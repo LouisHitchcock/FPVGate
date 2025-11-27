@@ -39,11 +39,11 @@
 #define PIN_VBAT 1
 #define VBAT_SCALE 2
 #define VBAT_ADD 2
-#define PIN_RX5808_RSSI 13
-#define PIN_RX5808_DATA 11     //CH1
-#define PIN_RX5808_SELECT 10   //CH2
-#define PIN_RX5808_CLOCK 12    //CH3
-#define PIN_BUZZER 3
+#define PIN_RX5808_RSSI 3      // RSSI on Pin 3
+#define PIN_RX5808_DATA 10     // CH1 on Pin 10
+#define PIN_RX5808_SELECT 11   // CH2 on Pin 11
+#define PIN_RX5808_CLOCK 12    // CH3 on Pin 12
+#define PIN_BUZZER 5
 #define BUZZER_INVERTED false
 
 //ESP32
