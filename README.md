@@ -5,6 +5,12 @@
 A compact, self-contained lap timing solution for 5.8GHz FPV drones. FPVGate combines RSSI-based timing with RGB LED status indicators and a modern web interface for accurate single-pilot lap timing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32--S3-orange.svg)](https://platformio.org/)
+[![GitHub release](https://img.shields.io/github/v/release/LouisHitchcock/FPVGate)](https://github.com/LouisHitchcock/FPVGate/releases)
+[![GitHub stars](https://img.shields.io/github/stars/LouisHitchcock/FPVGate)](https://github.com/LouisHitchcock/FPVGate/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/LouisHitchcock/FPVGate)](https://github.com/LouisHitchcock/FPVGate/issues)
+
+📖 **[Quick Start Guide](QUICKSTART.md)** | 📥 **[Download Prebuilt Firmware](https://github.com/LouisHitchcock/FPVGate/releases)**
 
 ---
 
@@ -23,10 +29,12 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 ✅ **ESP32-S3 Support** - Optimized for ESP32-S3-DevKitC-1  
 ✅ **RGB LED Indicators** - Visual feedback for race events (supports external NeoPixels)  
 ✅ **Web Interface** - Modern Material Design UI with **23 theme options**  
-✅ **Voice Announcements** - Lap time callouts with customizable pilot name & callsign  
+✅ **Voice Announcements** - Lap time callouts with customizable pilot names  
+✅ **Phonetic Name Support** - Custom TTS pronunciation for pilot names  
 ✅ **Real-time RSSI Graph** - Visual calibration with live feedback  
 ✅ **Visual Lap Analysis** - Bar charts showing lap history and fastest rounds  
-✅ **Race History** - Save, organize, and export races with custom names/tags  
+✅ **Race History** - Saves pilot info (name, callsign, channel) with each race  
+✅ **Persistent Settings** - Auto-save configuration, survives page refreshes  
 ✅ **Manual Lap Entry** - Add laps manually during race  
 ✅ **WiFi Access Point** - No apps required, works with any device  
 ✅ **OTA Updates** - Update firmware wirelessly  
@@ -34,7 +42,8 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 ✅ **Configurable Lap Count** - Set finite laps (1-50) or infinite mode  
 ✅ **Pilot Color Selection** - Choose from 15 colors for personalization  
 ✅ **Config Import/Export** - Backup and restore all settings as JSON  
-✅ **Minimum Lap Time** - Prevent false triggers from crashes (default: 5 seconds)
+✅ **Minimum Lap Time** - Prevent false triggers from crashes (default: 5 seconds)  
+✅ **Theme-Aware Branding** - SVG logo adapts to light/dark themes
 
 ## How It Works
 
@@ -112,7 +121,15 @@ GND      ────── Negative (-)
 - [PlatformIO Extension](https://platformio.org/install/ide?install=vscode)
 - USB-C cable (data capable)
 
-### Installation Steps
+## Installation Steps
+
+### Option 1: Prebuilt Firmware (Recommended)
+
+**Fastest way to get started!** Download prebuilt binaries and flash using esptool or ESP Flash Tool.
+
+👉 **See the [Quick Start Guide](QUICKSTART.md) for detailed instructions.**
+
+### Option 2: Build from Source
 
 1. **Clone the Repository**
    ```bash
@@ -218,6 +235,10 @@ The Configuration tab is now organized into three clear sections:
   
 - **Pilot Callsign**: Short displayed name (max 10 characters)
   - Used in UI and race history
+
+- **Phonetic Name**: How TTS pronounces your name (max 30 characters)
+  - Example: "Louis" → "Louie", "Xavier" → "Zavier"
+  - Falls back to Pilot Name if empty
 
 - **Pilot Color**: Choose from 15 colors
   - Red, Orange, Gold, Green, Cyan, Blue, Purple, Magenta, Pink, White, Gray, Black, Brown, Spring Green, Hot Pink

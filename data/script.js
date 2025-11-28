@@ -86,8 +86,22 @@ onload = function (e) {
       pilotNameInput.value = config.name;
       ssidInput.value = config.ssid;
       pwdInput.value = config.pwd;
-      maxLapsInput.value = config.maxLaps || 5;
+      maxLapsInput.value = (config.maxLaps !== undefined) ? config.maxLaps : 0;
       updateMaxLaps(maxLapsInput, maxLapsInput.value);
+      
+      // Load pilot callsign, phonetic name, and color from localStorage (frontend-only settings)
+      const savedCallsign = localStorage.getItem('pilotCallsign') || '';
+      const savedPhonetic = localStorage.getItem('pilotPhonetic') || '';
+      const savedColor = localStorage.getItem('pilotColor') || '#0080FF';
+      const callsignInput = document.getElementById('pcallsign');
+      const phoneticInput = document.getElementById('pphonetic');
+      const colorInput = document.getElementById('pilotColor');
+      if (callsignInput) callsignInput.value = savedCallsign;
+      if (phoneticInput) phoneticInput.value = savedPhonetic;
+      if (colorInput) {
+        colorInput.value = savedColor;
+        updateColorPreview();
+      }
       populateFreqOutput();
       stopRaceButton.disabled = true;
       startRaceButton.disabled = false;
@@ -263,7 +277,25 @@ function updateExitRssi(obj, value) {
   }
 }
 
+// Debounced auto-save to prevent excessive API calls
+let saveTimeout = null;
+function autoSaveConfig() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveConfig();
+  }, 1000); // Wait 1 second after last change before saving
+}
+
 function saveConfig() {
+  // Save frontend-only settings to localStorage
+  const callsignInput = document.getElementById('pcallsign');
+  const phoneticInput = document.getElementById('pphonetic');
+  const colorInput = document.getElementById('pilotColor');
+  if (callsignInput) localStorage.setItem('pilotCallsign', callsignInput.value);
+  if (phoneticInput) localStorage.setItem('pilotPhonetic', phoneticInput.value);
+  if (colorInput) localStorage.setItem('pilotColor', colorInput.value);
+  
+  // Save backend settings
   fetch("/config", {
     method: "POST",
     headers: {
@@ -297,11 +329,38 @@ function populateFreqOutput() {
 
 bcf.addEventListener("change", function handleChange(event) {
   populateFreqOutput();
+  autoSaveConfig();
 });
+
+// Add auto-save listeners for other inputs
+if (announcerSelect) {
+  announcerSelect.addEventListener('change', autoSaveConfig);
+}
+if (pilotNameInput) {
+  pilotNameInput.addEventListener('input', autoSaveConfig);
+}
+const callsignInput = document.getElementById('pcallsign');
+if (callsignInput) {
+  callsignInput.addEventListener('input', autoSaveConfig);
+}
+const phoneticInput = document.getElementById('pphonetic');
+if (phoneticInput) {
+  phoneticInput.addEventListener('input', autoSaveConfig);
+}
+const colorInput = document.getElementById('pilotColor');
+if (colorInput) {
+  colorInput.addEventListener('change', autoSaveConfig);
+}
+const batteryToggle = document.getElementById('batteryMonitorToggle');
+if (batteryToggle) {
+  batteryToggle.addEventListener('change', autoSaveConfig);
+}
 
 function updateAnnouncerRate(obj, value) {
   announcerRate = parseFloat(value);
   $(obj).parent().find("span").text(announcerRate.toFixed(1));
+  // Auto-save when changed
+  autoSaveConfig();
 }
 
 function updateMinLap(obj, value) {
@@ -309,6 +368,8 @@ function updateMinLap(obj, value) {
     .parent()
     .find("span")
     .text(parseFloat(value).toFixed(1) + "s");
+  // Auto-save when changed
+  autoSaveConfig();
 }
 
 function updateAlarmThreshold(obj, value) {
@@ -316,6 +377,8 @@ function updateAlarmThreshold(obj, value) {
     .parent()
     .find("span")
     .text(parseFloat(value).toFixed(1) + "v");
+  // Auto-save when changed
+  autoSaveConfig();
 }
 
 function updateMaxLaps(obj, value) {
@@ -332,6 +395,8 @@ function updateMaxLaps(obj, value) {
     .parent()
     .find("span")
     .text(displayText);
+  // Auto-save when changed
+  autoSaveConfig();
 }
 
 // function getAnnouncerVoices() {
@@ -352,7 +417,9 @@ function beep(duration, frequency, type) {
 }
 
 function addLap(lapStr) {
-  const pilotName = pilotNameInput.value;
+  // Use phonetic name for TTS if available, otherwise use regular pilot name
+  const phoneticInput = document.getElementById('pphonetic');
+  const pilotName = (phoneticInput && phoneticInput.value) ? phoneticInput.value : pilotNameInput.value;
   var last2lapStr = "";
   var last3lapStr = "";
   const newLap = parseFloat(lapStr);
@@ -918,12 +985,22 @@ function saveCurrentRace() {
     best3Total = best3.reduce((sum, t) => sum + t, 0);
   }
   
+  // Get current pilot and frequency info
+  const pilotCallsign = document.getElementById('pcallsign')?.value || '';
+  const bandValue = bandSelect.options[bandSelect.selectedIndex].value;
+  const channelValue = parseInt(channelSelect.options[channelSelect.selectedIndex].value);
+  
   const raceData = {
     timestamp: Math.floor(Date.now() / 1000),
     lapTimes: lapTimes.map(t => Math.round(t * 1000)), // Convert to milliseconds
     fastestLap: Math.round(fastest * 1000),
     medianLap: Math.round(median * 1000),
-    best3LapsTotal: Math.round(best3Total * 1000)
+    best3LapsTotal: Math.round(best3Total * 1000),
+    pilotName: pilotNameInput.value || '',
+    pilotCallsign: pilotCallsign,
+    frequency: frequency,
+    band: bandValue,
+    channel: channelValue
   };
   
   fetch('/races/save', {
@@ -968,6 +1045,8 @@ function renderRaceHistory() {
     const lapCount = race.lapTimes.length;
     const name = race.name || '';
     const tag = race.tag || '';
+    const pilotCallsign = race.pilotCallsign || race.pilotName || '';
+    const freqDisplay = race.frequency ? `${race.band}${race.channel} (${race.frequency}MHz)` : '';
     
     html += `
       <div class="race-item" onclick="viewRaceDetails(${index})">
@@ -981,6 +1060,8 @@ function renderRaceHistory() {
             ${tag ? '<span class="race-tag">' + tag + '</span>' : ''}
             <div class="race-date">${dateStr}</div>
             ${name ? '<div class="race-name">' + name + '</div>' : ''}
+            ${pilotCallsign ? '<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;">Pilot: ' + pilotCallsign + '</div>' : ''}
+            ${freqDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">Channel: ' + freqDisplay + '</div>' : ''}
           </div>
         </div>
         <div class="race-item-stats">

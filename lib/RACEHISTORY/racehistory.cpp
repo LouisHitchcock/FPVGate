@@ -65,6 +65,11 @@ String RaceHistory::toJsonString() {
         raceObj["best3LapsTotal"] = race.best3LapsTotal;
         raceObj["name"] = race.name;
         raceObj["tag"] = race.tag;
+        raceObj["pilotName"] = race.pilotName;
+        raceObj["pilotCallsign"] = race.pilotCallsign;
+        raceObj["frequency"] = race.frequency;
+        raceObj["band"] = race.band;
+        raceObj["channel"] = race.channel;
         
         JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
         for (uint32_t lap : race.lapTimes) {
@@ -97,6 +102,11 @@ bool RaceHistory::fromJsonString(const String& json) {
         race.best3LapsTotal = raceObj["best3LapsTotal"];
         race.name = raceObj["name"] | "";
         race.tag = raceObj["tag"] | "";
+        race.pilotName = raceObj["pilotName"] | "";
+        race.pilotCallsign = raceObj["pilotCallsign"] | "";
+        race.frequency = raceObj["frequency"] | 0;
+        race.band = raceObj["band"] | "";
+        race.channel = raceObj["channel"] | 0;
         
         JsonArray lapsArray = raceObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -180,6 +190,11 @@ bool RaceHistory::loadFromFile() {
         race.best3LapsTotal = raceObj["best3LapsTotal"];
         race.name = raceObj["name"] | "";
         race.tag = raceObj["tag"] | "";
+        race.pilotName = raceObj["pilotName"] | "";
+        race.pilotCallsign = raceObj["pilotCallsign"] | "";
+        race.frequency = raceObj["frequency"] | 0;
+        race.band = raceObj["band"] | "";
+        race.channel = raceObj["channel"] | 0;
         
         JsonArray lapsArray = raceObj["lapTimes"];
         for (uint32_t lap : lapsArray) {

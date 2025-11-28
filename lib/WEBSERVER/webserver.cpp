@@ -387,6 +387,11 @@ Battery Voltage:\t%0.1fv";
         race.fastestLap = jsonObj["fastestLap"];
         race.medianLap = jsonObj["medianLap"];
         race.best3LapsTotal = jsonObj["best3LapsTotal"];
+        race.pilotName = jsonObj["pilotName"] | "";
+        race.pilotCallsign = jsonObj["pilotCallsign"] | "";
+        race.frequency = jsonObj["frequency"] | 0;
+        race.band = jsonObj["band"] | "";
+        race.channel = jsonObj["channel"] | 0;
         
         JsonArray lapsArray = jsonObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -456,6 +461,11 @@ Battery Voltage:\t%0.1fv";
                     raceObj["best3LapsTotal"] = race.best3LapsTotal;
                     raceObj["name"] = race.name;
                     raceObj["tag"] = race.tag;
+                    raceObj["pilotName"] = race.pilotName;
+                    raceObj["pilotCallsign"] = race.pilotCallsign;
+                    raceObj["frequency"] = race.frequency;
+                    raceObj["band"] = race.band;
+                    raceObj["channel"] = race.channel;
                     JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
                     for (uint32_t lap : race.lapTimes) {
                         lapsArray.add(lap);
