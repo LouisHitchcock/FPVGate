@@ -21,3 +21,6 @@ Thumbs.db
 # Build artifacts
 *.bin
 *.elf
+
+# Allow prebuilt release binaries to be tracked
+!release/*.bin
