@@ -22,6 +22,7 @@
       <ul class="nav-links">
         <li><a id="nav-link-config" class="tablinks active" onclick="openTab(event, 'config')">Configuration</a></li>
         <li><a id="nav-link-race" class="tablinks" onclick="openTab(event, 'race')">Race</a></li>
+        <li><a id="nav-link-history" class="tablinks" onclick="openTab(event, 'history')">Race History</a></li>
         <li><a id="nav-link-calib" class="tablinks" onclick="openTab(event, 'calib')">Calibration</a></li>
       </ul>
     </header>
@@ -157,6 +158,72 @@
             <th>3 Lap Time</th>
           </tr>
         </table>
+        
+        <div id="lapAnalysis" class="lap-analysis">
+          <h3>Lap Analysis</h3>
+          
+          <!-- Stats Boxes -->
+          <div class="stats-boxes">
+            <div class="stat-box">
+              <div class="stat-label">Fastest Lap</div>
+              <div class="stat-value" id="statFastest">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Median Lap</div>
+              <div class="stat-value" id="statMedian">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Best 3 Laps</div>
+              <div class="stat-value" id="statBest3">--</div>
+              <div class="stat-sublabel" id="statBest3Laps"></div>
+            </div>
+          </div>
+          
+          <!-- Chart Tabs -->
+          <div class="analysis-tabs">
+            <button class="analysis-tab active" onclick="switchAnalysisMode('history')">Lap History</button>
+            <button class="analysis-tab" onclick="switchAnalysisMode('fastestRound')">Fastest Round (3 Laps)</button>
+          </div>
+          <div id="analysisContent" class="analysis-content">
+            <p class="no-data">Complete at least 1 lap to see analysis</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="history" class="tabcontent">
+        <h2>Race History</h2>
+        <div class="history-controls">
+          <button onclick="downloadRaces()">Download Races</button>
+          <button onclick="document.getElementById('importFile').click()">Import Races</button>
+          <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importRaces(this)" />
+          <button onclick="clearAllRaces()" class="danger-button">Clear All</button>
+        </div>
+        <div id="raceHistoryList" class="history-list">
+          <p class="no-data">No races saved yet</p>
+        </div>
+        <div id="raceDetails" class="race-details" style="display: none;">
+          <button onclick="closeRaceDetails()" class="close-button">Close</button>
+          <h3 id="raceDetailsTitle"></h3>
+          <div class="stats-boxes">
+            <div class="stat-box">
+              <div class="stat-label">Fastest Lap</div>
+              <div class="stat-value" id="detailFastest">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Median Lap</div>
+              <div class="stat-value" id="detailMedian">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Best 3 Laps</div>
+              <div class="stat-value" id="detailBest3">--</div>
+            </div>
+          </div>
+          <div class="analysis-tabs">
+            <button class="analysis-tab active" onclick="switchDetailMode('history')">Lap History</button>
+            <button class="analysis-tab" onclick="switchDetailMode('fastestRound')">Fastest Round (3 Laps)</button>
+          </div>
+          <div id="detailContent" class="analysis-content"></div>
+        </div>
       </div>
 
       <div id="calib" class="tabcontent">
@@ -188,6 +255,25 @@
     </main>
 
     <footer></footer>
+
+    <!-- Edit Race Modal -->
+    <div id="editRaceModal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h3>Edit Race Details</h3>
+        <div class="config-item">
+          <label for="raceName">Race Name:</label>
+          <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" />
+        </div>
+        <div class="config-item">
+          <label for="raceTag">Tag:</label>
+          <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" />
+        </div>
+        <div style="display: flex; gap: 12px; margin-top: 16px;">
+          <button onclick="saveRaceEdit()">Save</button>
+          <button onclick="closeEditModal()" style="background-color: var(--secondary-color);">Cancel</button>
+        </div>
+      </div>
+    </div>
 
     <script src="script.js"></script>
   </body>

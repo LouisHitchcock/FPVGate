@@ -25,12 +25,13 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 ✅ **Web Interface** - Modern Material Design UI with 4 theme options  
 ✅ **Voice Announcements** - Lap time callouts with customizable pilot name  
 ✅ **Real-time RSSI Graph** - Visual calibration with live feedback  
-✅ **Lap History** - 2-lap and 3-lap consecutive time tracking  
+✅ **Visual Lap Analysis** - Bar charts showing lap history and fastest rounds  
+✅ **Race History** - Save, organize, and export races with custom names/tags  
 ✅ **Manual Lap Entry** - Add laps manually during race  
 ✅ **WiFi Access Point** - No apps required, works with any device  
 ✅ **OTA Updates** - Update firmware wirelessly  
 ✅ **Battery Monitoring** - Low voltage alarm with audio/visual alerts  
-✅ **Minimum Lap Time** - Prevent false triggers from crashes  
+✅ **Minimum Lap Time** - Prevent false triggers from crashes
 
 ## How It Works
 
@@ -297,6 +298,42 @@ Exit  /──────────\─
 - **2 Lap Time**: Combined time of current + previous lap
 - **3 Lap Time**: Combined time of current + previous 2 laps
 
+### Lap Analysis
+
+Below the lap table, you'll find visual lap analysis:
+
+**Stats Boxes** (automatically calculated):
+- **Fastest Lap**: Your quickest single lap
+- **Median Lap**: Middle lap time (consistency indicator)
+- **Best 3 Laps**: Sum of your 3 fastest laps with lap numbers
+
+**Charts** (toggle between):
+- **Lap History**: Bar chart of your last 10 laps with color coding
+- **Fastest Round (3 Laps)**: Bar chart of your best consecutive 3-lap sequence
+
+### Race History
+
+Navigate to the **Race History** tab to view saved races:
+
+#### Features
+- **Auto-save**: Races automatically save when you stop or clear laps
+- **Custom Names**: Add descriptive names (e.g., "Morning Practice")
+- **Tags**: Categorize races (e.g., "training", "race", "freestyle")
+- **Persistent Storage**: Races survive reboots (stored in flash memory)
+- **Download/Import**: Export races as JSON for backup or sharing
+  - Download all races at once
+  - Download individual races
+  - Import races from other devices
+- **Visual Details**: Click any race to view full statistics and bar charts
+
+#### Managing Races
+1. **Edit**: Click "Edit" to add/modify race name and tag
+2. **Download**: Click "Download" to export a single race as JSON
+3. **Delete**: Remove individual races you no longer need
+4. **Clear All**: Bulk delete all saved races (with confirmation)
+
+**Note**: Race history is erased when you upload the filesystem (`uploadfs`). Download your races first if you're reflashing!
+
 ## Troubleshooting
 
 ### WiFi Connection Issues
@@ -381,6 +418,7 @@ FPVGate/
 ├── lib/
 │   ├── CONFIG/           # Configuration & EEPROM
 │   ├── LAPTIMER/         # Core timing logic
+│   ├── RACEHISTORY/      # Race storage & persistence
 │   ├── RGBLED/           # RGB LED control (ESP32-S3)
 │   ├── RX5808/           # VRx SPI communication
 │   ├── WEBSERVER/        # WiFi & web server

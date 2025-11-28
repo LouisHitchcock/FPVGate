@@ -3,6 +3,7 @@
 
 #include "battery.h"
 #include "laptimer.h"
+#include "racehistory.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -10,7 +11,7 @@
 
 class Webserver {
    public:
-    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l);
+    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist);
     void handleWebUpdate(uint32_t currentTimeMs);
 
    private:
@@ -23,6 +24,7 @@ class Webserver {
     BatteryMonitor *monitor;
     Buzzer *buz;
     Led *led;
+    RaceHistory *history;
 
     wifi_mode_t wifiMode = WIFI_OFF;
     wl_status_t lastStatus = WL_IDLE_STATUS;

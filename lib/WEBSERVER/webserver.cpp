@@ -26,7 +26,7 @@ static const char *wifi_ap_password = "fpvgate1";
 static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
-void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l) {
+void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist) {
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -35,6 +35,7 @@ void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMoni
     monitor = batMonitor;
     buz = buzzer;
     led = l;
+    history = raceHist;
 
     wifi_ap_ssid = String(wifi_ap_ssid_prefix) + "_" + WiFi.macAddress().substring(WiFi.macAddress().length() - 6);
     wifi_ap_ssid.replace(":", "");
@@ -253,6 +254,9 @@ void Webserver::startServices() {
     }
 
     startLittleFS();
+    
+    // Initialize race history after LittleFS is mounted
+    history->init();
 
     server.on("/", handleRoot);
     server.on("/generate_204", handleRoot);  // handle Andriod phones doing shit to detect if there is 'real' internet and possibly dropping conn.
@@ -358,6 +362,126 @@ Battery Voltage:\t%0.1fv";
 
     server.addHandler(&events);
     server.addHandler(configJsonHandler);
+
+    // Race history endpoints
+    server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        String json = history->toJsonString();
+        request->send(200, "application/json", json);
+        led->on(200);
+    });
+
+    server.on("/races/download", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        String json = history->toJsonString();
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/octet-stream", json);
+        response->addHeader("Content-Disposition", "attachment; filename=\"races.json\"");
+        response->addHeader("Content-Type", "application/json");
+        request->send(response);
+        led->on(200);
+    });
+
+    AsyncCallbackJsonWebHandler *raceSaveHandler = new AsyncCallbackJsonWebHandler("/races/save", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject jsonObj = json.as<JsonObject>();
+        
+        RaceSession race;
+        race.timestamp = jsonObj["timestamp"];
+        race.fastestLap = jsonObj["fastestLap"];
+        race.medianLap = jsonObj["medianLap"];
+        race.best3LapsTotal = jsonObj["best3LapsTotal"];
+        
+        JsonArray lapsArray = jsonObj["lapTimes"];
+        for (uint32_t lap : lapsArray) {
+            race.lapTimes.push_back(lap);
+        }
+        
+        bool success = history->saveRace(race);
+        request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
+        led->on(200);
+    });
+
+    AsyncCallbackJsonWebHandler *raceUploadHandler = new AsyncCallbackJsonWebHandler("/races/upload", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        String jsonString;
+        serializeJson(json, jsonString);
+        bool success = history->fromJsonString(jsonString);
+        request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
+        led->on(200);
+    });
+
+    server.on("/races/delete", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("timestamp", true)) {
+            uint32_t timestamp = request->getParam("timestamp", true)->value().toInt();
+            bool success = history->deleteRace(timestamp);
+            request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing timestamp\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/races/clear", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        bool success = history->clearAll();
+        request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
+        led->on(200);
+    });
+
+    server.on("/races/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("timestamp", true) && 
+            request->hasParam("name", true) && 
+            request->hasParam("tag", true)) {
+            uint32_t timestamp = request->getParam("timestamp", true)->value().toInt();
+            String name = request->getParam("name", true)->value();
+            String tag = request->getParam("tag", true)->value();
+            bool success = history->updateRace(timestamp, name, tag);
+            request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/races/downloadOne", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("timestamp")) {
+            uint32_t timestamp = request->getParam("timestamp")->value().toInt();
+            
+            // Find the race
+            const auto& races = history->getRaces();
+            for (const auto& race : races) {
+                if (race.timestamp == timestamp) {
+                    // Create JSON for single race
+                    DynamicJsonDocument doc(16384);
+                    JsonArray racesArray = doc.createNestedArray("races");
+                    JsonObject raceObj = racesArray.createNestedObject();
+                    raceObj["timestamp"] = race.timestamp;
+                    raceObj["fastestLap"] = race.fastestLap;
+                    raceObj["medianLap"] = race.medianLap;
+                    raceObj["best3LapsTotal"] = race.best3LapsTotal;
+                    raceObj["name"] = race.name;
+                    raceObj["tag"] = race.tag;
+                    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+                    for (uint32_t lap : race.lapTimes) {
+                        lapsArray.add(lap);
+                    }
+                    
+                    String json;
+                    serializeJson(doc, json);
+                    
+                    String filename = "race_" + String(timestamp) + ".json";
+                    AsyncWebServerResponse *response = request->beginResponse(200, "application/octet-stream", json);
+                    response->addHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                    response->addHeader("Content-Type", "application/json");
+                    request->send(response);
+                    led->on(200);
+                    return;
+                }
+            }
+            request->send(404, "application/json", "{\"status\": \"ERROR\", \"message\": \"Race not found\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing timestamp\"}");
+        }
+        led->on(200);
+    });
+
+    server.addHandler(raceSaveHandler);
+    server.addHandler(raceUploadHandler);
 
     ElegantOTA.setAutoReboot(true);
     ElegantOTA.begin(&server);

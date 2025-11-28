@@ -1,6 +1,7 @@
 #include "debug.h"
 #include "led.h"
 #include "webserver.h"
+#include "racehistory.h"
 #include <ElegantOTA.h>
 #ifdef ESP32S3
 #include "rgbled.h"
@@ -11,6 +12,7 @@ static Config config;
 static Webserver ws;
 static Buzzer buzzer;
 static Led led;
+static RaceHistory raceHistory;
 #ifdef ESP32S3
 static RgbLed rgbLed;
 RgbLed* g_rgbLed = &rgbLed;
@@ -61,7 +63,7 @@ void setup() {
 #endif
     timer.init(&config, &rx, &buzzer, &led);
     monitor.init(PIN_VBAT, VBAT_SCALE, VBAT_ADD, &buzzer, &led);
-    ws.init(&config, &timer, &monitor, &buzzer, &led);
+    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory);
     led.on(400);
     buzzer.beep(200);
     initParallelTask();

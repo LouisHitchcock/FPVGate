@@ -223,6 +223,11 @@ function openTab(evt, tabName) {
       })
       .then((response) => console.log("/timer/rssiStop:" + JSON.stringify(response)));
   }
+  
+  // Load race history when opening history tab
+  if (tabName === 'history') {
+    loadRaceHistory();
+  }
 }
 
 function updateEnterRssi(obj, value) {
@@ -376,6 +381,9 @@ function addLap(lapStr) {
       break;
   }
   lapTimes.push(newLap);
+  
+  // Update lap analysis
+  updateAnalysisView();
 }
 
 function startTimer() {
@@ -500,11 +508,21 @@ function stopRace() {
   startRaceButton.disabled = false;
   addLapButton.disabled = true;
 
+  // Auto-save race if there are laps
+  if (lapTimes.length > 0) {
+    saveCurrentRace();
+  }
+
   lapNo = -1;
   lapTimes = [];
 }
 
 function clearLaps() {
+  // Auto-save race if there are laps before clearing
+  if (lapTimes.length > 0) {
+    saveCurrentRace();
+  }
+
   var tableHeaderRowCount = 1;
   var rowCount = lapTable.rows.length;
   for (var i = tableHeaderRowCount; i < rowCount; i++) {
@@ -512,6 +530,14 @@ function clearLaps() {
   }
   lapNo = -1;
   lapTimes = [];
+  
+  // Clear lap analysis
+  document.getElementById('analysisContent').innerHTML = 
+    '<p class="no-data">Complete at least 1 lap to see analysis</p>';
+  document.getElementById('statFastest').textContent = '--';
+  document.getElementById('statMedian').textContent = '--';
+  document.getElementById('statBest3').textContent = '--';
+  document.getElementById('statBest3Laps').textContent = '';
 }
 
 if (!!window.EventSource) {
@@ -609,3 +635,476 @@ function addManualLap() {
     addLap(lapTimeSeconds);
   }
 }
+
+// Lap Analysis
+let currentAnalysisMode = 'history';
+
+// Color palette for bar variations
+const barColors = [
+  ['#42A5F5', '#1E88E5'], // Blue
+  ['#66BB6A', '#43A047'], // Green
+  ['#FFA726', '#FB8C00'], // Orange
+  ['#AB47BC', '#8E24AA'], // Purple
+  ['#26C6DA', '#00ACC1'], // Cyan
+  ['#FFCA28', '#FFB300'], // Amber
+  ['#EF5350', '#E53935'], // Red
+  ['#5C6BC0', '#3F51B5'], // Indigo
+  ['#EC407A', '#D81B60'], // Pink
+  ['#78909C', '#607D8B'], // Blue Grey
+];
+
+function switchAnalysisMode(mode) {
+  currentAnalysisMode = mode;
+  // Update tab styling
+  document.querySelectorAll('.analysis-tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  event.target.classList.add('active');
+  // Re-render analysis
+  updateAnalysisView();
+}
+
+function updateAnalysisView() {
+  if (lapTimes.length === 0) {
+    document.getElementById('analysisContent').innerHTML = 
+      '<p class="no-data">Complete at least 1 lap to see analysis</p>';
+    return;
+  }
+  
+  // Update stats boxes
+  updateStatsBoxes();
+  
+  // Update chart view
+  switch(currentAnalysisMode) {
+    case 'history':
+      renderLapHistory();
+      break;
+    case 'fastestRound':
+      renderFastestRound();
+      break;
+  }
+}
+
+function updateStatsBoxes() {
+  if (lapTimes.length === 0) {
+    document.getElementById('statFastest').textContent = '--';
+    document.getElementById('statMedian').textContent = '--';
+    document.getElementById('statBest3').textContent = '--';
+    document.getElementById('statBest3Laps').textContent = '';
+    return;
+  }
+  
+  // Fastest Lap
+  const fastest = Math.min(...lapTimes);
+  const fastestIndex = lapTimes.indexOf(fastest);
+  document.getElementById('statFastest').textContent = `${fastest.toFixed(2)}s`;
+  
+  // Median Lap
+  const sorted = [...lapTimes].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? 
+    (sorted[mid - 1] + sorted[mid]) / 2 : 
+    sorted[mid];
+  document.getElementById('statMedian').textContent = `${median.toFixed(2)}s`;
+  
+  // Best 3 Laps (sum of 3 fastest individual laps)
+  if (lapTimes.length >= 3) {
+    const lapsWithIndex = lapTimes.map((time, index) => ({ time, index }));
+    lapsWithIndex.sort((a, b) => a.time - b.time);
+    const best3 = lapsWithIndex.slice(0, 3);
+    const totalTime = best3.reduce((sum, l) => sum + l.time, 0);
+    const lapNumbers = best3.map(l => l.index + 1).sort((a, b) => a - b).join(', ');
+    document.getElementById('statBest3').textContent = `${totalTime.toFixed(2)}s`;
+    document.getElementById('statBest3Laps').textContent = `Laps: ${lapNumbers}`;
+  } else {
+    document.getElementById('statBest3').textContent = '--';
+    document.getElementById('statBest3Laps').textContent = 'Need 3 laps';
+  }
+}
+
+function renderLapHistory() {
+  // Show last 10 laps (or all if less than 10)
+  const recentLaps = lapTimes.slice(-10);
+  const startIndex = Math.max(0, lapTimes.length - 10);
+  const maxTime = Math.max(...recentLaps);
+  
+  let html = '<div class="analysis-bars">';
+  recentLaps.forEach((time, index) => {
+    const lapNumber = startIndex + index + 1;
+    const colorIndex = (startIndex + index) % barColors.length;
+    html += createBarItemWithColor(`Lap ${lapNumber}`, time, maxTime, `${time.toFixed(2)}s`, colorIndex);
+  });
+  html += '</div>';
+  
+  if (lapTimes.length > 10) {
+    html += `<p style="text-align: center; margin-top: 16px; color: var(--secondary-color); font-size: 14px;">Showing last 10 of ${lapTimes.length} laps</p>`;
+  }
+  
+  document.getElementById('analysisContent').innerHTML = html;
+}
+
+function renderFastestRound() {
+  if (lapTimes.length < 3) {
+    document.getElementById('analysisContent').innerHTML = 
+      '<p class="no-data">Complete at least 3 laps to see fastest round</p>';
+    return;
+  }
+  
+  // Find best consecutive 3 laps
+  let bestTime = Infinity;
+  let bestStartIndex = 0;
+  
+  for (let i = 0; i <= lapTimes.length - 3; i++) {
+    const sum = lapTimes[i] + lapTimes[i+1] + lapTimes[i+2];
+    if (sum < bestTime) {
+      bestTime = sum;
+      bestStartIndex = i;
+    }
+  }
+  
+  const lap1 = lapTimes[bestStartIndex];
+  const lap2 = lapTimes[bestStartIndex + 1];
+  const lap3 = lapTimes[bestStartIndex + 2];
+  const maxTime = Math.max(lap1, lap2, lap3);
+  
+  let html = '<div class="analysis-bars">';
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 1}`, lap1, maxTime, `${lap1.toFixed(2)}s`, 0);
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 2}`, lap2, maxTime, `${lap2.toFixed(2)}s`, 1);
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 3}`, lap3, maxTime, `${lap3.toFixed(2)}s`, 2);
+  html += '</div>';
+  html += `<p style="text-align: center; margin-top: 16px; font-weight: bold; color: var(--primary-color);">Total: ${bestTime.toFixed(2)}s</p>`;
+  
+  document.getElementById('analysisContent').innerHTML = html;
+}
+
+function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
+  const percentage = (time / maxTime) * 100;
+  const colors = barColors[colorIndex % barColors.length];
+  return `
+    <div class="bar-item">
+      <div class="bar-label">${label}</div>
+      <div class="bar-container">
+        <div class="bar-fill" style="width: ${percentage}%; background: linear-gradient(90deg, ${colors[0]}, ${colors[1]});">
+          <span class="bar-time">${displayTime}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Race History Functions
+let raceHistoryData = [];
+let currentDetailRace = null;
+
+function saveCurrentRace() {
+  if (lapTimes.length === 0) return;
+  
+  // Calculate stats
+  const fastest = Math.min(...lapTimes);
+  const sorted = [...lapTimes].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  
+  let best3Total = 0;
+  if (lapTimes.length >= 3) {
+    const best3 = sorted.slice(0, 3);
+    best3Total = best3.reduce((sum, t) => sum + t, 0);
+  }
+  
+  const raceData = {
+    timestamp: Math.floor(Date.now() / 1000),
+    lapTimes: lapTimes.map(t => Math.round(t * 1000)), // Convert to milliseconds
+    fastestLap: Math.round(fastest * 1000),
+    medianLap: Math.round(median * 1000),
+    best3LapsTotal: Math.round(best3Total * 1000)
+  };
+  
+  fetch('/races/save', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(raceData)
+  })
+  .then(response => response.json())
+  .then(data => {
+    console.log('Race saved:', data);
+    loadRaceHistory();
+  })
+  .catch(error => console.error('Error saving race:', error));
+}
+
+function loadRaceHistory() {
+  fetch('/races')
+    .then(response => response.json())
+    .then(data => {
+      raceHistoryData = data.races || [];
+      renderRaceHistory();
+    })
+    .catch(error => console.error('Error loading races:', error));
+}
+
+function renderRaceHistory() {
+  const listContainer = document.getElementById('raceHistoryList');
+  
+  if (raceHistoryData.length === 0) {
+    listContainer.innerHTML = '<p class="no-data">No races saved yet</p>';
+    return;
+  }
+  
+  let html = '';
+  raceHistoryData.forEach((race, index) => {
+    const date = new Date(race.timestamp * 1000);
+    const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    const fastestLap = (race.fastestLap / 1000).toFixed(2);
+    const lapCount = race.lapTimes.length;
+    const name = race.name || '';
+    const tag = race.tag || '';
+    
+    html += `
+      <div class="race-item" onclick="viewRaceDetails(${index})">
+        <div class="race-item-buttons">
+          <button class="race-item-button" onclick="event.stopPropagation(); openEditModal(${index})">Edit</button>
+          <button class="race-item-button" onclick="event.stopPropagation(); downloadSingleRace(${race.timestamp})">Download</button>
+          <button class="race-item-button" style="border-color: #e74c3c; color: #e74c3c;" onclick="event.stopPropagation(); deleteRace(${race.timestamp})">Delete</button>
+        </div>
+        <div class="race-item-header">
+          <div>
+            ${tag ? '<span class="race-tag">' + tag + '</span>' : ''}
+            <div class="race-date">${dateStr}</div>
+            ${name ? '<div class="race-name">' + name + '</div>' : ''}
+          </div>
+        </div>
+        <div class="race-item-stats">
+          <div class="race-item-stat">Laps: <strong>${lapCount}</strong></div>
+          <div class="race-item-stat">Fastest: <strong>${fastestLap}s</strong></div>
+        </div>
+      </div>
+    `;
+  });
+  
+  listContainer.innerHTML = html;
+}
+
+function viewRaceDetails(index) {
+  currentDetailRace = raceHistoryData[index];
+  const race = currentDetailRace;
+  const date = new Date(race.timestamp * 1000);
+  const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+  
+  document.getElementById('raceDetailsTitle').textContent = `Race - ${dateStr}`;
+  document.getElementById('detailFastest').textContent = (race.fastestLap / 1000).toFixed(2) + 's';
+  document.getElementById('detailMedian').textContent = (race.medianLap / 1000).toFixed(2) + 's';
+  document.getElementById('detailBest3').textContent = (race.best3LapsTotal / 1000).toFixed(2) + 's';
+  
+  document.getElementById('raceDetails').style.display = 'block';
+  switchDetailMode('history');
+}
+
+function closeRaceDetails() {
+  document.getElementById('raceDetails').style.display = 'none';
+  currentDetailRace = null;
+}
+
+function switchDetailMode(mode) {
+  const tabs = document.querySelectorAll('#raceDetails .analysis-tab');
+  tabs.forEach(tab => tab.classList.remove('active'));
+  
+  if (mode === 'history') {
+    tabs[0].classList.add('active');
+    renderDetailHistory();
+  } else if (mode === 'fastestRound') {
+    tabs[1].classList.add('active');
+    renderDetailFastestRound();
+  }
+}
+
+function renderDetailHistory() {
+  if (!currentDetailRace) return;
+  
+  const lapTimes = currentDetailRace.lapTimes.map(t => t / 1000);
+  const displayLaps = lapTimes.slice(-10);
+  const maxTime = Math.max(...displayLaps);
+  
+  let html = '<div class="analysis-bars">';
+  displayLaps.forEach((time, index) => {
+    const lapNo = lapTimes.length - displayLaps.length + index + 1;
+    html += createBarItemWithColor(`Lap ${lapNo}`, time, maxTime, `${time.toFixed(2)}s`, index);
+  });
+  html += '</div>';
+  
+  document.getElementById('detailContent').innerHTML = html;
+}
+
+function renderDetailFastestRound() {
+  if (!currentDetailRace) return;
+  
+  const lapTimes = currentDetailRace.lapTimes.map(t => t / 1000);
+  
+  if (lapTimes.length < 3) {
+    document.getElementById('detailContent').innerHTML = 
+      '<p class="no-data">Not enough laps for fastest round</p>';
+    return;
+  }
+  
+  let bestTime = Infinity;
+  let bestStartIndex = 0;
+  
+  for (let i = 0; i <= lapTimes.length - 3; i++) {
+    const sum = lapTimes[i] + lapTimes[i+1] + lapTimes[i+2];
+    if (sum < bestTime) {
+      bestTime = sum;
+      bestStartIndex = i;
+    }
+  }
+  
+  const lap1 = lapTimes[bestStartIndex];
+  const lap2 = lapTimes[bestStartIndex + 1];
+  const lap3 = lapTimes[bestStartIndex + 2];
+  const maxTime = Math.max(lap1, lap2, lap3);
+  
+  let html = '<div class="analysis-bars">';
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 1}`, lap1, maxTime, `${lap1.toFixed(2)}s`, 0);
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 2}`, lap2, maxTime, `${lap2.toFixed(2)}s`, 1);
+  html += createBarItemWithColor(`Lap ${bestStartIndex + 3}`, lap3, maxTime, `${lap3.toFixed(2)}s`, 2);
+  html += '</div>';
+  html += `<p style="text-align: center; margin-top: 16px; font-weight: bold; color: var(--primary-color);">Total: ${bestTime.toFixed(2)}s</p>`;
+  
+  document.getElementById('detailContent').innerHTML = html;
+}
+
+function downloadRaces() {
+  window.open('/races/download', '_blank');
+}
+
+function downloadSingleRace(timestamp) {
+  window.open('/races/downloadOne?timestamp=' + timestamp, '_blank');
+}
+
+let editingRaceIndex = null;
+
+function openEditModal(index) {
+  editingRaceIndex = index;
+  const race = raceHistoryData[index];
+  
+  document.getElementById('raceName').value = race.name || '';
+  document.getElementById('raceTag').value = race.tag || '';
+  document.getElementById('editRaceModal').style.display = 'flex';
+}
+
+function closeEditModal() {
+  document.getElementById('editRaceModal').style.display = 'none';
+  editingRaceIndex = null;
+}
+
+function saveRaceEdit() {
+  if (editingRaceIndex === null) return;
+  
+  const race = raceHistoryData[editingRaceIndex];
+  const name = document.getElementById('raceName').value;
+  const tag = document.getElementById('raceTag').value;
+  
+  const formData = new URLSearchParams();
+  formData.append('timestamp', race.timestamp);
+  formData.append('name', name);
+  formData.append('tag', tag);
+  
+  fetch('/races/update', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    console.log('Race updated:', data);
+    loadRaceHistory();
+    closeEditModal();
+  })
+  .catch(error => {
+    console.error('Error updating race:', error);
+    alert('Error updating race');
+  });
+}
+
+function importRaces(input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const json = JSON.parse(e.target.result);
+      
+      fetch('/races/upload', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(json)
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Races imported:', data);
+        loadRaceHistory();
+        alert('Races imported successfully!');
+      })
+      .catch(error => {
+        console.error('Error importing races:', error);
+        alert('Error importing races');
+      });
+    } catch (error) {
+      console.error('Error parsing JSON:', error);
+      alert('Invalid JSON file');
+    }
+  };
+  reader.readAsText(file);
+  input.value = ''; // Reset file input
+}
+
+function deleteRace(timestamp) {
+  if (!confirm('Delete this race?')) return;
+  
+  const formData = new URLSearchParams();
+  formData.append('timestamp', timestamp);
+  
+  fetch('/races/delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    console.log('Race deleted:', data);
+    loadRaceHistory();
+    if (currentDetailRace && currentDetailRace.timestamp === timestamp) {
+      closeRaceDetails();
+    }
+  })
+  .catch(error => console.error('Error deleting race:', error));
+}
+
+function clearAllRaces() {
+  if (!confirm('Are you sure you want to clear all race history? This cannot be undone.')) return;
+  
+  fetch('/races/clear', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    }
+  })
+  .then(response => response.json())
+  .then(data => {
+    console.log('All races cleared:', data);
+    loadRaceHistory();
+    closeRaceDetails();
+  })
+  .catch(error => console.error('Error clearing races:', error));
+}
+
