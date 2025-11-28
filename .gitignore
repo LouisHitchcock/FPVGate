@@ -24,3 +24,13 @@ Thumbs.db
 
 # Allow prebuilt release binaries to be tracked
 !release/*.bin
+
+# Secrets and API keys
+.env
+*.key
+release.txt
+api_key.txt
+
+# Python
+__pycache__/
+*.py[cod]
