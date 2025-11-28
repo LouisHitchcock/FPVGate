@@ -1,224 +1,444 @@
-![PhobosLT](assets/wq.png)![Logo](assets/logo.png)
+# FPVGate
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Join us on Discord!](https://img.shields.io/discord/1180943146696319126)](https://discord.gg/D3MgfvsnAw)
+**Personal FPV Lap Timer for ESP32-S3**
 
-> **Note:** This is a fork of the original [PhobosLT](https://github.com/phobos-/PhobosLT) project with build fixes and ESP32-S3 support. This fork includes updated library dependencies and fixes for compilation errors on ESP32 and ESP32-S3 targets.
+A compact, self-contained lap timing solution for 5.8GHz FPV drones. FPVGate combines RSSI-based timing with RGB LED status indicators and a modern web interface for accurate single-pilot lap timing.
 
-# Support PhobosLT
-**Affordable FPV single node Race Timing solution**
-
-If you like this project you can support it by contributing to the codebase, testing and giving feedback, sharing new ideas and helping spread the PhobosLT gospel. You can also consider buying me a bubble tea or a beer, it will fuel me to make the project better!
-
-[![Donate to PhobosLT](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/phoboslt)
-
-# About
-
-Phobos LapTimer (or PhobosLT) is a simple but mighty lap timing solution for 5.8GHz FPV pilots. It is designed for personal use and with small drones in mind (2 inch or less), but there is nothing against running it with bigger drones! It is a small standalone device that is self powered and communicates over WiFi with a phone, tablet or laptop. The goal of the project is to have a simple to use and small device that can be used anywhere whenever you want to do a whoop race practice session in your living room or at a local training venue with friends with no fuss.
-Parts of the code are based on [RotorHazard](https://github.com/RotorHazard/RotorHazard) and [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Big kudos to people behind these organizations, they are doing A LOT for the community and are shaping the future of FPV. If you don't know these projects yet and have some time, do check them out!
-
-### Features
-
-PhobosLT has the following features:
-- Single node timing of 5.8GHz Analog, HDZero, Walksnail systems.
-- Voice callouts, optionally including pilot name.
-- Real time RSSI readout and calibration - allows for timing even in small spaces like a 16m^2 or 200 ft^2 room.
-- 2 lap consecutive and 3 lap consecutive times and optional readouts on the fly (specially developed for [RaceGOW](https://www.racegow.com/)).
-- Viewable lap history.
-- Ability to set a minimal measurable lap time to avoid false positives.
-- Configurable low voltage alarm.
-- Small size, easy to build.
-- Relatively cheap.
-- No extra apps needed, self sufficient solution.
-
-Future development plans:
-- Flashing via WiFi or via web configurator.
-- Custom hardware to minimize soldering.
-- Integration with ExpressLRS and goggle VRXs to forward lap times to the OSD.
-- Integration with RotorHazard to measure split times.
-- Supporting multiple pilots at the same time at a cost of lower accuracy.
-
-### How it works
-
-The core of the project is an ESP32 board + an RX5808 module. ESP acts as a web server which serves a simple web page with all the configurations. Any device with WiFi connectivity and a web browser can be used to connect to it, configure the timer and measure lap times.
-
-The lap timing happens by measuring the RSSI over time, filtering it and checking for peaks in the RSSI as the closer the drone is to the timer the higher the RSSI. Based on that we set up an `Enter RSSI` and `Exit RSSI` thresholds, that tell us when to cut a peak. The time between the enter and exit RSSI is then used to measure the time between the last peak and the current peak which is a lap.
-
-Communication with the client happens over WiFi. The ESP32 sets up an access point and the client connects to it. RSSI is transmitted over a websocket to draw the RSSI graph in real time. Configuration, user interactions and events (like starting the timer, stopping, reporting a lap time) are done using rest calls.
-
-The browser is leveraged to emit sounds or call out lap times using [articulate.js](https://github.com/acoti/articulate.js) library, but an optional (but recommended) beeper can be installed to the timer to also emit a sound every time a peak is detected or to alert e.g. when the timer battery voltage is low. 
-
-# How to build one
-
-### Hardware
-
-To build a Phobos LapTimer you will need:
-- An ESP32 breakout board, preferably with USB. The codebase is plug and play with `LilyGo T-ENERGY` which has a built in 1s 18650 Li-Ion cell slot and voltage sensing circuit out of the box. Supported boards:
-    - LilyGo T-ENERGY - recommended.
-    - LilyGo T-CELL - more expensive than the one above but has a charging circuit.
-    - ESP32-DevKit - bare bones but cheap.
-    - **ESP32-S3-DevKitC-1 - Verified working in this fork.**
-- An RX5808 VRx module with [SPI mod](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html).
-- A voltage supply of any sort - a battery, a powerbank, etc. It will depend on the ESP32 module used.
-- (Optional) An LED of any color (+ a matching resistor to manage current).
-- (Optional) A 3v3 to 5v buzzer WITH a generator (so active and not passive).
-
-To connect the RX5808 to the ESP32 use below pinout table. Please note that +5v pin on the RX5808 should be connected to a 3v3 source to undervolt the RX5808 to get a better RSSI resolution and to help with cooling:
-| ESP32 PIN | RX5880 |
-| :------------- |:-------------|
-| 33 | RSSI |
-| GND | GND |
-| 19 | CH1 |
-| 22 | CH2 |
-| 23 | CH3 |
-| 3V3 | +5V |
-
-Optional but recommended LED, Buzzer and Battery voltage input pinout:
-| ESP32 PIN | Peripheral |
-| :------------- |:-------------|
-| 21 | LED anode (+) |
-| 27 | Buzzer positive (+) |
-| 35 | VBAT input MAX 3.3v (the code assumes a 1/2 voltage divider with a 1s Li-Ion  cell) |
-
-You can find a connection diagram of the peripherals below. **For T-Energy and T-Cell you just need to connect the RX5808 and a buzzer.**
-
-![Connection](assets/connection_diagram.png)
-
-Alternatively you can ask the community to build a timer for you. Ask around on discord!
-
-### Firmware
-
-Currently building the firmware happens via Visual Studio Code. The toolchain setup is exactly the same as for ExpressLRS, so if you already have an ExpressLRS toolchain set up and running, you should be good. The requirements to build the firmware are as follows:
-- Visual Studio Code.
-- PlatformIO.
-- Git.
-
-#### Toolchain setup
-
-Perform these steps to set the toolchain up on your computer:
-1. Download and install [vscode](https://code.visualstudio.com/).
-2. Open vscode, and click on the `Extensions` icon in the toolbar on the right (see [Managing Extensions](https://code.visualstudio.com/docs/editor/extension-marketplace)).
-3. In the search box, enter platformio, and install the extension (see the `pio install` [documentation](https://platformio.org/install/ide?install=vscode)).
-4. Install [git](https://github.com/git-guides/install-git).
-
-The last step before you can build the firmware is to clone this repository to your computer:
-- In VSCode open the command palette (using `Cmd+Shift+P` on MacOS or `Ctrl+Shift+P` on Windows)
-- Enter `Git: Clone`.
-- Click it.
-- Then, enter PhobosLT repo URL (can be found on top of the github page under the `Clone` button).
-- Choose a folder where you want your copy of the repository to be located.
-
-#### Building
-
-To build the firmware, click the `PlatformIO` icon in the toolbar on the left, which will show the list of tasks. Now, select `Project Tasks`, expand the appropriate target for your board (`PhobosLT` for ESP32, `ESP32S3` for ESP32-S3, `ESP32C3` for ESP32-C3) -> `General` and select `Build`. You should see the result in the terminal after a few seconds (`Success`).
-
-#### Flashing
-
-Before attemtping to flash ensure there is a connection between the ESP32 and the computer via USB. Flashing is a two step process. First we need to flash the firmware, then the static file system image to the ESP32.
-
-##### Step 1
-
-To flash the firmware, click the `PlatformIO` icon in the toolbar on the left, which will show the list of tasks. Now, select `Project Tasks`, expand your target (e.g., `PhobosLT` or `ESP32S3`) -> `General` and select `Upload`. You should see the result in the terminal (`Success`). Next, go to step 2.
-
-##### Step 2
-
-Select `Project Tasks`, expand your target (e.g., `PhobosLT` or `ESP32S3`) -> `Platform` and select `Upload Filesystem Image`. Wait for the result in the terminal saying `Success`. That's it! Your timer is ready to use.
-
-If something went wrong - please check the Terminal, too. It will contain at least a hint of what the issue is. Please ask the community for further help on discord!
-
-#### 3D printed cases
-[ESP-WROOM-32 case by porlock](https://makerworld.com/en/models/400720)
-
-# Usage
-
-This section is going to describe the usage and configuration of the timer. The app consists of 3 pages and is very easy to use!
-
-### First connect
-
-1. Turn on the timer, you should hear a short and a long beep.
-2. Turn on your device and turn on WiFi.
-3. Wait for it to discover a WiFi access point starting with `PhobosLT_xxxx`.
-4. Click on it and type the password: `phoboslt`.
-5. It should connect and open a browser window with the app for you. If it's not happening, open the browser and type `20.0.0.1`.
-6. Voila!
-
-![Homepage](assets/plt1.png)
-
-### Configuration
-
-To configure the timer you need to click on the `Configuration` button. You should be greeted with a screen similar to this:
-
-![Configuration](assets/plt2.png)
-
-Below you can find all the config parameters and their description:
-
-**Channel and Band** - set to the same Band and Channel as your drone. Supported Bands - A, B, E, Fatshark, RaceBand and LowBand, 8 channel each.
-**Frequency** - this is a static field that will display the frequency based on the set Band and Channel.
-**Minimum Lap Time** - you can set a minimum lap time that can be timed. This avoids false positives when you crash in the start gate, or when your track is very tight and you fly in close proximity to the timer multiple times during one lap.
-**Battery Voltage Alarm Threshold** - sets a battery voltage alarm that will trigger once the desired voltage is reached. The range is between 2.5-4.2v.
-**Announcer Type** - you have a few options on how you want your timer to report lap times:
-- `None` is no sound at all.
-- `Beep` will just emit a short beep on crossing to let you know it registered a lap.
-- `Lap Time` will announce the lap time (including your pilot name if the **Pilot name** field is filled).
-- `Two Consecutive Lap Time` will announce the two consecutive lap time.
-- `Three Consecutive Lap Time` will announce the three consecutive lap time.
-
-**Announcer Rate** - controls the speed of the announcer reading the lap time.
-**Pilot Name** - when filled it will include pilot name when reading the times, e.g. `Pilot1 23.45`. It is useful when there is more than just one timer running at the same time. When practicing alone leave it empty.
-
-**NOTE: Once configured make sure to save the configuration by clicking on the `Save Configuration` button, otherwise the changes will not take effect.**
-
-### Calibration
-
-Calibartion is a very important step and it needs to be done properly to ensure the timing happens correctly and every lap is counted by the timer.
-
-To perform the calibration click on the `Calibration` button. You should be presented with two sliders and a graph representing the RSSI over time. You can think of RSSI as an inverse of the distance between the drone and the timer. The higher the RSSI the shorter the distance.
-
-A node can be either `Crossing` or `Clear`. If a node is `Clear`, the timer believes a drone is not near the timer because the RSSI is low. If it is `Crossing`, the timer believes a drone is passing by the timer because the RSSI is high. A lap pass will be recorded once the `Crossing` is finished and the RSSI returns to `Clear` zone. We calibrate that by setting `Enter` and `Exit` RSSI thresholds.
-
-A well calibrated timer will show the lap time when we have only one crossing when drone is the closest to the timer, e.g.:
-
-![Configuration](assets/plt3.png)
-
-`Crossing` will always be marked in dark green, while `Clear` will be colored in blue.
-
-
-To come up with good initial values for `Enter` and `Exit` RSSI perform these steps:
-1. Turn on the timer and your drone, set it to the desired VTx power, wait 30 seconds for the VTx to reach its running temperature.
-2. Place the drone at a distance of slightly more than one gate above the timer. 
-3. Note the RSSI, deduct 2-5 points to be safe - that should be your `Enter RSSI`. 
-4. Deduct another 8-10 points and set it as your `Exit RSSI`. 
-5. **Click on `Save RSSI Thresholds` - otherwise the changes will not take effect.**
-
-When flying with other pilots the RSSI readings might be lower due to all the noise generated by other VTxs on adjecent channels. A good practice is to lower both thresholds by a few points when flying with other pilots in the air.
-
-### Race and lap management
-
-The Race screen will allow you to start or stop a race and view and clear your lap times. Once clicked on the `Race` button a screen will change to this:
-
-![Race](assets/plt4.png)
-
-Functions of the buttons:
-- `Start Race` - click it to to start the countdown and signal the timer to start counting laps. 
-- `Stop Race` - press it when you want to stop counting new laps. It does not clear the laps collected so far.
-- `Clear Laps` - clears the laps on the screen, can be done when the race is running as well.
-
-Once you run a few laps the screen will populate with lap times:
-
-![Race  FInished](assets/plt5.png)
-
-# Community
-
-Join our [Discord](https://discord.gg/D3MgfvsnAw) channel for support and questions or just to hang out! Everyone is welcome!
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
-## Disclaimer
+## What is FPVGate?
 
-**This fork contains modifications made with the assistance of [Warp AI](https://warp.dev).** While the changes have been tested on ESP32-S3 hardware and successfully compile for all targets, users should be aware that:
+FPVGate is a lap timer that measures the time it takes to complete a lap by detecting your drone's video transmitter signal strength (RSSI). When you fly through the gate, the timer detects the peak RSSI and records your lap time. It's perfect for:
 
-- Build configuration changes were made to resolve library compatibility issues
-- ESP32-S3 support has been verified and tested
-- Other board variants (ESP32, ESP32-C3) compile successfully but have not been extensively tested
-- Use at your own risk and please report any issues you encounter
+- Personal practice sessions
+- Small indoor tracks (even in your living room!)
+- 2-3 inch whoops and micro quads
+- Solo training and improvement tracking
 
-For the original, stable version, please visit: https://github.com/phobos-/PhobosLT
+## Confirmed Working Features
+
+✅ **Single Node RSSI Timing** - Accurate lap detection via 5.8GHz signal strength  
+✅ **ESP32-S3 Support** - Optimized for ESP32-S3-DevKitC-1  
+✅ **RGB LED Indicators** - Visual feedback for race events (supports external NeoPixels)  
+✅ **Web Interface** - Modern Material Design UI with 4 theme options  
+✅ **Voice Announcements** - Lap time callouts with customizable pilot name  
+✅ **Real-time RSSI Graph** - Visual calibration with live feedback  
+✅ **Lap History** - 2-lap and 3-lap consecutive time tracking  
+✅ **Manual Lap Entry** - Add laps manually during race  
+✅ **WiFi Access Point** - No apps required, works with any device  
+✅ **OTA Updates** - Update firmware wirelessly  
+✅ **Battery Monitoring** - Low voltage alarm with audio/visual alerts  
+✅ **Minimum Lap Time** - Prevent false triggers from crashes  
+
+## How It Works
+
+FPVGate uses an **RX5808 video receiver module** to continuously monitor the RSSI (signal strength) of your drone's video transmitter. As your drone approaches the gate, the RSSI increases, peaks when you're closest, then decreases as you fly away.
+
+The system uses two thresholds:
+- **Enter RSSI** - Signal strength when you start crossing
+- **Exit RSSI** - Signal strength when crossing ends
+
+A lap is recorded when the RSSI rises above Enter, peaks, then falls below Exit. The time between peaks = your lap time.
+
+The ESP32-S3 runs a web server that you connect to via WiFi. Configuration, race control, and live RSSI visualization all happen through your phone or tablet's web browser.
+
+## Hardware Requirements
+
+### Core Components
+| Component | Description |
+|-----------|-------------|
+| **ESP32-S3-DevKitC-1** | Main controller with WiFi |
+| **RX5808 Module** | 5.8GHz video receiver ([SPI mod required](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)) |
+| **5V Power Supply** | 18650 battery + 5V regulator recommended |
+
+### Optional Components
+| Component | Description |
+|-----------|-------------|
+| **WS2812 RGB LED Strip** | 1-2 external LEDs for visual feedback |
+| **Active Buzzer** | 3.3V-5V buzzer for audio notifications |
+
+## Hardware Setup
+
+### Wiring Diagram
+
+#### RX5808 to ESP32-S3
+```
+ESP32-S3        RX5808
+GPIO4    ────── RSSI
+GPIO10   ────── CH1 (DATA)
+GPIO11   ────── CH2 (SELECT)
+GPIO12   ────── CH3 (CLOCK)
+GND      ────── GND
+5V       ────── +5V
+```
+
+#### Power Supply
+```
+5V Regulator → ESP32-S3 VBUS pin (5V input)
+5V Regulator → RX5808 +5V pin
+Battery GND  → Common ground for all components
+```
+
+#### Optional: External RGB LEDs
+```
+ESP32-S3        WS2812 Strip
+VBUS (5V) ────── +5V
+GND       ────── GND
+GPIO18    ────── Data In
+```
+
+#### Optional: Buzzer
+```
+ESP32-S3        Buzzer
+GPIO5    ────── Positive (+)
+GND      ────── Negative (-)
+```
+
+### Important Notes
+- **GPIO4 for RSSI**: GPIO3 is a strapping pin and will prevent flashing if connected
+- **5V Power**: Both ESP32-S3 and RX5808 run on 5V for this setup
+- **External LEDs**: If using external RGB strip, you can use 1-2 WS2812 LEDs
+
+## Software Setup
+
+### Prerequisites
+- [Visual Studio Code](https://code.visualstudio.com/)
+- [PlatformIO Extension](https://platformio.org/install/ide?install=vscode)
+- USB-C cable (data capable)
+
+### Installation Steps
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/LouisHitchcock/FPVGate.git
+   cd FPVGate
+   ```
+
+2. **Open in VS Code**
+   - Launch VS Code
+   - File → Open Folder → Select the FPVGate folder
+
+3. **Configure LED Count (if using external LEDs)**
+   
+   If you're using external RGB LEDs, edit `lib/RGBLED/rgbled.h`:
+   ```cpp
+   #define NUM_LEDS 2  // Change to 1 or 2 based on your strip
+   ```
+
+4. **Build the Firmware**
+   - Click the PlatformIO icon in the left sidebar
+   - Project Tasks → ESP32S3 → General → Build
+   - Wait for "SUCCESS"
+
+5. **Flash the Firmware**
+   - Connect your ESP32-S3 via USB
+   - Project Tasks → ESP32S3 → General → Upload
+   - Wait for "SUCCESS"
+
+6. **Upload Web Interface Files**
+   - Project Tasks → ESP32S3 → Platform → Upload Filesystem Image
+   - Wait for "SUCCESS"
+
+### Command Line Build (Alternative)
+```bash
+# Build firmware
+pio run -e ESP32S3
+
+# Flash firmware
+pio run -e ESP32S3 -t upload
+
+# Upload web files
+pio run -e ESP32S3 -t uploadfs
+```
+
+## Using FPVGate
+
+### First Connection
+
+1. **Power On** - Plug in your FPVGate device
+2. **Connect to WiFi**
+   - Look for network: `FPVGate_XXXX` (XXXX = last 4 digits of MAC)
+   - Password: `fpvgate1`
+3. **Open Web Interface**
+   - Navigate to: `http://www.fpvgate.xyz` or `http://192.168.4.1`
+   - The web interface should load automatically
+
+### RGB LED Status Indicators
+
+The RGB LED provides instant visual feedback:
+
+| Color/Pattern | Meaning |
+|---------------|---------|
+| **Green Flash** | User connected to web interface OR race started |
+| **White Flash** | Lap detected! |
+| **Red Triple Flash** | Race reset |
+| **Off** | Idle/Ready state |
+
+### Configuration
+
+Navigate to the **Configuration** tab:
+
+#### Basic Settings
+- **Band & Channel**: Set to match your VTx frequency
+  - Default: **RaceBand 8** (5917 MHz)
+  - Supported: A, B, E, F (Fatshark), R (RaceBand), L (LowBand)
+- **Frequency**: Auto-calculated from band/channel selection
+
+#### Race Settings
+- **Minimum Lap Time**: Prevents false laps from crashes or multi-passes
+  - Recommended: 10 seconds for tight tracks
+  - Increase for larger tracks to avoid issues
+  
+- **Battery Alarm**: Low voltage warning threshold
+  - Set to your battery's safe minimum (e.g., 3.3V for 1S)
+
+#### Announcer Settings
+- **Type**: Choose how lap times are announced
+  - `None` - Silent
+  - `Beep` - Short beep only
+  - `Lap Time` - Voice announces your lap time
+  - `2 Consecutive Laps` - Announces combined time of last 2 laps
+  - `3 Consecutive Laps` - Announces combined time of last 3 laps
+  
+- **Announcer Rate**: Voice speed (0.1 = slow, 2.0 = fast)
+  
+- **Pilot Name**: Optional name for voice callouts
+  - Leave empty for solo practice
+  - Example: "Pilot1, 23.45 seconds"
+
+#### Visual Settings
+- **Theme**: Choose your preferred color scheme
+  - Light - Clean bright theme
+  - Dark - Pure dark theme
+  - Material Oceanic - Blue-grey with teal accents
+  - Material Deep Ocean - Dark navy with cyan accents
+
+**Don't forget to click "Save Configuration" after making changes!**
+
+### Calibration
+
+**Calibration is critical for accurate timing.** Follow these steps carefully:
+
+#### Step 1: Prepare
+1. Power on FPVGate and your drone
+2. Wait **30 seconds** for the VTx to reach operating temperature
+3. Navigate to the **Calibration** tab in the web interface
+
+#### Step 2: Observe Baseline RSSI
+1. Place your drone **one gate distance away** from FPVGate
+   - For living room: ~3-4 feet
+   - For outdoor track: ~6-8 feet
+2. Watch the **RSSI graph** - note the peak value as you hold the drone at gate distance
+
+#### Step 3: Set Thresholds
+1. **Enter RSSI**: Set to **2-5 points below** the observed peak
+   - This is when FPVGate starts "watching" for a lap
+   
+2. **Exit RSSI**: Set to **8-10 points below** Enter RSSI
+   - This is when FPVGate stops "watching" and records the lap
+
+3. Click **"Save RSSI Thresholds"**
+
+#### Understanding the Graph
+- **Blue Area** = Clear zone (no drone nearby)
+- **Green Area** = Crossing zone (drone passing through gate)
+- **Red Line** = Enter RSSI threshold
+- **Orange Line** = Exit RSSI threshold
+
+#### Good vs Bad Calibration
+
+**✅ Good Calibration:**
+```
+RSSI  │     /\
+      │    /  \
+      │   /    \     ← Single clean peak
+Enter ├──/──────\───
+      │ /        \
+Exit  ├/──────────\─
+      └─────────────── Time
+```
+
+**❌ Bad Calibration (thresholds too low):**
+```
+RSSI  │   /\/\    ← Multiple peaks = multiple laps!
+      │  /    \
+Enter ├─/──────\───
+      │/        \
+Exit  /──────────\─
+      └─────────────── Time
+```
+
+#### Tips
+- **Flying with others?** Lower both thresholds by 3-5 points to account for RF noise
+- **Lots of false laps?** Increase Exit RSSI or increase Minimum Lap Time
+- **Missing laps?** Lower Enter RSSI threshold
+- **Test your calibration** by flying a few practice laps and watching the graph
+
+### Racing
+
+1. Navigate to the **Race** tab
+2. Click **"Start Race"**
+   - Button turns orange and pulses
+   - Hear countdown: "Arm your quad... Starting on the tone in less than five"
+   - Race begins with a beep
+3. **Fly!** Each lap is recorded automatically
+   - Lap times appear in the table
+   - Voice announces lap time (if enabled)
+   - RGB LED flashes white
+4. **Manual Lap Entry**: Click "Add Lap" to manually record a lap at any time
+5. Click **"Stop Race"** when finished
+6. Use **"Clear Laps"** to reset the table
+
+### Race Table Columns
+- **Lap No**: Lap number (0 = hole shot)
+- **Lap Time**: Individual lap time
+- **2 Lap Time**: Combined time of current + previous lap
+- **3 Lap Time**: Combined time of current + previous 2 laps
+
+## Troubleshooting
+
+### WiFi Connection Issues
+**Problem**: Can't find FPVGate network  
+**Solution**: 
+- Make sure device is powered on (5V to VBUS)
+- Wait 10 seconds after power-on for network to appear
+- Check for network name: `FPVGate_XXXX`
+
+**Problem**: Wrong password  
+**Solution**: Password is `fpvgate1` (8 characters, all lowercase)
+
+**Problem**: Can't access web interface  
+**Solution**: Try both URLs:
+- `http://www.fpvgate.xyz`
+- `http://192.168.4.1`
+
+### Flashing/Upload Issues
+**Problem**: "Port doesn't exist" error  
+**Solution**: 
+- Use a **data-capable** USB-C cable (some are charge-only)
+- Try different USB ports
+- Check Device Manager (Windows) for COM port
+
+**Problem**: "Timed out waiting for packet header" error  
+**Solution**: 
+- Disconnect RX5808 RSSI wire from GPIO4 temporarily
+- GPIO3 is a strapping pin - never connect to it
+- Hold BOOT button while plugging in USB
+
+### Timing/Calibration Issues
+**Problem**: Missing laps  
+**Solution**: 
+- Lower Enter RSSI threshold by 5 points
+- Ensure VTx has warmed up (30 seconds minimum)
+- Check that Band/Channel matches your drone
+
+**Problem**: Too many false laps  
+**Solution**: 
+- Increase Minimum Lap Time to 12-15 seconds
+- Raise Exit RSSI threshold by 3-5 points
+- Move timer further from flight path
+
+**Problem**: Inconsistent lap detection  
+**Solution**: 
+- Ensure stable 5V power supply
+- Check for loose RX5808 connections
+- Re-calibrate when flying with other pilots
+
+### RGB LED Issues
+**Problem**: External LEDs not working  
+**Solution**: 
+- Verify 5V power to LED strip (VBUS pin)
+- Check data wire connection to GPIO18
+- Ensure `NUM_LEDS` in `rgbled.h` matches your strip
+- WS2812 LEDs need 5V, not 3.3V
+
+**Problem**: Wrong colors or random behavior  
+**Solution**: 
+- Confirm WS2812 LED type (not WS2811 or SK6812)
+- Check wiring: VBUS=5V, GND=GND, GPIO18=Data
+- Add 100-330Ω resistor on data line if experiencing issues
+
+## Default Settings
+
+- **WiFi SSID**: `FPVGate_XXXX`
+- **WiFi Password**: `fpvgate1`
+- **Default Channel**: RaceBand 8 (5917 MHz)
+- **Web Address**: `http://www.fpvgate.xyz` or `http://192.168.4.1`
+- **Minimum Lap**: 10 seconds
+- **RGB LED Pin**: GPIO18
+
+## Project Structure
+
+```
+FPVGate/
+├── data/                  # Web interface files
+│   ├── index.html        # Main web app
+│   ├── script.js         # UI logic and race control
+│   ├── style.css         # Material Design themes
+│   └── ...               # Supporting libraries
+├── lib/
+│   ├── CONFIG/           # Configuration & EEPROM
+│   ├── LAPTIMER/         # Core timing logic
+│   ├── RGBLED/           # RGB LED control (ESP32-S3)
+│   ├── RX5808/           # VRx SPI communication
+│   ├── WEBSERVER/        # WiFi & web server
+│   ├── KALMAN/           # RSSI filtering
+│   ├── BUZZER/           # Audio feedback
+│   └── BATTERY/          # Voltage monitoring
+├── src/
+│   └── main.cpp          # Main application entry
+├── targets/
+│   └── ESP32S3.ini       # ESP32-S3 build config
+└── platformio.ini        # PlatformIO configuration
+```
+
+## Technical Details
+
+### Pin Configuration (ESP32-S3)
+| GPIO | Function |
+|------|----------|
+| 1 | Battery voltage sense |
+| 2 | Status LED (onboard) |
+| 4 | RX5808 RSSI |
+| 5 | Buzzer |
+| 10 | RX5808 CH1 (DATA) |
+| 11 | RX5808 CH2 (SELECT) |
+| 12 | RX5808 CH3 (CLOCK) |
+| 18 | External RGB LED (WS2812) |
+
+### Memory Usage
+- **RAM**: ~15% (49KB / 328KB)
+- **Flash**: ~28% (940KB / 3.3MB)
+
+### Libraries Used
+- AsyncTCP - Async TCP library for ESP32
+- ESPAsyncWebServer - Async web server
+- ArduinoJson - JSON serialization
+- ElegantOTA - OTA updates
+- FastLED - RGB LED control
+
+## Contributing
+
+Contributions are welcome! If you'd like to improve FPVGate:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## Credits
+
+FPVGate is a heavily modified fork of [PhobosLT](https://github.com/phobos-/PhobosLT) by phobos-. 
+
+The original PhobosLT project provided the foundation for RSSI-based lap timing. FPVGate adds ESP32-S3 support, RGB LED indicators, a modernized web interface, and various improvements for personal use.
+
+Portions of the timing logic are inspired by [RotorHazard](https://github.com/RotorHazard/RotorHazard).
