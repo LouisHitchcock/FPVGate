@@ -26,7 +26,7 @@ static const char *wifi_ap_password = "fpvgate1";
 static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
-void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist) {
+void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808) {
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -36,6 +36,9 @@ void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMoni
     buz = buzzer;
     led = l;
     history = raceHist;
+    storage = stor;
+    selftest = test;
+    rx = rx5808;
 
     wifi_ap_ssid = String(wifi_ap_ssid_prefix) + "_" + WiFi.macAddress().substring(WiFi.macAddress().length() - 6);
     wifi_ap_ssid.replace(":", "");
@@ -226,11 +229,21 @@ static void handleNotFound(AsyncWebServerRequest *request) {
 }
 
 static bool startLittleFS() {
-    if (!LittleFS.begin()) {
-        DEBUG("LittleFS mount failed\n");
-        return false;
+    Serial.println("[INFO] Attempting to mount LittleFS...");
+    if (!LittleFS.begin(false)) {
+        Serial.println("[WARN] LittleFS mount failed, attempting to format...");
+        DEBUG("LittleFS mount failed, attempting to format...\n");
+        if (!LittleFS.begin(true)) {
+            Serial.println("[ERROR] LittleFS format failed!");
+            DEBUG("LittleFS format failed\n");
+            return false;
+        }
+        Serial.println("[INFO] LittleFS formatted and mounted");
+        DEBUG("LittleFS formatted and mounted\n");
+        return true;
     }
-    DEBUG("LittleFS mounted sucessfully\n");
+    Serial.println("[INFO] LittleFS mounted successfully");
+    DEBUG("LittleFS mounted successfully\n");
     return true;
 }
 
@@ -255,8 +268,11 @@ void Webserver::startServices() {
 
     startLittleFS();
     
-    // Initialize race history after LittleFS is mounted
-    history->init();
+    // Initialize storage (SD card or LittleFS fallback)
+    storage->init();
+    
+    // Initialize race history after storage is ready
+    history->init(storage);
 
     server.on("/", handleRoot);
     server.on("/generate_204", handleRoot);  // handle Andriod phones doing shit to detect if there is 'real' internet and possibly dropping conn.
@@ -269,7 +285,7 @@ void Webserver::startServices() {
     server.on("/fwlink", handleRoot);
 
     server.on("/status", [this](AsyncWebServerRequest *request) {
-        char buf[1024];
+        char buf[1536];
         char configBuf[256];
         conf->toJsonString(configBuf);
         float voltage = (float)monitor->getBatteryVoltage() / 10;
@@ -280,9 +296,11 @@ Heap:\n\
 \tMin:\t%i\n\
 \tSize:\t%i\n\
 \tAlloc:\t%i\n\
-LittleFS:\n\
-\tUsed:\t%i\n\
-\tTotal:\t%i\n\
+Storage:\n\
+\tType:\t%s\n\
+\tUsed:\t%llu\n\
+\tTotal:\t%llu\n\
+\tFree:\t%llu\n\
 Chip:\n\
 \tModel:\t%s Rev %i, %i Cores, SDK %s\n\
 \tFlashSize:\t%i\n\
@@ -296,7 +314,8 @@ EEPROM:\n\
 Battery Voltage:\t%0.1fv";
 
         snprintf(buf, sizeof(buf), format,
-                 ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap(), LittleFS.usedBytes(), LittleFS.totalBytes(),
+                 ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap(),
+                 storage->getStorageType().c_str(), storage->getUsedBytes(), storage->getTotalBytes(), storage->getFreeBytes(),
                  ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(), ESP.getSdkVersion(), ESP.getFlashChipSize(), ESP.getFlashChipSpeed() / 1000000, getCpuFrequencyMhz(),
                  WiFi.localIP().toString().c_str(), WiFi.macAddress().c_str(), configBuf, voltage);
         request->send(200, "text/plain", buf);
@@ -310,6 +329,15 @@ Battery Voltage:\t%0.1fv";
 
     server.on("/timer/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
         timer->stop();
+        request->send(200, "application/json", "{\"status\": \"OK\"}");
+    });
+
+    server.on("/timer/lap", HTTP_POST, [this](AsyncWebServerRequest *request) {
+#ifdef ESP32S3
+        if (g_rgbLed) {
+            g_rgbLed->flashLap();
+        }
+#endif
         request->send(200, "application/json", "{\"status\": \"OK\"}");
     });
 
@@ -492,6 +520,256 @@ Battery Voltage:\t%0.1fv";
 
     server.addHandler(raceSaveHandler);
     server.addHandler(raceUploadHandler);
+
+    // Self-test endpoint
+    server.on("/selftest", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        selftest->runAllTests();
+        String json = selftest->getResultsJSON();
+        request->send(200, "application/json", json);
+        led->on(200);
+    });
+
+    // SD card initialization endpoint
+    server.on("/storage/initsd", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        bool success = storage->initSDDeferred();
+        String json = success ? "{\"status\":\"OK\",\"message\":\"SD card initialized\"}" : 
+                               "{\"status\":\"ERROR\",\"message\":\"SD card init failed\"}";
+        request->send(success ? 200 : 500, "application/json", json);
+        led->on(200);
+    });
+
+#ifdef ESP32S3
+    // LED control endpoints
+    server.on("/led/color", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("color", true)) {
+            String colorStr = request->getParam("color", true)->value();
+            uint32_t color = strtol(colorStr.c_str(), NULL, 16);
+            if (g_rgbLed) {
+                g_rgbLed->setManualColor(color);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing color\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/mode", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("mode", true)) {
+            uint8_t mode = request->getParam("mode", true)->value().toInt();
+            if (g_rgbLed) {
+                if (mode == 0) {
+                    g_rgbLed->off();
+                } else if (mode == 1) {
+                    g_rgbLed->setManualMode(RGB_SOLID);
+                } else if (mode == 2) {
+                    g_rgbLed->setManualMode(RGB_PULSE);
+                } else if (mode == 3) {
+                    g_rgbLed->setRainbowWave();
+                }
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing mode\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/brightness", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("brightness", true)) {
+            uint8_t brightness = request->getParam("brightness", true)->value().toInt();
+            if (g_rgbLed) {
+                g_rgbLed->setBrightness(brightness);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing brightness\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/preset", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("preset", true)) {
+            uint8_t preset = request->getParam("preset", true)->value().toInt();
+            if (g_rgbLed) {
+                g_rgbLed->setPreset((led_preset_e)preset);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing preset\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/override", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("enable", true)) {
+            bool enable = request->getParam("enable", true)->value() == "1";
+            if (g_rgbLed) {
+                g_rgbLed->enableManualOverride(enable);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing enable\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/error", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("code", true)) {
+            uint8_t code = request->getParam("code", true)->value().toInt();
+            if (g_rgbLed) {
+                g_rgbLed->showErrorCode(code);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing code\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/speed", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("speed", true)) {
+            uint8_t speed = request->getParam("speed", true)->value().toInt();
+            if (g_rgbLed) {
+                g_rgbLed->setEffectSpeed(speed);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing speed\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/fadecolor", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("color", true)) {
+            String colorStr = request->getParam("color", true)->value();
+            uint32_t color = strtol(colorStr.c_str(), NULL, 16);
+            if (g_rgbLed) {
+                g_rgbLed->setFadeColor(color);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing color\"}");
+        }
+        led->on(200);
+    });
+
+    server.on("/led/strobecolor", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (request->hasParam("color", true)) {
+            String colorStr = request->getParam("color", true)->value();
+            uint32_t color = strtol(colorStr.c_str(), NULL, 16);
+            if (g_rgbLed) {
+                g_rgbLed->setStrobeColor(color);
+            }
+            request->send(200, "application/json", "{\"status\": \"OK\"}");
+        } else {
+            request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing color\"}");
+        }
+        led->on(200);
+    });
+#endif
+
+    // Calibration wizard endpoints
+    server.on("/calibration/start", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        timer->startCalibrationWizard();
+        request->send(200, "application/json", "{\"status\": \"OK\"}");
+        led->on(200);
+    });
+
+    server.on("/calibration/stop", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        timer->stopCalibrationWizard();
+        request->send(200, "application/json", "{\"status\": \"OK\"}");
+        led->on(200);
+    });
+
+    server.on("/calibration/data", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        uint16_t count = timer->getCalibrationRssiCount();
+        
+        // Build JSON response
+        String json = "{\"count\":" + String(count) + ",\"data\":[";
+        for (uint16_t i = 0; i < count; i++) {
+            if (i > 0) json += ",";
+            json += "{\"rssi\":" + String(timer->getCalibrationRssi(i)) + ",\"time\":" + String(timer->getCalibrationTimestamp(i)) + "}";
+        }
+        json += "]}";
+        
+        request->send(200, "application/json", json);
+        led->on(200);
+    });
+
+    // Self-test endpoint
+    server.on("/api/selftest", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        // Run RX5808 test
+        TestResult rxTest = selftest->testRX5808(rx);
+        
+        // Run Lap Timer test
+        TestResult timerTest = selftest->testLapTimer(timer);
+        
+        // Run Audio test
+        TestResult audioTest = selftest->testAudio(buz);
+        
+        // Run Config test
+        TestResult configTest = selftest->testConfig(conf);
+        
+        // Run Race History test
+        TestResult historyTest = selftest->testRaceHistory(history);
+        
+        // Run Web Server test
+        TestResult webTest = selftest->testWebServer();
+        
+        // Run OTA test
+        TestResult otaTest = selftest->testOTA();
+        
+        // Run Storage test
+        TestResult storageTest = selftest->testStorage();
+        
+        // Run LittleFS test
+        TestResult littleFSTest = selftest->testLittleFS();
+        
+        // Run EEPROM test
+        TestResult eepromTest = selftest->testEEPROM();
+        
+        // Run WiFi test
+        TestResult wifiTest = selftest->testWiFi();
+        
+        // Run Battery test
+        TestResult batteryTest = selftest->testBattery();
+        
+#ifdef ESP32S3
+        // Run RGB LED test
+        TestResult ledTest = selftest->testRGBLED(g_rgbLed);
+#endif
+        
+        // Build JSON response
+        String json = "{\"tests\":[";
+        
+        auto addTest = [&json](const TestResult& test, bool first = false) {
+            if (!first) json += ",";
+            json += "{\"name\":\"" + test.name + "\",\"passed\":" + String(test.passed ? "true" : "false") + 
+                   ",\"details\":\"" + test.details + "\",\"duration\":" + String(test.duration_ms) + "}";
+        };
+        
+        addTest(rxTest, true);
+        addTest(timerTest);
+        addTest(audioTest);
+        addTest(configTest);
+        addTest(historyTest);
+        addTest(webTest);
+        addTest(otaTest);
+        addTest(storageTest);
+        addTest(littleFSTest);
+        addTest(eepromTest);
+        addTest(wifiTest);
+        addTest(batteryTest);
+#ifdef ESP32S3
+        addTest(ledTest);
+#endif
+        
+        json += "]}";
+        
+        request->send(200, "application/json", json);
+        led->on(200);
+    });
 
     ElegantOTA.setAutoReboot(true);
     ElegantOTA.begin(&server);

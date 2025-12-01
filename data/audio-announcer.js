@@ -16,14 +16,22 @@ class AudioAnnouncer {
         this.rate = 1.3;  // Faster playback for quicker announcements
         this.piperTTS = null;
         this.piperLoaded = false;
+        this.ttsEngine = 'piper';  // Default to Piper TTS
         
         // Pre-recorded audio cache
         this.audioCache = new Map();
         this.preloadedAudios = new Set();
         
+        // Load TTS engine preference
+        const savedEngine = localStorage.getItem('ttsEngine');
+        if (savedEngine) {
+            this.ttsEngine = savedEngine;
+        }
+        
         // Initialize Piper TTS
         this.initPiper();
         console.log('[AudioAnnouncer] Initialized (audio disabled by default, call enable() to activate)');
+        console.log('[AudioAnnouncer] TTS engine:', this.ttsEngine);
     }
 
     /**
@@ -217,7 +225,25 @@ class AudioAnnouncer {
         
         console.log('[AudioAnnouncer] Speaking:', cleanText);
         
+        // Check if PiperTTS is selected as primary voice
+        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const usePiperExclusively = (selectedVoice === 'piper');
+        
         try {
+            // If PiperTTS is selected, use it exclusively without trying pre-recorded files
+            if (usePiperExclusively) {
+                console.log('[AudioAnnouncer] PiperTTS selected - using exclusively');
+                if (this.piperLoaded) {
+                    await this.playPiper(cleanText);
+                    return;
+                } else {
+                    console.warn('[AudioAnnouncer] PiperTTS not loaded, fallback to Web Speech');
+                    await this.playWebSpeech(cleanText);
+                    return;
+                }
+            }
+            
+            // ElevenLabs voice selected - try pre-recorded files first
             // Check for different lap announcement formats
             // Format 1: "Pilot Lap X, time" (e.g., "Louis Lap 5, 12.34")
             const fullFormatMatch = cleanText.match(/^(.+?)\s+lap\s+(\d+)\s*,\s*([\d.]+)$/i);
@@ -249,7 +275,7 @@ class AudioAnnouncer {
                 return;
             }
             
-            // Try 1: Pre-recorded audio (ElevenLabs)
+            // Try pre-recorded audio (ElevenLabs)
             const audioPath = this.mapTextToAudio(cleanText);
             if (audioPath) {
                 console.log('[AudioAnnouncer] Mapped to audio path:', audioPath);
@@ -264,15 +290,15 @@ class AudioAnnouncer {
                 console.log('[AudioAnnouncer] No audio mapping found for:', cleanText);
             }
             
-            // Try 2: Piper TTS
+            // Fallback to Piper TTS (for ElevenLabs voices when files missing)
             if (this.piperLoaded) {
-                console.log('[AudioAnnouncer] Generating with Piper TTS:', cleanText);
+                console.log('[AudioAnnouncer] Fallback: Generating with Piper TTS:', cleanText);
                 await this.playPiper(cleanText);
                 return;
             }
             
-            // Try 3: Web Speech API
-            console.log('[AudioAnnouncer] Using Web Speech API fallback:', cleanText);
+            // Final fallback: Web Speech API
+            console.log('[AudioAnnouncer] Fallback: Using Web Speech API:', cleanText);
             await this.playWebSpeech(cleanText);
             
         } catch (error) {
@@ -351,6 +377,19 @@ class AudioAnnouncer {
     async speakComplexWithPilot(pilot, lapNumber, lapTime) {
         if (!this.audioEnabled) return;
         
+        // Check if PiperTTS is selected as primary voice
+        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const usePiperExclusively = (selectedVoice === 'piper');
+        
+        // If PiperTTS is selected, use it exclusively
+        if (usePiperExclusively) {
+            const fullText = `${pilot} Lap ${lapNumber}, ${lapTime}`;
+            console.log('[AudioAnnouncer] PiperTTS selected - speaking complex announcement exclusively:', fullText);
+            await this.useTtsFallback(fullText);
+            return;
+        }
+        
+        // ElevenLabs voice - try pre-recorded files first
         const phoneticInput = document.getElementById('pphonetic');
         const pilotNameInput = document.getElementById('pname');
         const phoneticName = (phoneticInput?.value || pilotNameInput?.value || pilot).toLowerCase().trim();
@@ -374,9 +413,10 @@ class AudioAnnouncer {
             console.error('[AudioAnnouncer] Complex speech with pilot failed:', e);
         }
         
-        // Fallback: speak entire phrase as one
+        // Fallback: Use TTS directly (NOT speak() to avoid infinite recursion)
         const fullText = `${pilot} Lap ${lapNumber}, ${lapTime}`;
-        await this.speak(fullText);
+        console.log('[AudioAnnouncer] Using TTS fallback for:', fullText);
+        await this.useTtsFallback(fullText);
     }
     
     /**
@@ -385,6 +425,19 @@ class AudioAnnouncer {
     async speakComplexLapTime(lapNumber, lapTime) {
         if (!this.audioEnabled) return;
         
+        // Check if PiperTTS is selected as primary voice
+        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const usePiperExclusively = (selectedVoice === 'piper');
+        
+        // If PiperTTS is selected, use it exclusively
+        if (usePiperExclusively) {
+            const fullText = `Lap ${lapNumber}, ${lapTime}`;
+            console.log('[AudioAnnouncer] PiperTTS selected - speaking lap+time exclusively:', fullText);
+            await this.useTtsFallback(fullText);
+            return;
+        }
+        
+        // ElevenLabs voice - try pre-recorded files first
         try {
             // Check if we have pre-recorded "Lap X" file
             const lapPath = `sounds/lap_${lapNumber}.mp3`;
@@ -399,9 +452,29 @@ class AudioAnnouncer {
             console.error('[AudioAnnouncer] Lap+time speech failed:', e);
         }
         
-        // Fallback: speak entire phrase
+        // Fallback: Use TTS directly (NOT speak() to avoid infinite recursion)
         const fullText = `Lap ${lapNumber}, ${lapTime}`;
-        await this.speak(fullText);
+        console.log('[AudioAnnouncer] Using TTS fallback for:', fullText);
+        await this.useTtsFallback(fullText);
+    }
+
+    /**
+     * Use TTS fallback based on user preference
+     */
+    async useTtsFallback(text) {
+        if (this.ttsEngine === 'piper' && this.piperLoaded) {
+            await this.playPiper(text);
+        } else if (this.ttsEngine === 'webspeech' || !this.piperLoaded) {
+            await this.playWebSpeech(text);
+        }
+    }
+
+    /**
+     * Set TTS engine preference
+     */
+    setTtsEngine(engine) {
+        this.ttsEngine = engine;
+        console.log('[AudioAnnouncer] TTS engine set to:', engine);
     }
 
     /**
@@ -412,6 +485,18 @@ class AudioAnnouncer {
         const numStr = num.toString();
         console.log('[AudioAnnouncer] Speaking number:', numStr);
         
+        // Check if PiperTTS is selected as primary voice
+        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const usePiperExclusively = (selectedVoice === 'piper');
+        
+        // If PiperTTS is selected, use it exclusively
+        if (usePiperExclusively) {
+            console.log('[AudioAnnouncer] PiperTTS selected - speaking number exclusively:', numStr);
+            await this.useTtsFallback(numStr);
+            return;
+        }
+        
+        // ElevenLabs voice - try pre-recorded number files first
         // Split into whole and decimal parts
         const parts = numStr.split('.');
         const wholePart = parseInt(parts[0]);
@@ -447,19 +532,9 @@ class AudioAnnouncer {
                 }
             }
         } catch (e) {
-            console.warn('[AudioAnnouncer] Error speaking number:', num, e);
-            // Fallback: spell out digit by digit
-            for (const char of numStr) {
-                try {
-                    if (char === '.') {
-                        await this.playPrerecorded('sounds/point.mp3');
-                    } else if (char >= '0' && char <= '9') {
-                        await this.playPrerecorded(`sounds/num_${char}.mp3`);
-                    }
-                } catch (err) {
-                    console.warn('[AudioAnnouncer] Error speaking character:', char, err);
-                }
-            }
+            console.warn('[AudioAnnouncer] Error speaking number, fallback to TTS:', num, e);
+            // Fallback to TTS instead of trying to piece together files
+            await this.useTtsFallback(numStr);
         }
     }
 

@@ -2,6 +2,8 @@
 #include "led.h"
 #include "webserver.h"
 #include "racehistory.h"
+#include "storage.h"
+#include "selftest.h"
 #include <ElegantOTA.h>
 #ifdef ESP32S3
 #include "rgbled.h"
@@ -9,6 +11,8 @@
 
 static RX5808 rx(PIN_RX5808_RSSI, PIN_RX5808_DATA, PIN_RX5808_SELECT, PIN_RX5808_CLOCK);
 static Config config;
+static Storage storage;
+static SelfTest selfTest;
 static Webserver ws;
 static Buzzer buzzer;
 static Led led;
@@ -59,11 +63,24 @@ void setup() {
     led.init(PIN_LED, false);
 #ifdef ESP32S3
     rgbLed.init();
-    // LED stays off by default - only flashes for events
+    // Apply saved LED configuration
+    rgbLed.setBrightness(config.getLedBrightness());
+    uint8_t ledMode = config.getLedMode();
+    if (ledMode == 0) {
+        rgbLed.off();
+    } else if (ledMode == 1) {
+        rgbLed.setManualColor(config.getLedColor());
+    } else if (ledMode == 2) {
+        rgbLed.setManualColor(config.getLedColor());
+        rgbLed.setManualMode(RGB_PULSE);
+    } else if (ledMode == 3) {
+        rgbLed.setRainbowWave();
+    }
 #endif
     timer.init(&config, &rx, &buzzer, &led);
     monitor.init(PIN_VBAT, VBAT_SCALE, VBAT_ADD, &buzzer, &led);
-    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory);
+    selfTest.init(&storage);
+    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx);
     led.on(400);
     buzzer.beep(200);
     initParallelTask();

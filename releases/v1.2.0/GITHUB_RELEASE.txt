@@ -1,0 +1,88 @@
+FPVGate v1.2.0 - System Diagnostics & Enhanced Features
+
+System Self-Test
+- Comprehensive hardware and software diagnostics testing 13 components
+- Located in Configuration page under "System Diagnostics"
+- Visual pass/fail indicators with detailed error messages
+- Perfect for troubleshooting and verifying hardware setup
+
+PiperTTS Integration
+- New low-latency text-to-speech option
+- Exclusive Mode: Uses only PiperTTS when selected (no pre-recorded files)
+- Fallback Mode: ElevenLabs voices fall back to PiperTTS on file failure
+- Automatic TTS engine selection based on voice choice
+
+Enhanced LED Presets
+- Color pickers for Solid Colour, Color Fade, and Strobe presets
+- New "Pilot Colour" preset uses your pilot color
+- Slowed Police and Strobe effects for better visibility
+- 10 total presets with better organization
+
+UI Improvements
+- New "TTS Settings" section for voice configuration
+- Fixed voice control button styling and toggle stretching
+- Enhanced config import/export with ALL frontend settings
+- Better organization with 5 logical sections
+
+Bug Fixes
+- Fixed audio infinite loop when pilot-specific files missing
+- Fixed Voice Control button opacity issue
+- Fixed toggle switch stretching in Configuration
+- Added include guards to prevent compilation errors
+
+---
+
+Installation Instructions
+
+Option 1: Flash with esptool (All Platforms)
+
+1. Install esptool:
+   pip install esptool
+
+2. Download all 4 binary files
+
+3. Flash:
+   esptool.py --chip esp32s3 --port COM12 --baud 460800 write_flash -z \
+     0x0000 bootloader-esp32s3.bin \
+     0x8000 partitions-esp32s3.bin \
+     0x10000 firmware-esp32s3.bin \
+     0x390000 littlefs-esp32s3.bin
+
+   Replace COM12 with your port (Windows: COM3/4, Linux: /dev/ttyUSB0, Mac: /dev/cu.usbserial-*)
+
+Option 2: ESP Flash Tool (Windows)
+1. Download ESP Flash Tool from Espressif
+2. Select ESP32-S3 chip
+3. Add files: 0x0000=bootloader, 0x8000=partitions, 0x10000=firmware, 0x390000=littlefs
+4. Click Start
+
+---
+
+Upgrading from v1.1.0
+1. Download your config (Configuration -> Download Config)
+2. Flash v1.2.0 using instructions above
+3. Import config if needed
+4. Run System Self-Test to verify
+
+Note: Race History erased on filesystem upload. Download races first to keep them.
+
+---
+
+Requirements
+- ESP32-S3-DevKitC-1 (8MB Flash)
+- RX5808 module (SPI modded)
+- 5V power supply
+
+Memory Usage
+- Flash: 54.3% (997 KB)
+- RAM: 16.7% (55 KB)
+- Filesystem: 4.65 MB
+
+Files Included
+- bootloader-esp32s3.bin (15 KB)
+- partitions-esp32s3.bin (3 KB)
+- firmware-esp32s3.bin (997 KB)
+- littlefs-esp32s3.bin (4.65 MB)
+
+Full release notes: See RELEASE_NOTES.txt
+Documentation: QUICKSTART.md | README.md | CHANGELOG.md

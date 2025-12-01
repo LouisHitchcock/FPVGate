@@ -1,0 +1,336 @@
+(kicad_sch (version 20211014) (generator eeschema)
+
+  (paper "A4")
+
+  (title_block
+    (title "FPVGate Carrier for ESP32-S3 DevKit C1")
+    (company "Louis / FPVGate")
+    (rev "v0.1")
+    (comment 1 "ESP32-S3 DevKit carrier with RX5808 + 2x NeoPixel strips")
+    (comment 2 "USB-C 5V input, high-side toggle switch")
+    (comment 3 "Template: symbols only, you still need to wire nets")
+  )
+
+  ; ==============
+  ; POWER INPUT
+  ; ==============
+
+  ; USB-C receptacle (5V only, no data used)
+  (symbol (lib_id "Connector:USB_C_Receptacle_USB2.0")
+    (at 20 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "J1" (at 20 33) (effects (font (size 1.27 1.27))))
+    (property "Value" "USB-C_PWR_IN" (at 20 47) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "Connector_USB:USB_C_Receptacle_USB2.0" (at 20 50))
+  )
+
+  ; CC pull-down resistors for 5V sink
+  (symbol (lib_id "Device:R")
+    (at 50 30)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R1" (at 50 27))
+    (property "Value" "5k1" (at 50 33))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 50 35))
+    (property "Comment" "CC1 pulldown to GND" (at 50 37))
+  )
+
+  (symbol (lib_id "Device:R")
+    (at 60 30)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R2" (at 60 27))
+    (property "Value" "5k1" (at 60 33))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 60 35))
+    (property "Comment" "CC2 pulldown to GND" (at 60 37))
+  )
+
+  ; Label for raw 5V from USB (VBUS)
+  (symbol (lib_id "power:+5V")
+    (at 40 20)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR01" (at 40 18))
+    (property "Value" "+5V_IN" (at 40 22))
+  )
+
+  ; Ground symbol
+  (symbol (lib_id "power:GND")
+    (at 40 60)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR02" (at 40 62))
+    (property "Value" "GND" (at 40 58))
+  )
+
+  ; Bulk capacitor on +5V_IN (input side)
+  (symbol (lib_id "Device:C")
+    (at 55 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C1" (at 55 37))
+    (property "Value" "100uF/10V" (at 55 43))
+    (property "Footprint" "Capacitor_SMD:CP_Elec_6.3x7.7" (at 55 45))
+    (property "Comment" "Bulk cap on +5V_IN" (at 55 47))
+  )
+
+  ; Small ceramic on +5V_IN
+  (symbol (lib_id "Device:C")
+    (at 65 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C2" (at 65 37))
+    (property "Value" "100nF" (at 65 43))
+    (property "Footprint" "Capacitor_SMD:C_0603_1608Metric" (at 65 45))
+  )
+
+  ; ==============
+  ; POWER SWITCH & MAIN 5V RAIL
+  ; ==============
+
+  ; SPST toggle switch on high side: +5V_IN -> +5V_SW
+  (symbol (lib_id "Switch:SW_SPST")
+    (at 40 30)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "SW1" (at 40 27))
+    (property "Value" "PWR_TOGGLE" (at 40 33))
+    (property "Footprint" "Switch_Toggle:SW_Toggle_SPST" (at 40 35))
+    (property "Comment" "+5V_IN to +5V_SW" (at 40 37))
+  )
+
+  ; Label for switched 5V rail
+  (symbol (lib_id "power:+5V")
+    (at 80 20)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR03" (at 80 18))
+    (property "Value" "+5V_SW" (at 80 22))
+  )
+
+  ; Bulk cap on +5V_SW (system rail)
+  (symbol (lib_id "Device:C")
+    (at 90 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C3" (at 90 37))
+    (property "Value" "100uF/10V" (at 90 43))
+    (property "Footprint" "Capacitor_SMD:CP_Elec_6.3x7.7" (at 90 45))
+    (property "Comment" "Bulk cap on +5V_SW near ESP32" (at 90 47))
+  )
+
+  (symbol (lib_id "Device:C")
+    (at 100 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C4" (at 100 37))
+    (property "Value" "100nF" (at 100 43))
+    (property "Footprint" "Capacitor_SMD:C_0603_1608Metric" (at 100 45))
+  )
+
+  ; ==============
+  ; ESP32-S3 DEVKIT CARRIER CONNECTION
+  ; ==============
+
+  ; Represent the DevKit as a 2x19 header (you can remap pins to match your actual board)
+  (symbol (lib_id "Connector_Generic:Conn_02x19_Odd_Even")
+    (at 150 40)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "J2" (at 150 15))
+    (property "Value" "ESP32-S3-DevKitC1_HDR" (at 150 65))
+    (property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_2x19_P2.54mm_Vertical" (at 150 68))
+    (property "Comment" "Plug ESP32-S3 DevKit C1 here" (at 150 70))
+  )
+
+  ; Power pins to DevKit (you will wire these to the correct pins for 5V, GND on your actual board)
+  (symbol (lib_id "power:+5V")
+    (at 135 20)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR04" (at 135 18))
+    (property "Value" "+5V_SW" (at 135 22))
+  )
+
+  (symbol (lib_id "power:GND")
+    (at 165 60)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR05" (at 165 62))
+    (property "Value" "GND" (at 165 58))
+  )
+
+  ; ==========================
+  ; RX5808 VIDEO RECEIVER MODULE
+  ; ==========================
+
+  ; Generic 1x8 header for RX5808 module
+  (symbol (lib_id "Connector_Generic:Conn_01x08")
+    (at 200 30)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "J3" (at 200 20))
+    (property "Value" "RX5808_HDR" (at 200 40))
+    (property "Footprint" "Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical" (at 200 43))
+    (property "Comment" "Breakout to RX5808 module" (at 200 45))
+  )
+
+  ; Decoupling/filter for RX5808 VCC from +5V_SW
+  (symbol (lib_id "Device:R")
+    (at 220 30)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R3" (at 220 27))
+    (property "Value" "10R" (at 220 33))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 220 35))
+    (property "Comment" "Optional RC/FB filter in series with RX5808 VCC" (at 220 37))
+  )
+
+  (symbol (lib_id "Device:C")
+    (at 230 35)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C5" (at 230 32))
+    (property "Value" "47uF" (at 230 38))
+    (property "Footprint" "Capacitor_SMD:CP_Elec_5x5.8" (at 230 40))
+    (property "Comment" "Local bulk for RX5808" (at 230 42))
+  )
+
+  (symbol (lib_id "Device:C")
+    (at 240 35)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C6" (at 240 32))
+    (property "Value" "100nF" (at 240 38))
+    (property "Footprint" "Capacitor_SMD:C_0603_1608Metric" (at 240 40))
+  )
+
+  (symbol (lib_id "power:GND")
+    (at 230 45)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR06" (at 230 47))
+    (property "Value" "GND" (at 230 43))
+  )
+
+  ; ==========================
+  ; NEOPIXEL STRIP CONNECTORS (2x)
+  ; ==========================
+
+  ; Strip 1: 3-pin connector (5V, DATA, GND)
+  (symbol (lib_id "Connector_Generic:Conn_01x03")
+    (at 120 80)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "J4" (at 120 73))
+    (property "Value" "NEOPIXEL_STRIP1" (at 120 87))
+    (property "Footprint" "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical" (at 120 90))
+  )
+
+  ; Strip 2
+  (symbol (lib_id "Connector_Generic:Conn_01x03")
+    (at 160 80)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "J5" (at 160 73))
+    (property "Value" "NEOPIXEL_STRIP2" (at 160 87))
+    (property "Footprint" "Connector_JST:JST_XH_B3B-XH-A_1x03_P2.50mm_Vertical" (at 160 90))
+  )
+
+  ; Big electrolytic for LED strips (place near J4/J5)
+  (symbol (lib_id "Device:C")
+    (at 140 90)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "C7" (at 140 87))
+    (property "Value" "470uF/10V" (at 140 93))
+    (property "Footprint" "Capacitor_SMD:CP_Elec_8x10" (at 140 95))
+    (property "Comment" "Bulk for NeoPixel power" (at 140 97))
+  )
+
+  (symbol (lib_id "power:+5V")
+    (at 130 75)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR07" (at 130 73))
+    (property "Value" "+5V_SW" (at 130 77))
+  )
+
+  (symbol (lib_id "power:GND")
+    (at 130 100)
+    (unit 1)
+    (in_bom no)
+    (on_board no)
+    (property "Reference" "#PWR08" (at 130 102))
+    (property "Value" "GND" (at 130 98))
+  )
+
+  ; Series resistors on NeoPixel data lines (place near DevKit)
+  (symbol (lib_id "Device:R")
+    (at 135 70)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R4" (at 135 67))
+    (property "Value" "220R" (at 135 73))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 135 75))
+    (property "Comment" "Series resistor for STRIP1 data" (at 135 77))
+  )
+
+  (symbol (lib_id "Device:R")
+    (at 175 70)
+    (unit 1)
+    (in_bom yes)
+    (on_board yes)
+    (property "Reference" "R5" (at 175 67))
+    (property "Value" "220R" (at 175 73))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 175 75))
+    (property "Comment" "Series resistor for STRIP2 data" (at 175 77))
+  )
+
+  ; ==========================
+  ; NOTES ON SIGNAL NETS (YOU WIRE THESE IN KICAD)
+  ; ==========================
+
+  (comment "NET_GUIDE_1"
+    "Connect USB-C VBUS pin to +5V_IN symbol. CC1/CC2 pins each go through 5k1 (R1/R2) to GND."
+  )
+
+  (comment "NET_GUIDE_2"
+    "+5V_IN goes through SW1 to +5V_SW. +5V_SW then fans out to: ESP32 DevKit 5V pin, RX5808 VCC via R3, and both NeoPixel connectors J4/J5."
+  )
+
+  (comment "NET_GUIDE_3"
+    "Choose ESP32 GPIOs for: LED1_DATA (-> R4 -> J4 pin 2), LED2_DATA (-> R5 -> J5 pin 2), "
+    "SPI/CTRL lines for RX5808 (from J2 pins to J3 pins), and RSSI (J3 pin -> ADC pin on J2)."
+  )
+
+  (comment "NET_GUIDE_4"
+    "Make sure all GND pins (USB-C, ESP32, RX5808, LED strips) are tied to a solid GND plane."
+  )
+
+)

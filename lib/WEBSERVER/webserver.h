@@ -4,6 +4,8 @@
 #include "battery.h"
 #include "laptimer.h"
 #include "racehistory.h"
+#include "storage.h"
+#include "selftest.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -11,7 +13,7 @@
 
 class Webserver {
    public:
-    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist);
+    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808);
     void handleWebUpdate(uint32_t currentTimeMs);
 
    private:
@@ -25,6 +27,9 @@ class Webserver {
     Buzzer *buz;
     Led *led;
     RaceHistory *history;
+    Storage *storage;
+    SelfTest *selftest;
+    RX5808 *rx;
 
     wifi_mode_t wifiMode = WIFI_OFF;
     wl_status_t lastStatus = WL_IDLE_STATUS;

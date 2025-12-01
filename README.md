@@ -23,7 +23,17 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 - 2-3 inch whoops and micro quads
 - Solo training and improvement tracking
 
-## NEW in v1.1.0 - Natural Voice System
+## NEW in v1.2.0 - System Diagnostics & Enhanced Features
+
+**System Self-Test** - Comprehensive hardware/software diagnostics in Configuration page  
+**PiperTTS Integration** - Lower latency TTS with exclusive mode (no pre-recorded file attempts)  
+**Enhanced LED Presets** - Color pickers for Solid, Fade, and Strobe + new Pilot Colour preset  
+**TTS Settings Section** - Dedicated UI section for all voice-related configuration  
+**Complete Config Export** - Import/export now includes all frontend settings (theme, audio, LED)  
+**Automatic Voice Engine** - TTS engine auto-selects based on chosen voice  
+**Bug Fixes** - Fixed audio infinite loop, toggle stretching, voice button opacity
+
+## v1.1.0 - Natural Voice System
 
 **Natural Voice TTS** - ElevenLabs-powered pre-recorded audio (100% offline after generation)  
 **Numbers 0-99** - "11.44" = "eleven point forty-four" (not robotic digit-by-digit)  
@@ -39,9 +49,11 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 
 - **Single Node RSSI Timing** - Accurate lap detection via 5.8GHz signal strength  
 - **ESP32-S3 Support** - Optimized for ESP32-S3-DevKitC-1  
-- **RGB LED Indicators** - Visual feedback for race events (supports external NeoPixels)  
+- **System Self-Test** - Comprehensive diagnostics testing all hardware/software components  
+- **RGB LED Indicators** - Visual feedback with 10 presets including customizable colors  
 - **Web Interface** - Modern Material Design UI with **23 theme options**  
-- **Natural Voice Announcements** - Pre-recorded ElevenLabs TTS with natural number pronunciation  
+- **Dual TTS System** - ElevenLabs pre-recorded + PiperTTS (lower latency) with smart fallback  
+- **Natural Voice Announcements** - Natural number pronunciation ("eleven point forty-four")  
 - **Phonetic Name Support** - Custom TTS pronunciation for pilot names  
 - **Real-time RSSI Graph** - Visual calibration with live feedback  
 - **Enhanced Lap Analysis** - Fastest Lap, Fastest 3 Consecutive, Best 3 Laps, Median  
@@ -52,8 +64,8 @@ FPVGate is a lap timer that measures the time it takes to complete a lap by dete
 - **OTA Updates** - Update firmware wirelessly  
 - **Battery Monitoring** - Low voltage alarm with audio/visual alerts  
 - **Configurable Lap Count** - Set finite laps (1-50) or infinite mode  
-- **Pilot Color Selection** - Choose from 15 colors for personalization  
-- **Config Import/Export** - Backup and restore all settings as JSON  
+- **Pilot Color Selection** - Choose from 15 colors + Pilot Colour LED preset  
+- **Complete Config Export** - Backup all settings including frontend preferences  
 - **Minimum Lap Time** - Prevent false triggers from crashes (default: 5 seconds)  
 - **Theme-Aware Branding** - SVG logo adapts to light/dark themes
 
@@ -213,7 +225,7 @@ The RGB LED provides instant visual feedback:
 
 Navigate to the **Configuration** tab:
 
-The Configuration tab is now organized into three clear sections:
+The Configuration tab is now organized into five clear sections:
 
 #### Race Setup Section
 - **Number of Laps**: Set finite laps (1-50) or infinite mode (0)
@@ -225,12 +237,26 @@ The Configuration tab is now organized into three clear sections:
   - Default: 5 seconds
   - Recommended: 5-8 seconds for tight tracks, 10-15 seconds for larger tracks
 
+#### TTS Settings Section
 - **Announcer Type**: Choose how lap times are announced
   - `None` - Silent
   - `Beep` - Short beep only
   - `Lap Time` - Voice announces your lap time
   - `2 Consecutive Laps` - Announces combined time of last 2 laps
   - `3 Consecutive Laps` - Announces combined time of last 3 laps
+
+- **Lap Announcement Format**: Choose how voice announces laps
+  - `Pilot + Lap + Time` - "Louis Lap 5, 12.34" (Full)
+  - `Lap + Time` - "Lap 5, 12.34"
+  - `Time Only` - "12.34" (Fastest)
+
+- **Voice**: Select TTS engine and voice
+  - `ElevenLabs (Sarah - Energetic)` - Natural pre-recorded audio (default)
+  - `ElevenLabs (Rachel - Calm)` - Natural pre-recorded audio
+  - `ElevenLabs (Adam - Deep Male)` - Natural pre-recorded audio
+  - `ElevenLabs (Antoni - Male)` - Natural pre-recorded audio
+  - `PiperTTS (Lower Latency)` - **Exclusive mode** - uses only PiperTTS, no pre-recorded files
+  - **Note**: ElevenLabs voices try pre-recorded files first, fallback to PiperTTS if missing
   
 - **Announcer Rate**: Voice speed (0.1 = slow, 2.0 = fast)
 
@@ -257,6 +283,31 @@ The Configuration tab is now organized into three clear sections:
   - Live preview swatch shows selected color
   - Default: Blue
 
+#### LED Setup Section
+- **LED Preset**: Choose from 10 visual effects
+  - `Off` - LEDs disabled
+  - `Solid Colour` - **Color picker available** - set custom solid color
+  - `Rainbow Wave` - Smooth rainbow animation (default)
+  - `Color Fade` - **Color picker available** - fade to/from custom color
+  - `Fire` - Flickering fire effect
+  - `Ocean` - Blue wave pattern
+  - `Police` - Red/blue alternating (slowed for visibility)
+  - `Strobe` - **Color picker available** - custom color strobe (slowed for visibility)
+  - `Comet` - Chasing light effect
+  - `Pilot Colour` - Uses your Pilot Color from Pilot Info section
+
+- **Animation Speed**: Controls effect speed (1-20)
+  - Affects Rainbow, Pulse, and animation presets
+  - Default: 5
+
+- **LED Brightness**: Adjust brightness (0-255)
+  - Default: 80
+  - Helps reduce power consumption or match ambient lighting
+
+- **Manual LED Control**: Toggle for manual override
+  - When enabled, race events won't affect LED settings
+  - Useful for keeping LEDs in specific state during practice
+
 #### System Setup Section
 - **Battery Monitoring**: Toggle on/off
   - When enabled, shows voltage and low battery alarm threshold
@@ -273,7 +324,28 @@ The Configuration tab is now organized into three clear sections:
 - **Config Management**:
   - **Download Config**: Export all settings as JSON backup
   - **Import Config**: Restore settings from JSON file
-  - Includes both backend (frequency, thresholds) and frontend (theme, audio) settings
+  - Includes both backend (frequency, thresholds) and frontend (theme, audio, LED) settings
+
+#### System Diagnostics Section
+- **System Self-Test**: Comprehensive hardware and software validation
+  - Tests: RX5808 RSSI Module, Lap Timer, Audio/Buzzer, Configuration, Race History, Web Server, OTA Updates, Storage (LittleFS), EEPROM, WiFi, Battery Monitor, RGB LED
+  - Click **"Run System Self-Test"** to validate all components
+  - Visual pass/fail indicators with test duration and detailed messages
+  - Use for troubleshooting hardware issues or verifying correct setup
+
+**What the Self-Test Validates:**
+- ✅ RX5808 module responding and reading RSSI (checks GPIO wiring)
+- ✅ Lap Timer can communicate with RX5808
+- ✅ Audio/Buzzer functional and audio files present
+- ✅ Configuration values in valid ranges (frequency, RSSI thresholds)
+- ✅ Race History storage accessible
+- ✅ Web Server files loaded (index.html, script.js, style.css)
+- ✅ OTA update space available (>100KB)
+- ✅ LittleFS filesystem mounted and accessible
+- ✅ EEPROM read/write working
+- ✅ WiFi initialized and active
+- ✅ Battery monitor reading voltage
+- ✅ RGB LED all channels functional (R, G, B)
 
 **Don't forget to click "Save Configuration" after making changes!**
 

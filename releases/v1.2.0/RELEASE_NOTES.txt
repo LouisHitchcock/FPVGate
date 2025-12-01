@@ -1,0 +1,183 @@
+FPVGate v1.2.0 - System Diagnostics & Enhanced Features
+========================================================
+
+Release Date: December 1, 2024
+
+WHAT'S NEW
+----------
+
+System Self-Test
+- Comprehensive hardware and software diagnostics
+- Tests 13 components: RX5808, Lap Timer, Audio, Config, Race History, Web Server, OTA, Storage, EEPROM, WiFi, Battery, RGB LED
+- Located in Configuration page under "System Diagnostics"
+- Visual pass/fail indicators with test duration and error details
+- Perfect for troubleshooting hardware issues
+
+PiperTTS Integration
+- New low-latency text-to-speech option
+- Exclusive Mode: When PiperTTS selected, uses only PiperTTS (no pre-recorded files)
+- Fallback Mode: ElevenLabs voices fall back to PiperTTS when files missing
+- Automatic TTS engine selection based on voice choice
+- Added to Voice dropdown as "PiperTTS (Lower Latency)"
+
+Enhanced LED Presets
+- Renamed "Custom Color" to "Solid Colour" (moved to position 1)
+- Color pickers added for Solid Colour, Color Fade, and Strobe presets
+- New "Pilot Colour" preset - uses your pilot color from configuration
+- Slowed Police effect (20x slower) for better visibility
+- Slowed Strobe effect (15x slower) for better visibility
+- Removed redundant presets (Red Pulse, Green Solid, Blue Pulse, White Solid)
+- 10 presets total: Off, Solid Colour, Rainbow, Color Fade, Fire, Ocean, Police, Strobe, Comet, Pilot Colour
+
+UI Improvements
+- New "TTS Settings" section groups all voice-related settings
+- Better organization: Race Setup, TTS Settings, Pilot Info, LED Setup, System Setup
+- Fixed voice control button opacity issue
+- Fixed toggle switch stretching
+- Battery monitoring now unchecked by default
+
+Enhanced Config Import/Export
+- Now includes ALL frontend settings
+- Exports: Theme, Audio settings, Pilot settings, LED settings, Battery toggle
+- Complete backup and restore capability
+
+BUG FIXES
+---------
+
+- Fixed audio infinite loop when pilot-specific files missing
+- Fixed Voice Control button styling (disabled state too dark)
+- Fixed toggle switch stretching issue in Configuration page
+- Added include guards to prevent compilation errors (RX5808.h, kalman.h, laptimer.h)
+
+TECHNICAL DETAILS
+-----------------
+
+Memory Usage:
+- Flash: 54.3% (996,581 bytes)
+- RAM: 16.7% (54,632 bytes)
+- Filesystem: 4.65 MB (1.79 MB compressed)
+
+Requirements:
+- ESP32-S3-DevKitC-1 (8MB Flash)
+- RX5808 module (SPI modded)
+- 5V power supply
+
+INSTALLATION
+------------
+
+Option 1: Flash with esptool (All Platforms)
+
+1. Install esptool:
+   pip install esptool
+
+2. Download all 4 binary files from this release
+
+3. Connect ESP32-S3 via USB
+
+4. Flash all files:
+   esptool.py --chip esp32s3 --port COM12 --baud 460800 write_flash -z \
+     0x0000 bootloader-esp32s3.bin \
+     0x8000 partitions-esp32s3.bin \
+     0x10000 firmware-esp32s3.bin \
+     0x390000 littlefs-esp32s3.bin
+
+   Replace COM12 with your port:
+   - Windows: COM3, COM4, etc. (check Device Manager)
+   - Linux: /dev/ttyUSB0
+   - Mac: /dev/cu.usbserial-*
+
+Option 2: ESP Flash Tool (Windows)
+
+1. Download ESP Flash Tool from Espressif
+2. Select ESP32-S3 chip
+3. Add files at these addresses:
+   - 0x0000 -> bootloader-esp32s3.bin
+   - 0x8000 -> partitions-esp32s3.bin
+   - 0x10000 -> firmware-esp32s3.bin
+   - 0x390000 -> littlefs-esp32s3.bin
+4. Click Start
+
+FIRST USE
+---------
+
+1. Power on FPVGate
+2. Connect to WiFi: FPVGate_XXXX (password: fpvgate1)
+3. Navigate to: http://www.fpvgate.xyz or http://192.168.4.1
+4. Go to Configuration tab
+5. Run System Self-Test to verify all components
+6. Set your Band/Channel, Pilot Info, and preferences
+7. Go to Calibration tab and calibrate RSSI thresholds
+8. Start racing!
+
+UPGRADING FROM v1.1.0
+---------------------
+
+Simply flash the new firmware and filesystem. Your settings will be preserved in EEPROM, but we recommend:
+
+1. Download your config before upgrading (Configuration -> Download Config)
+2. Flash v1.2.0 using instructions above
+3. Import your config if needed (Configuration -> Import Config)
+4. Run System Self-Test to verify everything works
+
+Note: Race History will be erased when uploading filesystem. Download races first if you want to keep them.
+
+WHAT'S TESTED
+-------------
+
+All 13 system components:
+- RX5808 RSSI Module (GPIO wiring check)
+- Lap Timer communication
+- Audio/Buzzer functionality
+- Configuration validity
+- Race History storage
+- Web Server files
+- OTA update space
+- LittleFS filesystem
+- EEPROM read/write
+- WiFi connectivity
+- Battery monitoring
+- RGB LED channels
+
+FILES INCLUDED
+--------------
+
+bootloader-esp32s3.bin - ESP32-S3 bootloader (15 KB)
+partitions-esp32s3.bin - Partition table (3 KB)
+firmware-esp32s3.bin - Main application (997 KB)
+littlefs-esp32s3.bin - Web interface + audio files (4.65 MB)
+
+DOCUMENTATION
+-------------
+
+- Quick Start Guide: https://github.com/LouisHitchcock/FPVGate/blob/main/QUICKSTART.md
+- Full README: https://github.com/LouisHitchcock/FPVGate/blob/main/README.md
+- Changelog: https://github.com/LouisHitchcock/FPVGate/blob/main/CHANGELOG.md
+
+SUPPORT
+-------
+
+- Report issues: https://github.com/LouisHitchcock/FPVGate/issues
+- Discussions: https://github.com/LouisHitchcock/FPVGate/discussions
+
+DEFAULT SETTINGS
+----------------
+
+WiFi SSID: FPVGate_XXXX (XXXX = last 4 MAC digits)
+WiFi Password: fpvgate1
+Default Channel: RaceBand 8 (5917 MHz)
+Web Address: http://www.fpvgate.xyz or http://192.168.4.1
+Minimum Lap Time: 5 seconds
+Lap Count: Infinite (0)
+Theme: Material Oceanic
+LED Preset: Rainbow Wave
+Announcer: None
+Battery Monitor: Disabled
+
+CREDITS
+-------
+
+FPVGate v1.2.0 by Louis Hitchcock
+Based on PhobosLT by Pawel Stefanski
+Timing logic inspired by RotorHazard
+
+License: MIT

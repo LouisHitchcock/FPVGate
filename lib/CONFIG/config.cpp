@@ -57,6 +57,9 @@ void Config::toJson(AsyncResponseStream& destination) {
     config["enterRssi"] = conf.enterRssi;
     config["exitRssi"] = conf.exitRssi;
     config["maxLaps"] = conf.maxLaps;
+    config["ledMode"] = conf.ledMode;
+    config["ledBrightness"] = conf.ledBrightness;
+    config["ledColor"] = conf.ledColor;
     config["name"] = conf.pilotName;
     config["ssid"] = conf.ssid;
     config["pwd"] = conf.password;
@@ -73,6 +76,9 @@ void Config::toJsonString(char* buf) {
     config["enterRssi"] = conf.enterRssi;
     config["exitRssi"] = conf.exitRssi;
     config["maxLaps"] = conf.maxLaps;
+    config["ledMode"] = conf.ledMode;
+    config["ledBrightness"] = conf.ledBrightness;
+    config["ledColor"] = conf.ledColor;
     config["name"] = conf.pilotName;
     config["ssid"] = conf.ssid;
     config["pwd"] = conf.password;
@@ -110,6 +116,18 @@ void Config::fromJson(JsonObject source) {
     }
     if (source["maxLaps"] != conf.maxLaps) {
         conf.maxLaps = source["maxLaps"];
+        modified = true;
+    }
+    if (source.containsKey("ledMode") && source["ledMode"] != conf.ledMode) {
+        conf.ledMode = source["ledMode"];
+        modified = true;
+    }
+    if (source.containsKey("ledBrightness") && source["ledBrightness"] != conf.ledBrightness) {
+        conf.ledBrightness = source["ledBrightness"];
+        modified = true;
+    }
+    if (source.containsKey("ledColor") && source["ledColor"] != conf.ledColor) {
+        conf.ledColor = source["ledColor"];
         modified = true;
     }
     if (source["name"] != conf.pilotName) {
@@ -158,6 +176,18 @@ uint8_t Config::getMaxLaps() {
     return conf.maxLaps;
 }
 
+uint8_t Config::getLedMode() {
+    return conf.ledMode;
+}
+
+uint8_t Config::getLedBrightness() {
+    return conf.ledBrightness;
+}
+
+uint32_t Config::getLedColor() {
+    return conf.ledColor;
+}
+
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -171,6 +201,9 @@ void Config::setDefaults(void) {
     conf.enterRssi = 120;
     conf.exitRssi = 100;
     conf.maxLaps = 0;
+    conf.ledMode = 3;  // Rainbow wave by default
+    conf.ledBrightness = 80;
+    conf.ledColor = 0xFF00FF;  // Purple by default
     strlcpy(conf.ssid, "", sizeof(conf.ssid));
     strlcpy(conf.password, "", sizeof(conf.password));
     strlcpy(conf.pilotName, "", sizeof(conf.pilotName));

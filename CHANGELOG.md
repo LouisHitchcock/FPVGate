@@ -5,6 +5,61 @@ All notable changes to FPVGate will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-12-01
+
+### Added
+- **System Self-Test Functionality**: Comprehensive diagnostics for hardware and software validation
+  - Tests: RX5808 RSSI module, Lap Timer, Audio/Buzzer, Configuration, Race History, Web Server, OTA Updates, Storage (LittleFS), EEPROM, WiFi, Battery Monitor, RGB LED
+  - Accessible via "System Diagnostics" section in Configuration page
+  - Visual pass/fail indicators with test duration and detailed error messages
+  - REST API endpoint `/api/selftest` for programmatic access
+- **PiperTTS Integration**: Lower latency text-to-speech option
+  - **Exclusive Mode**: When PiperTTS is selected, it's used exclusively for all announcements (no pre-recorded file attempts)
+  - **Fallback Mode**: ElevenLabs voices now fall back to PiperTTS only when pre-recorded files fail
+  - Added to Voice dropdown as "PiperTTS (Lower Latency)"
+  - Automatic TTS engine selection based on voice choice
+- **Enhanced LED Presets**:
+  - Renamed "Custom Color" to "Solid Colour" and moved to position 1
+  - **Color Pickers**: Added for Solid Colour, Color Fade, and Strobe presets
+  - **New Preset**: "Pilot Colour" - uses pilot's color from Pilot Info section
+  - **Slowed Effects**: Police (20x slower) and Strobe (15x slower), scaled by effect speed
+  - Removed redundant presets: Red Pulse, Green Solid, Blue Pulse, White Solid
+- **Enhanced Config Import/Export**: Now includes all frontend settings
+  - Theme, Audio settings (format, voice, TTS engine)
+  - Pilot settings (callsign, phonetic, color)
+  - LED settings (preset, colors, speed, manual override)
+  - Battery monitoring toggle state
+
+### Changed
+- **UI Organization**: Created dedicated "TTS Settings" section in Configuration page
+  - Groups: Announcer Type, Lap Announcement Format, Voice, Announcer Rate, Voice Control buttons
+  - Improved logical organization of audio-related settings
+- **Voice Selection Logic**: Automatically sets TTS engine based on selected voice
+  - PiperTTS voice → sets engine to 'piper'
+  - ElevenLabs voices → sets engine to 'webspeech'
+- **LED Preset Organization**: Reordered for better usability
+  - Order: Off, Solid Colour, Rainbow, Color Fade, Fire, Ocean, Police, Strobe, Comet, Pilot Colour
+- **Battery Monitoring**: Now unchecked by default
+
+### Fixed
+- **Audio Infinite Loop Bug**: Fixed recursive `speak()` calls when pilot-specific audio files weren't found
+  - Changed to direct `useTtsFallback()` calls in `speakComplexWithPilot()` and `speakComplexLapTime()`
+  - Prevents infinite recursion when custom pilot audio is missing
+- **Voice Control Button Styling**: Removed opacity from disabled state for better visibility
+- **Toggle Switch Stretching**: Fixed CSS selector to exclude toggle switches from min-width rule
+- **Include Guards**: Added proper include guards to RX5808.h, kalman.h, and laptimer.h
+  - Prevents redefinition errors during compilation
+  - Enables modular header inclusion
+
+### Removed
+- **TTS Fallback Engine Dropdown**: Removed from UI (now automatically determined by voice selection)
+
+### Technical
+- **Memory Usage**: Flash: 54.3% (996,581 bytes), RAM: 16.7% (54,632 bytes)
+- **New Test Infrastructure**: SelfTest class with 13 individual test methods
+- **Forward Declarations**: Used in selftest.h to avoid circular dependencies
+- **Filesystem**: 4,653,056 bytes (1,792,357 compressed) - includes updated UI and audio files
+
 ## [1.1.0] - 2025-11-28
 
 ### Added - Natural Voice TTS System
@@ -111,5 +166,6 @@ FPVGate follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features, backwards compatible
 - **PATCH**: Bug fixes, minor improvements
 
+[1.2.0]: https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.2.0
 [1.1.0]: https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.1.0
 [1.0.0]: https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.0.0

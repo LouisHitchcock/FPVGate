@@ -1,3 +1,6 @@
+#ifndef RX5808_H
+#define RX5808_H
+
 #include <stdint.h>
 
 #define RX5808_MIN_TUNETIME 35    // after set freq need to wait this long before read RSSI
@@ -38,3 +41,5 @@ class RX5808 {
 
     static uint16_t freqMhzToRegVal(uint16_t freqInMhz);
 };
+
+#endif

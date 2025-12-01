@@ -1,3 +1,6 @@
+#ifndef KALMAN_H
+#define KALMAN_H
+
 #include <stdint.h>
 
 class KalmanFilter {
@@ -17,3 +20,5 @@ class KalmanFilter {
     float cov;  // NaN
     float x;    // NaN -- estimated signal without noise
 };
+
+#endif

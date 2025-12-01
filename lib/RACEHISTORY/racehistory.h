@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include "storage.h"
 
 #define MAX_RACES 50
 #define RACES_FILE "/races.json"
@@ -26,7 +27,7 @@ struct RaceSession {
 class RaceHistory {
    public:
     RaceHistory();
-    bool init();
+    bool init(Storage* storage);
     bool saveRace(const RaceSession& race);
     bool loadRaces();
     bool deleteRace(uint32_t timestamp);
@@ -41,6 +42,7 @@ class RaceHistory {
     bool saveToFile();
     bool loadFromFile();
     std::vector<RaceSession> races;
+    Storage* storage;
 };
 
 #endif

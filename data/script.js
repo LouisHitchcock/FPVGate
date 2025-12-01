@@ -132,7 +132,41 @@ onload = function (e) {
       const lapFormatSelect = document.getElementById('lapFormatSelect');
       const voiceSelect = document.getElementById('voiceSelect');
       if (lapFormatSelect) lapFormatSelect.value = lapFormat;
-      if (voiceSelect) voiceSelect.value = selectedVoice;
+      if (voiceSelect) voiceSelect.value = savedVoice;
+      
+      // Load LED settings from config (if available)
+      const ledPresetSelect = document.getElementById('ledPreset');
+      const ledBrightnessInput = document.getElementById('ledBrightness');
+      const ledColorInput = document.getElementById('ledColor');
+      const ledManualOverrideToggle = document.getElementById('ledManualOverride');
+      const customColorSection = document.getElementById('customColorSection');
+      
+      // Set defaults or load from backend config
+      if (config.ledMode !== undefined) {
+        // Map ledMode to preset (0-3 are old modes, map to appropriate presets)
+        let preset = 1; // Default to Rainbow Wave
+        if (config.ledMode === 0) preset = 0; // Off
+        else if (config.ledMode === 1) preset = 3; // Green solid
+        else if (config.ledMode === 2) preset = 2; // Red pulse
+        else if (config.ledMode === 3) preset = 1; // Rainbow wave
+        if (ledPresetSelect) ledPresetSelect.value = preset;
+      }
+      
+      if (config.ledBrightness !== undefined && ledBrightnessInput) {
+        ledBrightnessInput.value = config.ledBrightness;
+        updateLedBrightness(ledBrightnessInput, config.ledBrightness);
+      }
+      
+      if (config.ledColor !== undefined && ledColorInput) {
+        // Convert color integer to hex string
+        const hexColor = '#' + ('000000' + config.ledColor.toString(16)).slice(-6).toUpperCase();
+        ledColorInput.value = hexColor;
+      }
+      
+      // Show custom color section if preset 9 is selected
+      if (ledPresetSelect && customColorSection) {
+        customColorSection.style.display = (parseInt(ledPresetSelect.value) === 9) ? 'flex' : 'none';
+      }
     });
 };
 
@@ -596,8 +630,22 @@ function saveVoiceSelection() {
     selectedVoice = voiceSelect.value;
     localStorage.setItem('selectedVoice', selectedVoice);
     console.log('Voice selection saved:', selectedVoice);
-    // Show reminder to regenerate audio files
-    alert('Voice changed to ' + voiceSelect.options[voiceSelect.selectedIndex].text + '\n\nTo use this voice, you need to regenerate audio files with the generate_voice_files.py script.');
+    
+    // If PiperTTS selected, use piper engine, otherwise use webspeech for fallback
+    if (selectedVoice === 'piper') {
+      localStorage.setItem('ttsEngine', 'piper');
+      if (audioAnnouncer) {
+        audioAnnouncer.setTtsEngine('piper');
+      }
+    } else {
+      // ElevenLabs voices use webspeech for fallback
+      localStorage.setItem('ttsEngine', 'webspeech');
+      if (audioAnnouncer) {
+        audioAnnouncer.setTtsEngine('webspeech');
+      }
+      // Show reminder to regenerate audio files for ElevenLabs voices
+      alert('Voice changed to ' + voiceSelect.options[voiceSelect.selectedIndex].text + '\n\nTo use this voice, you need to regenerate audio files with the generate_voice_files.py script.');
+    }
   }
 }
 
@@ -645,6 +693,153 @@ function toggleBatteryMonitor(enabled) {
   if (batterySection) {
     batterySection.style.display = enabled ? 'block' : 'none';
   }
+}
+
+// LED control functions
+function changeLedPreset() {
+  const presetSelect = document.getElementById('ledPreset');
+  const solidColorSection = document.getElementById('solidColorSection');
+  const fadeColorSection = document.getElementById('fadeColorSection');
+  const strobeColorSection = document.getElementById('strobeColorSection');
+  const preset = parseInt(presetSelect.value);
+  
+  // Show/hide color pickers based on preset
+  if (solidColorSection) {
+    solidColorSection.style.display = (preset === 1) ? 'flex' : 'none';
+  }
+  if (fadeColorSection) {
+    fadeColorSection.style.display = (preset === 3) ? 'flex' : 'none';
+  }
+  if (strobeColorSection) {
+    strobeColorSection.style.display = (preset === 7) ? 'flex' : 'none';
+  }
+  
+  // If Pilot Colour preset (9) is selected, use pilot color
+  if (preset === 9) {
+    const pilotColor = document.getElementById('pilotColor')?.value || '#0080FF';
+    const color = pilotColor.substring(1); // Remove #
+    fetch('/led/color', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `color=${color}`
+    }).catch(err => console.error('Failed to set pilot color:', err));
+  }
+  
+  fetch('/led/preset', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `preset=${preset}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED preset changed:', data))
+    .catch(err => console.error('Failed to change LED preset:', err));
+}
+
+function setSolidColor() {
+  const colorInput = document.getElementById('ledSolidColor');
+  const color = colorInput.value.substring(1);
+  
+  fetch('/led/color', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `color=${color}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED solid color changed:', data))
+    .catch(err => console.error('Failed to change LED solid color:', err));
+}
+
+function setFadeColor() {
+  const colorInput = document.getElementById('ledFadeColor');
+  const color = colorInput.value.substring(1);
+  
+  fetch('/led/fadecolor', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `color=${color}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED fade color changed:', data))
+    .catch(err => console.error('Failed to change LED fade color:', err));
+}
+
+function setStrobeColor() {
+  const colorInput = document.getElementById('ledStrobeColor');
+  const color = colorInput.value.substring(1);
+  
+  fetch('/led/strobecolor', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `color=${color}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED strobe color changed:', data))
+    .catch(err => console.error('Failed to change LED strobe color:', err));
+}
+
+function updateLedBrightness(obj, value) {
+  const brightness = parseInt(value);
+  $(obj).parent().find('span').text(brightness);
+  
+  fetch('/led/brightness', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `brightness=${brightness}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED brightness changed:', data))
+    .catch(err => console.error('Failed to change LED brightness:', err));
+}
+
+function updateLedSpeed(obj, value) {
+  const speed = parseInt(value);
+  $(obj).parent().find('span').text(speed);
+  
+  fetch('/led/speed', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `speed=${speed}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED speed changed:', data))
+    .catch(err => console.error('Failed to change LED speed:', err));
+}
+
+function toggleLedManualOverride(enabled) {
+  const enable = enabled ? 1 : 0;
+  
+  fetch('/led/override', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `enable=${enable}`
+  })
+    .then(response => response.json())
+    .then(data => console.log('LED manual override:', enabled ? 'enabled' : 'disabled', data))
+    .catch(err => console.error('Failed to toggle LED manual override:', err));
 }
 function generateAudio() {
   if (!audioEnabled) {
@@ -899,6 +1094,18 @@ function addManualLap() {
     // Calculate lap time
     const lapTime = totalMs - (lapNo >= 0 ? lapTimes.reduce((a, b) => a + (b * 1000), 0) : 0);
     const lapTimeSeconds = (lapTime / 1000).toFixed(2);
+    
+    // Trigger white LED flash
+    fetch('/timer/lap', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      }
+    })
+      .then(response => response.json())
+      .then(data => console.log('LED flash triggered:', data))
+      .catch(err => console.error('Failed to trigger LED flash:', err));
     
     addLap(lapTimeSeconds);
   }
@@ -1423,11 +1630,29 @@ function downloadConfig() {
   fetch('/config')
     .then(response => response.json())
     .then(config => {
-      // Add client-side settings
+      // Add all client-side settings
       const fullConfig = {
         ...config,
+        // Theme
         theme: localStorage.getItem('theme') || 'oceanic',
+        // Audio settings
         audioEnabled: audioEnabled,
+        lapFormat: localStorage.getItem('lapFormat') || 'full',
+        selectedVoice: localStorage.getItem('selectedVoice') || 'default',
+        ttsEngine: localStorage.getItem('ttsEngine') || 'piper',
+        // Pilot frontend settings
+        pilotCallsign: localStorage.getItem('pilotCallsign') || '',
+        pilotPhonetic: localStorage.getItem('pilotPhonetic') || '',
+        pilotColor: localStorage.getItem('pilotColor') || '#0080FF',
+        // LED settings (get from current UI state)
+        ledPreset: parseInt(document.getElementById('ledPreset')?.value || 2),
+        ledSolidColor: document.getElementById('ledSolidColor')?.value || '#FF00FF',
+        ledFadeColor: document.getElementById('ledFadeColor')?.value || '#0080FF',
+        ledStrobeColor: document.getElementById('ledStrobeColor')?.value || '#FFFFFF',
+        ledSpeed: parseInt(document.getElementById('ledSpeed')?.value || 5),
+        ledManualOverride: document.getElementById('ledManualOverride')?.checked || false,
+        // Battery monitoring
+        batteryMonitoring: document.getElementById('batteryMonitorToggle')?.checked !== false,
         timestamp: new Date().toISOString()
       };
       
@@ -1482,18 +1707,65 @@ function importConfig(input) {
       .then(data => {
         console.log('Config imported:', data);
         
-        // Apply client-side settings
+        // Apply all client-side settings
+        // Theme
         if (config.theme) {
           localStorage.setItem('theme', config.theme);
-          const themeSelect = document.getElementById('themeSelect');
-          if (themeSelect) {
-            themeSelect.value = config.theme;
-            changeTheme();
-          }
+        }
+        // Audio settings
+        if (config.lapFormat) {
+          localStorage.setItem('lapFormat', config.lapFormat);
+        }
+        if (config.selectedVoice) {
+          localStorage.setItem('selectedVoice', config.selectedVoice);
+        }
+        if (config.ttsEngine) {
+          localStorage.setItem('ttsEngine', config.ttsEngine);
+        }
+        // Pilot frontend settings
+        if (config.pilotCallsign !== undefined) {
+          localStorage.setItem('pilotCallsign', config.pilotCallsign);
+        }
+        if (config.pilotPhonetic !== undefined) {
+          localStorage.setItem('pilotPhonetic', config.pilotPhonetic);
+        }
+        if (config.pilotColor) {
+          localStorage.setItem('pilotColor', config.pilotColor);
+        }
+        // LED settings
+        if (config.ledPreset !== undefined) {
+          const ledPresetSelect = document.getElementById('ledPreset');
+          if (ledPresetSelect) ledPresetSelect.value = config.ledPreset;
+        }
+        if (config.ledSolidColor) {
+          const ledSolidColor = document.getElementById('ledSolidColor');
+          if (ledSolidColor) ledSolidColor.value = config.ledSolidColor;
+        }
+        if (config.ledFadeColor) {
+          const ledFadeColor = document.getElementById('ledFadeColor');
+          if (ledFadeColor) ledFadeColor.value = config.ledFadeColor;
+        }
+        if (config.ledStrobeColor) {
+          const ledStrobeColor = document.getElementById('ledStrobeColor');
+          if (ledStrobeColor) ledStrobeColor.value = config.ledStrobeColor;
+        }
+        if (config.ledSpeed !== undefined) {
+          const ledSpeed = document.getElementById('ledSpeed');
+          if (ledSpeed) ledSpeed.value = config.ledSpeed;
+        }
+        if (config.ledManualOverride !== undefined) {
+          const ledManualOverride = document.getElementById('ledManualOverride');
+          if (ledManualOverride) ledManualOverride.checked = config.ledManualOverride;
+        }
+        // Battery monitoring
+        if (config.batteryMonitoring !== undefined) {
+          const batteryToggle = document.getElementById('batteryMonitorToggle');
+          if (batteryToggle) batteryToggle.checked = config.batteryMonitoring;
         }
         
+        alert('Configuration imported successfully! Page will reload.');
         // Reload config to update UI
-        location.reload();
+        setTimeout(() => location.reload(), 500);
       })
       .catch(error => {
         console.error('Error importing config:', error);
@@ -1506,5 +1778,413 @@ function importConfig(input) {
   };
   reader.readAsText(file);
   input.value = ''; // Reset file input
+}
+
+// Calibration Wizard
+let wizardState = {
+  recording: false,
+  data: [],
+  markers: [], // Array of {index, type: 'entry'|'exit', lap: 1|2|3}
+  currentLap: 1,
+  currentMarkerType: 'entry',
+  chart: null,
+  calculatedEnter: 0,
+  calculatedExit: 0
+};
+
+function startCalibrationWizard() {
+  // Reset wizard state
+  wizardState = {
+    recording: false,
+    data: [],
+    markers: [],
+    currentLap: 1,
+    currentMarkerType: 'entry',
+    chart: null,
+    calculatedEnter: 0,
+    calculatedExit: 0
+  };
+  
+  // Show modal and recording screen
+  document.getElementById('calibrationWizardModal').style.display = 'flex';
+  document.getElementById('wizardRecording').style.display = 'block';
+  document.getElementById('wizardMarking').style.display = 'none';
+  document.getElementById('wizardResults').style.display = 'none';
+  
+  // Start recording
+  fetch('/calibration/start', { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Calibration wizard started:', data);
+      wizardState.recording = true;
+      wizardRecordingLoop();
+    })
+    .catch(error => {
+      console.error('Error starting calibration wizard:', error);
+      alert('Error starting calibration wizard');
+      closeCalibrationWizard();
+    });
+}
+
+function wizardRecordingLoop() {
+  if (!wizardState.recording) return;
+  
+  // Fetch current sample count
+  fetch('/calibration/data')
+    .then(response => response.json())
+    .then(data => {
+      document.getElementById('wizardSampleCount').textContent = `Samples: ${data.count}`;
+      if (wizardState.recording) {
+        setTimeout(wizardRecordingLoop, 200);
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching calibration data:', error);
+    });
+}
+
+function stopCalibrationWizard() {
+  wizardState.recording = false;
+  
+  fetch('/calibration/stop', { method: 'POST' })
+    .then(response => response.json())
+    .then(() => {
+      // Fetch recorded data
+      return fetch('/calibration/data');
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Calibration data received:', data.count, 'samples');
+      wizardState.data = data.data;
+      
+      if (wizardState.data.length < 10) {
+        alert('Not enough data recorded. Please try again with at least 3 clear gate passes.');
+        closeCalibrationWizard();
+        return;
+      }
+      
+      // Show marking screen
+      document.getElementById('wizardRecording').style.display = 'none';
+      document.getElementById('wizardMarking').style.display = 'block';
+      
+      // Draw chart
+      drawWizardChart();
+    })
+    .catch(error => {
+      console.error('Error stopping calibration wizard:', error);
+      alert('Error processing calibration data');
+      closeCalibrationWizard();
+    });
+}
+
+function drawWizardChart() {
+  const canvas = document.getElementById('wizardChart');
+  const ctx = canvas.getContext('2d');
+  
+  // Set canvas size
+  canvas.width = canvas.offsetWidth;
+  canvas.height = 400;
+  
+  const width = canvas.width;
+  const height = canvas.height;
+  const padding = 40;
+  const chartWidth = width - 2 * padding;
+  const chartHeight = height - 2 * padding;
+  
+  // Get RSSI values
+  const rssiValues = wizardState.data.map(d => d.rssi);
+  const minRssi = Math.min(...rssiValues);
+  const maxRssi = Math.max(...rssiValues);
+  const rssiRange = maxRssi - minRssi;
+  
+  // Clear canvas
+  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg-primary').trim();
+  ctx.fillRect(0, 0, width, height);
+  
+  // Draw axes
+  ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--border-color').trim();
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding, padding);
+  ctx.lineTo(padding, height - padding);
+  ctx.lineTo(width - padding, height - padding);
+  ctx.stroke();
+  
+  // Draw RSSI line
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  
+  for (let i = 0; i < wizardState.data.length; i++) {
+    const x = padding + (i / (wizardState.data.length - 1)) * chartWidth;
+    const rssi = wizardState.data[i].rssi;
+    const y = height - padding - ((rssi - minRssi) / rssiRange) * chartHeight;
+    
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+  
+  // Draw markers
+  wizardState.markers.forEach(marker => {
+    const x = padding + (marker.index / (wizardState.data.length - 1)) * chartWidth;
+    const rssi = wizardState.data[marker.index].rssi;
+    const y = height - padding - ((rssi - minRssi) / rssiRange) * chartHeight;
+    
+    ctx.fillStyle = marker.type === 'entry' ? '#ff5555' : '#ff9f43';
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    // Draw label
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`L${marker.lap} ${marker.type === 'entry' ? 'E' : 'X'}`, x, y - 12);
+  });
+  
+  // Add click listener
+  canvas.onclick = function(event) {
+    const rect = canvas.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    
+    // Convert click position to data index
+    const dataIndex = Math.round(((clickX - padding) / chartWidth) * (wizardState.data.length - 1));
+    
+    if (dataIndex >= 0 && dataIndex < wizardState.data.length) {
+      addWizardMarker(dataIndex);
+    }
+  };
+}
+
+function addWizardMarker(index) {
+  // Check if we're done
+  if (wizardState.currentLap > 3) return;
+  
+  // Add marker
+  wizardState.markers.push({
+    index: index,
+    type: wizardState.currentMarkerType,
+    lap: wizardState.currentLap
+  });
+  
+  // Update state
+  if (wizardState.currentMarkerType === 'entry') {
+    wizardState.currentMarkerType = 'exit';
+    updateWizardStatus(`Lap ${wizardState.currentLap}: Mark Exit Point`);
+  } else {
+    wizardState.currentLap++;
+    wizardState.currentMarkerType = 'entry';
+    if (wizardState.currentLap <= 3) {
+      updateWizardStatus(`Lap ${wizardState.currentLap}: Mark Entry Point`);
+    } else {
+      updateWizardStatus('All laps marked! Click "Calculate Thresholds"');
+      document.getElementById('wizardCalculateButton').disabled = false;
+    }
+  }
+  
+  // Enable undo button
+  document.getElementById('wizardUndoButton').disabled = false;
+  
+  // Redraw chart
+  drawWizardChart();
+}
+
+function undoLastMarker() {
+  if (wizardState.markers.length === 0) return;
+  
+  // Remove last marker
+  const removed = wizardState.markers.pop();
+  
+  // Update state
+  wizardState.currentLap = removed.lap;
+  wizardState.currentMarkerType = removed.type;
+  
+  updateWizardStatus(`Lap ${wizardState.currentLap}: Mark ${wizardState.currentMarkerType === 'entry' ? 'Entry' : 'Exit'} Point`);
+  
+  // Disable buttons if needed
+  if (wizardState.markers.length === 0) {
+    document.getElementById('wizardUndoButton').disabled = true;
+  }
+  document.getElementById('wizardCalculateButton').disabled = true;
+  
+  // Redraw chart
+  drawWizardChart();
+}
+
+function updateWizardStatus(text) {
+  document.getElementById('wizardMarkingStatus').textContent = text;
+}
+
+function calculateThresholds() {
+  // Get entry and exit RSSI values
+  const entryMarkers = wizardState.markers.filter(m => m.type === 'entry');
+  const exitMarkers = wizardState.markers.filter(m => m.type === 'exit');
+  
+  if (entryMarkers.length !== 3 || exitMarkers.length !== 3) {
+    alert('Please mark all 3 laps before calculating thresholds');
+    return;
+  }
+  
+  // Get RSSI values at marker points
+  const entryRssiValues = entryMarkers.map(m => wizardState.data[m.index].rssi);
+  const exitRssiValues = exitMarkers.map(m => wizardState.data[m.index].rssi);
+  
+  // Calculate average/median
+  const avgEntryRssi = entryRssiValues.reduce((a, b) => a + b, 0) / entryRssiValues.length;
+  const avgExitRssi = exitRssiValues.reduce((a, b) => a + b, 0) / exitRssiValues.length;
+  
+  // Apply safety margins
+  // Enter threshold: 85% of average entry peak (to ensure we don't miss lower peaks)
+  // Exit threshold: 110% of average exit value (to ensure we don't exit too early)
+  let calculatedEnter = Math.round(avgEntryRssi * 0.85);
+  let calculatedExit = Math.round(avgExitRssi * 1.10);
+  
+  // Ensure enter > exit with minimum gap
+  if (calculatedEnter <= calculatedExit) {
+    calculatedEnter = calculatedExit + 20;
+  }
+  
+  // Clamp to valid range
+  calculatedEnter = Math.max(50, Math.min(255, calculatedEnter));
+  calculatedExit = Math.max(50, Math.min(255, calculatedExit));
+  
+  // Store calculated values
+  wizardState.calculatedEnter = calculatedEnter;
+  wizardState.calculatedExit = calculatedExit;
+  
+  // Show results screen
+  document.getElementById('wizardMarking').style.display = 'none';
+  document.getElementById('wizardResults').style.display = 'block';
+  
+  document.getElementById('calculatedEnterRssi').textContent = calculatedEnter;
+  document.getElementById('calculatedExitRssi').textContent = calculatedExit;
+}
+
+function applyCalculatedThresholds() {
+  // Apply to sliders
+  enterRssiInput.value = wizardState.calculatedEnter;
+  exitRssiInput.value = wizardState.calculatedExit;
+  updateEnterRssi(enterRssiInput, wizardState.calculatedEnter);
+  updateExitRssi(exitRssiInput, wizardState.calculatedExit);
+  
+  // Save to backend
+  saveConfig();
+  
+  // Close wizard
+  closeCalibrationWizard();
+  
+  // Show success message
+  alert('Calibration thresholds applied! You can now fine-tune them manually if needed.');
+}
+
+function cancelCalibrationWizard() {
+  if (wizardState.recording) {
+    fetch('/calibration/stop', { method: 'POST' })
+      .then(() => {
+        closeCalibrationWizard();
+      })
+      .catch(error => {
+        console.error('Error stopping calibration:', error);
+        closeCalibrationWizard();
+      });
+  } else {
+    closeCalibrationWizard();
+  }
+}
+
+function closeCalibrationWizard() {
+  wizardState.recording = false;
+  document.getElementById('calibrationWizardModal').style.display = 'none';
+  document.getElementById('wizardRecording').style.display = 'none';
+  document.getElementById('wizardMarking').style.display = 'none';
+  document.getElementById('wizardResults').style.display = 'none';
+}
+
+// Self-Test Functions
+function runSelfTest() {
+  const button = document.getElementById('runTestsButton');
+  const loadingDiv = document.getElementById('testLoading');
+  const resultsDiv = document.getElementById('testResults');
+  const resultsListDiv = document.getElementById('testResultsList');
+  
+  // Show loading, hide results
+  button.disabled = true;
+  button.textContent = 'Running Tests...';
+  loadingDiv.style.display = 'block';
+  resultsDiv.style.display = 'none';
+  
+  fetch('/api/selftest')
+    .then(response => response.json())
+    .then(data => {
+      // Hide loading
+      loadingDiv.style.display = 'none';
+      
+      // Build results HTML
+      let html = '';
+      let allPassed = true;
+      
+      data.tests.forEach(test => {
+        if (!test.passed) allPassed = false;
+        
+        const statusIcon = test.passed ? '✓' : '✗';
+        const statusColor = test.passed ? '#4ade80' : '#ff5555';
+        const bgColor = test.passed ? 'rgba(74, 222, 128, 0.1)' : 'rgba(255, 85, 85, 0.1)';
+        
+        html += `
+          <div style="margin-bottom: 12px; padding: 12px; background-color: ${bgColor}; border-left: 4px solid ${statusColor}; border-radius: 4px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 20px; color: ${statusColor};">${statusIcon}</span>
+                <span style="font-weight: bold; font-size: 16px;">${test.name}</span>
+              </div>
+              <span style="font-size: 12px; color: var(--secondary-color);">${test.duration}ms</span>
+            </div>
+            <div style="font-size: 14px; color: var(--secondary-color); margin-left: 28px;">
+              ${test.details}
+            </div>
+          </div>
+        `;
+      });
+      
+      // Add summary
+      const passedCount = data.tests.filter(t => t.passed).length;
+      const totalCount = data.tests.length;
+      const summaryColor = allPassed ? '#4ade80' : '#ff9f43';
+      
+      html = `
+        <div style="margin-bottom: 20px; padding: 16px; background-color: var(--bg-secondary); border-radius: 8px; text-align: center;">
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px; color: ${summaryColor};">
+            ${allPassed ? 'All Tests Passed!' : 'Some Tests Failed'}
+          </div>
+          <div style="font-size: 14px; color: var(--secondary-color);">
+            ${passedCount} / ${totalCount} tests passed
+          </div>
+        </div>
+      ` + html;
+      
+      resultsListDiv.innerHTML = html;
+      resultsDiv.style.display = 'block';
+      
+      // Re-enable button
+      button.disabled = false;
+      button.textContent = 'Run All Tests Again';
+    })
+    .catch(error => {
+      console.error('Error running self-test:', error);
+      loadingDiv.style.display = 'none';
+      resultsListDiv.innerHTML = `
+        <div style="padding: 16px; background-color: rgba(255, 85, 85, 0.1); border-left: 4px solid #ff5555; border-radius: 4px;">
+          <div style="font-weight: bold; color: #ff5555; margin-bottom: 6px;">Error Running Tests</div>
+          <div style="font-size: 14px; color: var(--secondary-color);">${error.message}</div>
+        </div>
+      `;
+      resultsDiv.style.display = 'block';
+      button.disabled = false;
+      button.textContent = 'Run All Tests';
+    });
 }
 

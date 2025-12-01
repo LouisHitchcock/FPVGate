@@ -52,6 +52,9 @@
             </div>
           </div>
 
+          <!-- TTS SETTINGS SECTION -->
+          <h3 style="color: var(--primary-color); border-bottom: 2px solid var(--primary-color); padding-bottom: 8px; margin-top: 24px;">TTS Settings</h3>
+
           <div class="config-item">
             <label for="announcerSelect">Announcer Type:</label>
             <select id="announcerSelect">
@@ -82,10 +85,11 @@
               <option value="rachel">ElevenLabs (Rachel - Calm)</option>
               <option value="adam">ElevenLabs (Adam - Deep Male)</option>
               <option value="antoni">ElevenLabs (Antoni - Male)</option>
+              <option value="piper">PiperTTS (Lower Latency)</option>
             </select>
           </div>
           <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px;">
-            Note: Voice change requires regenerating audio files
+            Note: ElevenLabs voices require pre-generated audio files
           </div>
 
           <div class="config-item">
@@ -180,6 +184,72 @@
             <span id="colorPreview" style="display: inline-block; width: 30px; height: 30px; margin-left: 10px; border: 2px solid var(--border-color); border-radius: 4px; background-color: #FF0000;"></span>
           </div>
 
+          <!-- LED SETUP SECTION -->
+          <h3 style="color: var(--primary-color); border-bottom: 2px solid var(--primary-color); padding-bottom: 8px; margin-top: 24px;">LED Setup</h3>
+          
+          <div class="config-item">
+            <label for="ledPreset">LED Preset:</label>
+            <select id="ledPreset" onchange="changeLedPreset()">
+              <option value="0">Off</option>
+              <option value="1">Solid Colour</option>
+              <option value="2" selected>Rainbow Wave</option>
+              <option value="3">Color Fade</option>
+              <option value="4">Fire</option>
+              <option value="5">Ocean</option>
+              <option value="6">Police</option>
+              <option value="7">Strobe</option>
+              <option value="8">Comet</option>
+              <option value="9">Pilot Colour</option>
+            </select>
+          </div>
+
+          <div class="config-item" id="solidColorSection" style="display: none;">
+            <label for="ledSolidColor">Solid Color:</label>
+            <input type="color" id="ledSolidColor" value="#FF00FF" onchange="setSolidColor()" style="height: 40px; border: 2px solid var(--border-color); border-radius: 4px;" />
+          </div>
+
+          <div class="config-item" id="fadeColorSection" style="display: none;">
+            <label for="ledFadeColor">Fade Color:</label>
+            <input type="color" id="ledFadeColor" value="#0080FF" onchange="setFadeColor()" style="height: 40px; border: 2px solid var(--border-color); border-radius: 4px;" />
+          </div>
+
+          <div class="config-item" id="strobeColorSection" style="display: none;">
+            <label for="ledStrobeColor">Strobe Color:</label>
+            <input type="color" id="ledStrobeColor" value="#FFFFFF" onchange="setStrobeColor()" style="height: 40px; border: 2px solid var(--border-color); border-radius: 4px;" />
+          </div>
+
+          <div class="config-item">
+            <label for="ledSpeed">Animation Speed:</label>
+            <div class="input-with-value">
+              <span class="val">5</span>
+              <input type="range" id="ledSpeed" step="1" min="1" max="20" value="5" oninput="updateLedSpeed(this,value)" />
+            </div>
+          </div>
+          <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px;">
+            Controls rainbow, pulse, and animation speed
+          </div>
+
+          <div class="config-item">
+            <label for="ledBrightness">LED Brightness:</label>
+            <div class="input-with-value">
+              <span class="val">80</span>
+              <input type="range" id="ledBrightness" step="5" min="0" max="255" value="80" oninput="updateLedBrightness(this,value)" />
+            </div>
+          </div>
+
+          <div class="config-item">
+            <label for="ledManualOverride">Manual LED Control:</label>
+            <div style="flex: 1;">
+              <label class="switch">
+                <input type="checkbox" id="ledManualOverride" onchange="toggleLedManualOverride(this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px;">
+            When enabled, race events won't affect LED settings
+          </div>
+
           <!-- SYSTEM SETUP SECTION -->
           <h3 style="color: var(--primary-color); border-bottom: 2px solid var(--primary-color); padding-bottom: 8px; margin-top: 24px;">System Setup</h3>
 
@@ -187,7 +257,7 @@
             <label for="batteryMonitorToggle">Battery Monitoring:</label>
             <div style="flex: 1;">
               <label class="switch">
-                <input type="checkbox" id="batteryMonitorToggle" checked onchange="toggleBatteryMonitor(this.checked)">
+                <input type="checkbox" id="batteryMonitorToggle" onchange="toggleBatteryMonitor(this.checked)">
                 <span class="slider"></span>
               </label>
             </div>
@@ -250,6 +320,24 @@
           <div class="config-item" style="display: none">
             <label for="pwd">WiFi Password:</label>
             <input type="password" id="pwd" maxlength="32" />
+          </div>
+
+          <!-- SELF-TEST SECTION -->
+          <h3 style="color: var(--primary-color); border-bottom: 2px solid var(--primary-color); padding-bottom: 8px; margin-top: 24px;">System Diagnostics</h3>
+          
+          <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px;">
+            <p style="margin: 0;">Run comprehensive hardware and software tests to verify all FPVGate components are functioning correctly.</p>
+          </div>
+
+          <button id="runTestsButton" onclick="runSelfTest()" style="width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--accent-color);">Run System Self-Test</button>
+          
+          <div id="testResults" style="display: none; margin-bottom: 16px;">
+            <h4 style="margin-bottom: 12px; color: var(--primary-color);">Test Results</h4>
+            <div id="testResultsList"></div>
+          </div>
+          
+          <div id="testLoading" style="display: none; text-align: center; padding: 24px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 16px;">
+            <p style="margin: 0; font-size: 14px; color: var(--primary-color);">Running tests...</p>
           </div>
         </div>
         <br>
@@ -356,6 +444,10 @@
       </div>
 
       <div id="calib" class="tabcontent">
+        <div style="margin-bottom: 16px;">
+          <button id="startWizardButton" onclick="startCalibrationWizard()" style="width: 100%; padding: 12px; font-size: 16px; background-color: var(--primary-color);">Start Calibration Wizard</button>
+        </div>
+        
         <div>
           <canvas id="rssiChart"></canvas>
         </div>
@@ -400,6 +492,78 @@
         <div style="display: flex; gap: 12px; margin-top: 16px;">
           <button onclick="saveRaceEdit()">Save</button>
           <button onclick="closeEditModal()" style="background-color: var(--secondary-color);">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calibration Wizard Modal -->
+    <div id="calibrationWizardModal" class="modal" style="display: none;">
+      <div class="modal-content wizard-modal">
+        <div id="wizardRecording" style="display: none;">
+          <h3>Calibration Wizard - Recording</h3>
+          <div class="wizard-instructions">
+            <p><strong>Instructions:</strong></p>
+            <ol>
+              <li>Fly through the gate 3 times</li>
+              <li>Make sure you get clear signal peaks on each pass</li>
+              <li>Click "Stop Recording" when finished</li>
+            </ol>
+          </div>
+          <div class="wizard-status">
+            <div class="recording-indicator">
+              <span class="recording-dot"></span>
+              <span>Recording RSSI Data...</span>
+            </div>
+            <div id="wizardSampleCount" style="margin-top: 8px; font-size: 14px;">Samples: 0</div>
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 24px;">
+            <button onclick="stopCalibrationWizard()" style="flex: 1;">Stop Recording</button>
+            <button onclick="cancelCalibrationWizard()" style="flex: 1; background-color: var(--secondary-color);">Cancel</button>
+          </div>
+        </div>
+
+        <div id="wizardMarking" style="display: none;">
+          <h3>Calibration Wizard - Mark Lap Gates</h3>
+          <div class="wizard-instructions">
+            <p><strong>Click on the chart to mark entry and exit points for each lap:</strong></p>
+            <ul>
+              <li>Click at the <span style="color: #ff5555;">peak</span> where you entered the gate</li>
+              <li>Click where you <span style="color: #ff9f43;">exited</span> (lower signal after peak)</li>
+              <li>Repeat for all 3 laps</li>
+            </ul>
+          </div>
+          <div id="wizardMarkingStatus" style="margin: 12px 0; padding: 8px; background-color: var(--bg-secondary); border-radius: 4px; font-weight: bold;">
+            Lap 1: Mark Entry Point
+          </div>
+          <div style="position: relative;">
+            <canvas id="wizardChart" style="cursor: crosshair; border: 2px solid var(--border-color); border-radius: 4px;"></canvas>
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 16px;">
+            <button id="wizardUndoButton" onclick="undoLastMarker()" disabled style="flex: 1; background-color: var(--secondary-color);">Undo Last</button>
+            <button id="wizardCalculateButton" onclick="calculateThresholds()" disabled style="flex: 1;">Calculate Thresholds</button>
+            <button onclick="cancelCalibrationWizard()" style="flex: 1; background-color: var(--secondary-color);">Cancel</button>
+          </div>
+        </div>
+
+        <div id="wizardResults" style="display: none;">
+          <h3>Calibration Wizard - Results</h3>
+          <div class="wizard-results-box">
+            <div class="result-item">
+              <label>Calculated Enter RSSI:</label>
+              <span id="calculatedEnterRssi" class="result-value">--</span>
+            </div>
+            <div class="result-item">
+              <label>Calculated Exit RSSI:</label>
+              <span id="calculatedExitRssi" class="result-value">--</span>
+            </div>
+          </div>
+          <div style="margin: 16px 0; padding: 12px; background-color: var(--bg-secondary); border-radius: 4px; font-size: 14px;">
+            <strong>Note:</strong> These values have been calculated based on your lap data with safety margins. You can apply them now and fine-tune manually if needed.
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 16px;">
+            <button onclick="applyCalculatedThresholds()" style="flex: 1;">Apply Thresholds</button>
+            <button onclick="closeCalibrationWizard()" style="flex: 1; background-color: var(--secondary-color);">Close</button>
+          </div>
         </div>
       </div>
     </div>

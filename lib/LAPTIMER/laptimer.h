@@ -1,3 +1,6 @@
+#ifndef LAPTIMER_H
+#define LAPTIMER_H
+
 #include "RX5808.h"
 #include "buzzer.h"
 #include "config.h"
@@ -7,11 +10,13 @@
 typedef enum {
     STOPPED,
     WAITING,
-    RUNNING
+    RUNNING,
+    CALIBRATION_WIZARD
 } laptimer_state_e;
 
 #define LAPTIMER_LAP_HISTORY 10
 #define LAPTIMER_RSSI_HISTORY 100
+#define LAPTIMER_CALIBRATION_HISTORY 1000
 
 class LapTimer {
    public:
@@ -22,6 +27,13 @@ class LapTimer {
     uint8_t getRssi();
     uint32_t getLapTime();
     bool isLapAvailable();
+    
+    // Calibration wizard methods
+    void startCalibrationWizard();
+    void stopCalibrationWizard();
+    uint16_t getCalibrationRssiCount();
+    uint8_t getCalibrationRssi(uint16_t index);
+    uint32_t getCalibrationTimestamp(uint16_t index);
 
    private:
     laptimer_state_e state = STOPPED;
@@ -42,6 +54,11 @@ class LapTimer {
     uint32_t rssiPeakTimeMs;
 
     bool lapAvailable = false;
+    
+    // Calibration wizard data
+    uint16_t calibrationRssiCount;
+    uint8_t calibrationRssi[LAPTIMER_CALIBRATION_HISTORY];
+    uint32_t calibrationTimestamps[LAPTIMER_CALIBRATION_HISTORY];
 
     void lapPeakCapture();
     bool lapPeakCaptured();
@@ -50,3 +67,5 @@ class LapTimer {
     void startLap();
     void finishLap();
 };
+
+#endif

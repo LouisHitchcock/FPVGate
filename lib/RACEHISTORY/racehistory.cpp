@@ -1,12 +1,16 @@
 #include "racehistory.h"
-#include <LittleFS.h>
 #include <algorithm>
 #include "debug.h"
 
-RaceHistory::RaceHistory() {
+RaceHistory::RaceHistory() : storage(nullptr) {
 }
 
-bool RaceHistory::init() {
+bool RaceHistory::init(Storage* storageBackend) {
+    storage = storageBackend;
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null!\n");
+        return false;
+    }
     return loadFromFile();
 }
 
@@ -141,35 +145,37 @@ bool RaceHistory::fromJsonString(const String& json) {
 }
 
 bool RaceHistory::saveToFile() {
-    File file = LittleFS.open(RACES_FILE, "w");
-    if (!file) {
-        DEBUG("Failed to open races file for writing\n");
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null!\n");
         return false;
     }
     
     String json = toJsonString();
-    size_t written = file.print(json);
-    file.close();
+    bool success = storage->writeFile(RACES_FILE, json);
     
-    DEBUG("Saved %d races to file (%d bytes)\n", races.size(), written);
-    return written > 0;
+    if (success) {
+        DEBUG("Saved %d races to file (%d bytes)\n", races.size(), json.length());
+    }
+    return success;
 }
 
 bool RaceHistory::loadFromFile() {
-    if (!LittleFS.exists(RACES_FILE)) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null!\n");
+        return false;
+    }
+    
+    if (!storage->exists(RACES_FILE)) {
         DEBUG("Races file does not exist, starting fresh\n");
         races.clear();
         return true;
     }
     
-    File file = LittleFS.open(RACES_FILE, "r");
-    if (!file) {
-        DEBUG("Failed to open races file for reading\n");
+    String json;
+    if (!storage->readFile(RACES_FILE, json)) {
+        DEBUG("Failed to read races file\n");
         return false;
     }
-    
-    String json = file.readString();
-    file.close();
     
     DynamicJsonDocument doc(32768);
     DeserializationError error = deserializeJson(doc, json);

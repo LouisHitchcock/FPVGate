@@ -1,3 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <stdint.h>
@@ -46,6 +49,11 @@
 #define PIN_RX5808_CLOCK 12    // CH3 on Pin 12
 #define PIN_BUZZER 5
 #define BUZZER_INVERTED false
+// SD Card SPI pins (right side of board)
+#define PIN_SD_CS 42
+#define PIN_SD_SCK 41
+#define PIN_SD_MOSI 40
+#define PIN_SD_MISO 39
 
 //ESP32
 #else
@@ -66,7 +74,7 @@
 #define EEPROM_RESERVED_SIZE 256
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 1U
+#define CONFIG_VERSION 2U
 
 #define EEPROM_CHECK_TIME_MS 1000
 
@@ -80,6 +88,9 @@ typedef struct {
     uint8_t enterRssi;
     uint8_t exitRssi;
     uint8_t maxLaps;
+    uint8_t ledMode;           // 0=off, 1=solid, 2=pulse, 3=rainbow
+    uint8_t ledBrightness;     // 0-255
+    uint32_t ledColor;         // RGB as 0xRRGGBB
     char pilotName[21];
     char ssid[33];
     char password[33];
@@ -102,6 +113,9 @@ class Config {
     uint8_t getEnterRssi();
     uint8_t getExitRssi();
     uint8_t getMaxLaps();
+    uint8_t getLedMode();
+    uint8_t getLedBrightness();
+    uint32_t getLedColor();
     char* getSsid();
     char* getPassword();
 
@@ -111,3 +125,5 @@ class Config {
     volatile uint32_t checkTimeMs = 0;
     void setDefaults();
 };
+
+#endif // CONFIG_H

@@ -77,6 +77,14 @@ void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
                 startLap();
             }
             break;
+        case CALIBRATION_WIZARD:
+            // Record RSSI data without triggering lap detection
+            if (calibrationRssiCount < LAPTIMER_CALIBRATION_HISTORY) {
+                calibrationRssi[calibrationRssiCount] = rssi[rssiCount];
+                calibrationTimestamps[calibrationRssiCount] = currentTimeMs;
+                calibrationRssiCount++;
+            }
+            break;
         default:
             break;
     }
@@ -146,4 +154,45 @@ uint32_t LapTimer::getLapTime() {
 
 bool LapTimer::isLapAvailable() {
     return lapAvailable;
+}
+
+void LapTimer::startCalibrationWizard() {
+    DEBUG("Calibration wizard started\n");
+    state = CALIBRATION_WIZARD;
+    calibrationRssiCount = 0;
+    memset(calibrationRssi, 0, sizeof(calibrationRssi));
+    memset(calibrationTimestamps, 0, sizeof(calibrationTimestamps));
+    buz->beep(300);
+    led->on(300);
+#ifdef ESP32S3
+    if (g_rgbLed) g_rgbLed->flashGreen();
+#endif
+}
+
+void LapTimer::stopCalibrationWizard() {
+    DEBUG("Calibration wizard stopped, recorded %u samples\n", calibrationRssiCount);
+    state = STOPPED;
+    buz->beep(300);
+    led->on(300);
+#ifdef ESP32S3
+    if (g_rgbLed) g_rgbLed->flashReset();
+#endif
+}
+
+uint16_t LapTimer::getCalibrationRssiCount() {
+    return calibrationRssiCount;
+}
+
+uint8_t LapTimer::getCalibrationRssi(uint16_t index) {
+    if (index < calibrationRssiCount) {
+        return calibrationRssi[index];
+    }
+    return 0;
+}
+
+uint32_t LapTimer::getCalibrationTimestamp(uint16_t index) {
+    if (index < calibrationRssiCount) {
+        return calibrationTimestamps[index];
+    }
+    return 0;
 }

@@ -3,6 +3,8 @@
   --primary-color-dark: #E0E0E0;
   --secondary-color: #90A4AE;
   --background-color: #FFFFFF;
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F5;
   --text-color: #212121;
   --border-color: #E0E0E0;
   --table-even-bg: #F5F5F5;
@@ -15,6 +17,8 @@
   --primary-color-dark: #00796B;
   --secondary-color: #607D8B;
   --background-color: #263238;
+  --bg-primary: #263238;
+  --bg-secondary: #37474F;
   --text-color: #B0BEC5;
   --border-color: #37474F;
   --table-even-bg: #2E3C43;
@@ -378,7 +382,7 @@ main {
   display: flex;
 }
 
-.config-item label {
+.config-item > label:not(.switch) {
   min-width: 170px;
   font-weight: bold;
 }
@@ -431,7 +435,6 @@ button:hover {
 }
 
 button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -926,6 +929,103 @@ footer {
   border-radius: 4px;
   background-color: var(--background-color);
   color: var(--text-color);
+}
+
+/* Calibration Wizard Styles */
+.wizard-modal {
+  max-width: 800px;
+  width: 95%;
+}
+
+.wizard-instructions {
+  background-color: var(--background-color);
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.wizard-instructions p {
+  margin: 0 0 8px 0;
+  color: var(--text-color);
+}
+
+.wizard-instructions ol,
+.wizard-instructions ul {
+  margin: 8px 0;
+  padding-left: 24px;
+  color: var(--text-color);
+}
+
+.wizard-instructions li {
+  margin: 4px 0;
+}
+
+.wizard-status {
+  background-color: var(--background-color);
+  padding: 16px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+.recording-dot {
+  width: 12px;
+  height: 12px;
+  background-color: #ff5555;
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.wizard-results-box {
+  background-color: var(--background-color);
+  padding: 16px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.result-item:last-child {
+  border-bottom: none;
+}
+
+.result-item label {
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+.result-value {
+  font-size: 20px;
+  font-weight: bold;
+  color: var(--primary-color);
+}
+
+#wizardChart {
+  width: 100%;
+  background-color: var(--background-color);
 }
 
 @media (max-width: 150px) {
