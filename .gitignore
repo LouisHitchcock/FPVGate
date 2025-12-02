@@ -35,8 +35,9 @@ api_key.txt
 __pycache__/
 *.py[cod]
 
-# WARP temporary files
+# WARP temporary files and documentation
 .warp/
+WARP.md
 
 # Voice generation output (too large for git)
 data_full_voices/
