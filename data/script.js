@@ -749,14 +749,34 @@ function updateMaxLaps(obj, value) {
 //   $().articulate("getVoices", "#voiceSelect", "System Default Announcer Voice");
 // }
 
+// Shared AudioContext for beeps (reused to avoid iOS issues)
+var beepAudioContext = null;
+
 function beep(duration, frequency, type) {
-  var context = new AudioContext();
-  var oscillator = context.createOscillator();
+  // Create or reuse AudioContext
+  if (!beepAudioContext) {
+    beepAudioContext = new AudioContext();
+  }
+  
+  // iOS/Safari: ensure AudioContext is running
+  if (beepAudioContext.state === 'suspended') {
+    beepAudioContext.resume().then(() => {
+      playBeepTone(duration, frequency, type);
+    }).catch(err => {
+      console.warn('[Beep] AudioContext resume failed:', err);
+    });
+  } else {
+    playBeepTone(duration, frequency, type);
+  }
+}
+
+function playBeepTone(duration, frequency, type) {
+  var oscillator = beepAudioContext.createOscillator();
   oscillator.type = type;
   oscillator.frequency.value = frequency;
-  oscillator.connect(context.destination);
+  oscillator.connect(beepAudioContext.destination);
   oscillator.start();
-  // Beep for 500 milliseconds
+  // Beep for specified duration
   setTimeout(function () {
     oscillator.stop();
   }, duration);
@@ -1203,6 +1223,16 @@ async function startRace() {
   startRaceButton.disabled = true;
   startRaceButton.classList.add('active');
   
+  // iOS/Safari: unlock AudioContext for beeps during user interaction
+  if (beepAudioContext && beepAudioContext.state === 'suspended') {
+    try {
+      await beepAudioContext.resume();
+      console.log('[Race] AudioContext resumed for beeps');
+    } catch (err) {
+      console.warn('[Race] AudioContext resume failed:', err);
+    }
+  }
+  
   // Queue both announcements
   queueSpeak("<p>Arm your quad</p>");
   queueSpeak("<p>Starting on the tone in less than five</p>");
@@ -1219,6 +1249,12 @@ async function startRace() {
   // Play start beep and begin race
   beep(1, 1, "square"); // needed for some reason to make sure we fire the first beep
   beep(500, 880, "square");
+  
+  // Vibrate for mobile devices (works even in silent mode on iOS)
+  if (navigator.vibrate) {
+    navigator.vibrate(500); // 500ms vibration
+  }
+  
   startTimer();
   startRaceButton.classList.remove('active');
   stopRaceButton.disabled = false;

@@ -620,10 +620,72 @@ class AudioAnnouncer {
     /**
      * Enable audio announcements
      */
-    enable() {
+    async enable() {
         this.audioEnabled = true;
         console.log('[AudioAnnouncer] Audio enabled');
+        
+        // iOS/Safari requires audio to be "unlocked" with user interaction
+        await this.unlockAudioContextiOS();
+        
         this.processQueue();  // Start processing any queued items
+    }
+    
+    /**
+     * Unlock audio context for iOS/Safari
+     * Safari requires user interaction before playing audio
+     */
+    async unlockAudioContextiOS() {
+        // Detect iOS/Safari
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        
+        if (!isIOS && !isSafari) {
+            return; // Not iOS/Safari, no need to unlock
+        }
+        
+        console.log('[AudioAnnouncer] iOS/Safari detected, unlocking audio...');
+        
+        try {
+            // Create and play a silent audio to unlock iOS audio
+            const silentAudio = new Audio();
+            silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+            silentAudio.volume = 0;
+            
+            // Try to play
+            await silentAudio.play().catch(err => {
+                console.warn('[AudioAnnouncer] iOS audio unlock play failed (expected on first try):', err);
+            });
+            
+            // For PiperTTS - unlock Web Audio API AudioContext
+            if (this.piperTTS && this.piperTTS.audioContext) {
+                if (this.piperTTS.audioContext.state === 'suspended') {
+                    await this.piperTTS.audioContext.resume();
+                    console.log('[AudioAnnouncer] PiperTTS AudioContext resumed');
+                }
+            }
+            
+            // For Web Speech API - try to initialize
+            if ('speechSynthesis' in window) {
+                // Load voices (required for iOS)
+                const voices = speechSynthesis.getVoices();
+                if (voices.length === 0) {
+                    // Voices not loaded yet, wait for them
+                    await new Promise(resolve => {
+                        if (speechSynthesis.onvoiceschanged !== undefined) {
+                            speechSynthesis.onvoiceschanged = resolve;
+                            setTimeout(resolve, 1000); // Timeout after 1s
+                        } else {
+                            resolve();
+                        }
+                    });
+                }
+            }
+            
+            console.log('[AudioAnnouncer] iOS/Safari audio unlocked successfully');
+        } catch (error) {
+            console.warn('[AudioAnnouncer] iOS audio unlock error:', error);
+        }
     }
 
     /**
