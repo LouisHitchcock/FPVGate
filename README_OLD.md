@@ -116,45 +116,45 @@ The ESP32-S3 runs a web server that you connect to via WiFi. Configuration, race
 #### RX5808 to ESP32-S3
 ```
 ESP32-S3        RX5808
-GPIO4     RSSI
-GPIO10    CH1 (DATA)
-GPIO11    CH2 (SELECT)
-GPIO12    CH3 (CLOCK)
-GND       GND
-5V        +5V
+GPIO4    ────── RSSI
+GPIO10   ────── CH1 (DATA)
+GPIO11   ────── CH2 (SELECT)
+GPIO12   ────── CH3 (CLOCK)
+GND      ────── GND
+5V       ────── +5V
 ```
 
 #### Power Supply
 ```
-5V Regulator  ESP32-S3 VBUS pin (5V input)
-5V Regulator  RX5808 +5V pin
-Battery GND   Common ground for all components
+5V Regulator → ESP32-S3 VBUS pin (5V input)
+5V Regulator → RX5808 +5V pin
+Battery GND  → Common ground for all components
 ```
 
 #### Optional: External RGB LEDs
 ```
 ESP32-S3        WS2812 Strip
-VBUS (5V)  +5V
-GND        GND
-GPIO18     Data In
+VBUS (5V) ────── +5V
+GND       ────── GND
+GPIO18    ────── Data In
 ```
 
 #### Optional: Buzzer
 ```
 ESP32-S3        Buzzer
-GPIO5     Positive (+)
-GND       Negative (-)
+GPIO5    ────── Positive (+)
+GND      ────── Negative (-)
 ```
 
 #### MicroSD Card (Recommended)
 ```
 ESP32-S3        MicroSD Module
-GPIO39    CS (Chip Select)
-GPIO36    SCK (Clock)
-GPIO35    MOSI (Data In)
-GPIO37    MISO (Data Out)
-GND       GND
-3.3V      VCC
+GPIO39   ────── CS (Chip Select)
+GPIO36   ────── SCK (Clock)
+GPIO35   ────── MOSI (Data In)
+GPIO37   ────── MISO (Data Out)
+GND      ────── GND
+3.3V     ────── VCC
 ```
 
 ### Important Notes
@@ -188,7 +188,7 @@ GND       GND
 
 2. **Open in VS Code**
    - Launch VS Code
-   - File  Open Folder  Select the FPVGate folder
+   - File → Open Folder → Select the FPVGate folder
 
 3. **Configure LED Count (if using external LEDs)**
    
@@ -199,16 +199,16 @@ GND       GND
 
 4. **Build the Firmware**
    - Click the PlatformIO icon in the left sidebar
-   - Project Tasks  ESP32S3  General  Build
+   - Project Tasks → ESP32S3 → General → Build
    - Wait for "SUCCESS"
 
 5. **Flash the Firmware**
    - Connect your ESP32-S3 via USB
-   - Project Tasks  ESP32S3  General  Upload
+   - Project Tasks → ESP32S3 → General → Upload
    - Wait for "SUCCESS"
 
 6. **Upload Web Interface Files**
-   - Project Tasks  ESP32S3  Platform  Upload Filesystem Image
+   - Project Tasks → ESP32S3 → Platform → Upload Filesystem Image
    - Wait for "SUCCESS"
 
 ### Command Line Build (Alternative)
@@ -285,7 +285,7 @@ FPVGate supports two connection methods:
 1. **Download** the Electron app from the [Releases page](https://github.com/LouisHitchcock/FPVGate/releases)
 2. **Install** and launch the FPVGate desktop application
 3. **Connect** your ESP32-S3 via USB
-4. **Select COM Port** in Configuration  System Setup
+4. **Select COM Port** in Configuration → System Setup
    - App auto-detects available serial ports
    - COM port selection dropdown added to config menu
 5. The app automatically uses USB transport when connected
@@ -299,7 +299,7 @@ FPVGate supports two connection methods:
 5. All features work identically to WiFi mode
 
 **Transport Features:**
-- Automatic fallback: USB  WiFi seamless switching
+- Automatic fallback: USB ↔ WiFi seamless switching
 - Simultaneous connections: USB for race control, WiFi for spectators
 - All features supported: race control, LED commands, lap timing, voice announcements
 - JSON-based command protocol over Serial CDC
@@ -369,7 +369,7 @@ The Configuration tab is now organized into five clear sections:
   - Used in UI and race history
 
 - **Phonetic Name**: How TTS pronounces your name (max 30 characters)
-  - Example: "Louis"  "Louie", "Xavier"  "Zavier"
+  - Example: "Louis" → "Louie", "Xavier" → "Zavier"
   - Falls back to Pilot Name if empty
 
 - **Pilot Color**: Choose from 15 colors
@@ -477,23 +477,23 @@ The Configuration tab is now organized into five clear sections:
 
 ** Good Calibration:**
 ```
-RSSI       /\
-          /  \
-         /    \      Single clean peak
-Enter /\
-       /        \
-Exit  /\
-       Time
+RSSI  │     /\
+      │    /  \
+      │   /    \     ← Single clean peak
+Enter ├──/──────\───
+      │ /        \
+Exit  ├/──────────\─
+      └─────────────── Time
 ```
 
 ** Bad Calibration (thresholds too low):**
 ```
-RSSI     /\/\     Multiple peaks = multiple laps!
-        /    \
-Enter /\
-      /        \
-Exit  /\
-       Time
+RSSI  │   /\/\    ← Multiple peaks = multiple laps!
+      │  /    \
+Enter ├─/──────\───
+      │/        \
+Exit  /──────────\─
+      └─────────────── Time
 ```
 
 #### Tips
@@ -620,7 +620,7 @@ Navigate to the **Race History** tab to view saved races:
 **Solution**: 
 - Confirm WS2812 LED type (not WS2811 or SK6812)
 - Check wiring: VBUS=5V, GND=GND, GPIO18=Data
-- Add 100-330 resistor on data line if experiencing issues
+- Add 100-330Ω resistor on data line if experiencing issues
 
 ## Default Settings
 
@@ -638,46 +638,46 @@ Navigate to the **Race History** tab to view saved races:
 
 ```
 FPVGate/
- data/                  # Web interface files
-    index.html        # Main web app
-    script.js         # UI logic and race control
-    usb-transport.js  # USB Serial CDC transport
-    style.css         # Material Design themes
-    ...               # Supporting libraries
- docs/                  # Documentation
-    MULTI_VOICE_SETUP.md
-    VOICE_GENERATION_README.md
-    SD_CARD_MIGRATION_GUIDE.md
- electron/              # Desktop application
-    main.js           # Electron main process
-    preload.js        # Preload script
-    package.json      # Electron dependencies
- lib/
-    CONFIG/           # Configuration & EEPROM
-    LAPTIMER/         # Core timing logic
-    RACEHISTORY/      # Race storage & persistence
-    RGBLED/           # RGB LED control (ESP32-S3)
-    RX5808/           # VRx SPI communication
-    TRANSPORT/        # Transport abstraction layer
-    USB/              # USB Serial CDC transport
-    WEBSERVER/        # WiFi & web server
-    SELFTEST/         # System diagnostics
-    KALMAN/           # RSSI filtering
-    BUZZER/           # Audio feedback
-    BATTERY/          # Voltage monitoring
- release/               # Prebuilt firmware releases
-    v1.2.1/           # Latest release
-    v1.2.0/           # Previous release
- src/
-    main.cpp          # Main application entry
- targets/
-    ESP32S3.ini       # ESP32-S3 build config
-    custom_8mb.csv    # Custom partition table
- tools/                 # Python utilities
-    generate_voice_files.py
-    upload_sounds_to_sd.py
-    ...               # Voice generation scripts
- platformio.ini        # PlatformIO configuration
+├── data/                  # Web interface files
+│   ├── index.html        # Main web app
+│   ├── script.js         # UI logic and race control
+│   ├── usb-transport.js  # USB Serial CDC transport
+│   ├── style.css         # Material Design themes
+│   └── ...               # Supporting libraries
+├── docs/                  # Documentation
+│   ├── MULTI_VOICE_SETUP.md
+│   ├── VOICE_GENERATION_README.md
+│   └── SD_CARD_MIGRATION_GUIDE.md
+├── electron/              # Desktop application
+│   ├── main.js           # Electron main process
+│   ├── preload.js        # Preload script
+│   └── package.json      # Electron dependencies
+├── lib/
+│   ├── CONFIG/           # Configuration & EEPROM
+│   ├── LAPTIMER/         # Core timing logic
+│   ├── RACEHISTORY/      # Race storage & persistence
+│   ├── RGBLED/           # RGB LED control (ESP32-S3)
+│   ├── RX5808/           # VRx SPI communication
+│   ├── TRANSPORT/        # Transport abstraction layer
+│   ├── USB/              # USB Serial CDC transport
+│   ├── WEBSERVER/        # WiFi & web server
+│   ├── SELFTEST/         # System diagnostics
+│   ├── KALMAN/           # RSSI filtering
+│   ├── BUZZER/           # Audio feedback
+│   └── BATTERY/          # Voltage monitoring
+├── release/               # Prebuilt firmware releases
+│   ├── v1.2.1/           # Latest release
+│   └── v1.2.0/           # Previous release
+├── src/
+│   └── main.cpp          # Main application entry
+├── targets/
+│   ├── ESP32S3.ini       # ESP32-S3 build config
+│   └── custom_8mb.csv    # Custom partition table
+├── tools/                 # Python utilities
+│   ├── generate_voice_files.py
+│   ├── upload_sounds_to_sd.py
+│   └── ...               # Voice generation scripts
+└── platformio.ini        # PlatformIO configuration
 ```
 
 ## Technical Details
