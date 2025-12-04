@@ -473,7 +473,7 @@ TestResult SelfTest::testUSB() {
     
     // Check if USB CDC is available
     #if ARDUINO_USB_CDC_ON_BOOT
-    if (!USBSerial) {
+    if (!Serial) {
         result.passed = false;
         result.details = "USB CDC not available";
         result.duration_ms = millis() - start;
@@ -481,7 +481,7 @@ TestResult SelfTest::testUSB() {
     }
     
     // Test if USB is connected
-    bool connected = (bool)USBSerial;
+    bool connected = (bool)Serial;
     
     // Check USB transport files
     bool transportFileExists = LittleFS.exists("/usb-transport.js");

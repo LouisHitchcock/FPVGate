@@ -11,6 +11,11 @@ bool RaceHistory::init(Storage* storageBackend) {
         DEBUG("RaceHistory: Storage backend is null!\n");
         return false;
     }
+    
+    // Create races directory if it doesn't exist
+    storage->mkdir("/sd");
+    storage->mkdir("/sd/races");
+    
     return loadFromFile();
 }
 

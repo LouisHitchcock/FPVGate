@@ -7,7 +7,7 @@
 #include "storage.h"
 
 #define MAX_RACES 50
-#define RACES_FILE "/races.json"
+#define RACES_FILE "/sd/races/races.json"
 
 struct RaceSession {
     uint32_t timestamp;
