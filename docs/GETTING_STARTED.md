@@ -313,6 +313,8 @@ pio run -e ESP32S3 -t uploadfs
 
 ## Initial Configuration
 
+![Calibration Wizard](../screenshots/Calibration%20Wizard%2005-12-2025.png)
+
 ### Step 1: Connect to FPVGate
 
 **Power on your FPVGate device**

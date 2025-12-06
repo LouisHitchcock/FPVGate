@@ -16,6 +16,16 @@ A compact, self-contained RSSI-based lap timing solution for 5.8GHz FPV drones. 
 
 FPVGate measures lap times by detecting your drone's video transmitter signal strength (RSSI). When you fly through the gate, it detects the peak signal and records your lap time. No transponders, no complex setup—just plug in, calibrate, and fly.
 
+### Screenshots
+
+| Race Screen | Configuration Menu |
+|:-----------:|:------------------:|
+| ![Race Screen](screenshots/Race%20Screen%2005-12-2025.png) | ![Config Menu](screenshots/Config%20Menu%2005-12-2025.png) |
+
+| Calibration Wizard | Race History |
+|:------------------:|:------------:|
+| ![Calibration Wizard](screenshots/Calibration%20Wizard%2005-12-2025.png) | ![Race History](screenshots/Race%20History%2005-12-2025.png) |
+
 ### Key Features
 
 **Dual Connectivity**

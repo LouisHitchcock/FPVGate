@@ -81,6 +81,8 @@ Direct USB connection provides lower latency and eliminates WiFi issues.
 
 The web interface has four main tabs:
 
+![Race Screen](../screenshots/Race%20Screen%2005-12-2025.png)
+
 ### Race Tab
 
 **Main racing interface** - Start races, view live lap times, lap analysis.
@@ -99,6 +101,8 @@ The web interface has four main tabs:
 
 ### Configuration Tab
 
+![Configuration Menu](../screenshots/Config%20Menu%2005-12-2025.png)
+
 **All settings and diagnostics** - Organized into sections:
 
 1. **Race Setup** - Lap count, minimum lap time
@@ -110,6 +114,8 @@ The web interface has four main tabs:
 
 ### Calibration Tab
 
+![Calibration Screen](../screenshots/Calibration%20Screen%2005-12-2025.png)
+
 **RSSI threshold setup** - Critical for accurate timing.
 
 **Features:**
@@ -120,6 +126,8 @@ The web interface has four main tabs:
 - Real-time preview
 
 ### Race History Tab
+
+![Race History](../screenshots/Race%20History%2005-12-2025.png)
 
 **Saved races archive** - View, edit, export past races.
 
