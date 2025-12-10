@@ -34,7 +34,8 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 - Electron desktop app for Windows/Mac/Linux
 
 **Visual Feedback**
-- RGB LED indicators with 10 customizable presets
+- RGB LED indicators with 10 customizable presets (settings persist to EEPROM)
+- Real-time WiFi status display with connection monitoring
 - Real-time RSSI visualization
 - OSD overlay for live streaming (transparent, multi-monitor support)
 - Mobile-responsive web interface
@@ -51,10 +52,12 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 - Fastest 3 consecutive laps (RaceGOW format)
 - Race history with export/import (cross-device SD card storage)
 - Race tagging and naming
+- Marshalling mode for post-race lap editing (add/remove laps)
 - Detailed race analysis view
 
 **Smart Storage**
 - SD card support for audio files and race data
+- Individual race files with index for better performance
 - Auto-migration from flash to SD
 - Cross-device race history (accessible from all connected devices)
 - Config backup/restore
@@ -177,14 +180,24 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Version:** v1.3.1  
+**Current Version:** v1.3.2  
 **Platform:** ESP32-S3 (ESP32-C3 support legacy)  
 **License:** MIT  
 **Status:** Stable - actively maintained
 
 ### Recent Updates
 
-**v1.3.1 (Latest)**
+**v1.3.2 (Latest)**
+- WiFi Status Display with real-time connection monitoring
+- Marshalling Mode for post-race lap editing (add/remove laps)
+- LED settings persistence to EEPROM (survives reboots)
+- Improved race history file structure (individual files + index)
+- Rainbow Wave default LED preset
+- Fixed Gate 1 timing calculation
+- Fixed race history saving to SD card
+- Fixed WiFi Station mode connection
+
+**v1.3.1**
 - Fixed race history storage initialization bug
 - Improved calibration wizard with 3-peak marking system
 - Enhanced threshold calculation (peak-relative instead of baseline-relative)
