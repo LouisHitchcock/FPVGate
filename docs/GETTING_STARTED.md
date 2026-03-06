@@ -191,10 +191,9 @@ ESP32-S3 VBUS pin (USB-C or 5V pin)
 
 **Enclosure Considerations:**
 1. **Ventilation** - ESP32-S3 generates heat
-2. **Antenna Placement** - RX5808 antenna should extend outside
-3. **LED Visibility** - Mount LEDs where visible
-4. **Button Access** - Leave BOOT button accessible for flashing
-5. **SD Card Access** - Allow card removal without disassembly
+2. **LED Visibility** - Mount LEDs where visible
+3. **Button Access** - Leave BOOT button accessible for flashing
+4. **SD Card Access** - Allow card removal without disassembly
 
 **Mounting Options:**
 - 3D printed case (STL files available in community)

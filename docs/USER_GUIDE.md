@@ -499,7 +499,6 @@ Result: 3 laps counted
 - Lower Enter RSSI by 5 points
 - Check VTx frequency matches
 - Ensure VTx warmed up (30 seconds)
-- Verify antenna on RX5808
 
 **False Laps (Too Many):**
 - Increase Minimum Lap Time (Configuration)
@@ -1251,7 +1250,6 @@ Save and restore all settings.
 
  **DON'T:**
 - Change frequency without recalibrating
-- Use damaged/weak antennas
 - Fly with cold VTx
 - Ignore false lap triggers
 

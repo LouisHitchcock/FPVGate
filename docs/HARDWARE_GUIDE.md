@@ -43,9 +43,8 @@ Technical specifications, wiring diagrams, and hardware troubleshooting.
 | Component | Purpose | Cost |
 |-----------|---------|------|
 | **LiPo Battery** | Portable power (2S-3S) | $10-20 |
-| **Buck Converter** | Voltage regulation (7-24V → 5V) | $2-5 |
-| **Enclosure** | Protection, mounting | $5-15 |
-| **SMA Antenna** | Better reception | $3-8 |
+|| **Buck Converter** | Voltage regulation (7-24V → 5V) | $2-5 |
+|| **Enclosure** | Protection, mounting | $5-15 |
 
 ---
 
@@ -143,26 +142,6 @@ The RX5808 is a 5.8GHz FPV receiver module that detects drone video signals.
 | **SPI_CLK** | SPI clock | GPIO15 |
 | **SPI_DATA** | SPI data | GPIO13 |
 | **SPI_SEL** | Chip select | GPIO14 |
-
-### Antenna Selection
-
-**Included Antenna:**
-- Usually small dipole or patch
-- Works for 3-6 feet range
-
-**Upgrade Options:**
-
-| Antenna Type | Range | Best For |
-|--------------|-------|----------|
-| **Dipole** | 10-15 ft | Indoor tracks |
-| **Patch** | 15-25 ft | Directional, tight gates |
-| **Cloverleaf** | 20-30 ft | Circular polarization |
-| **Helical** | 30-50 ft | Long-range outdoor |
-
-**Connection:**
-- Most RX5808 modules have U.FL or SMA connector
-- Match your antenna connector type
-- **Never power on without antenna!** (can damage receiver)
 
 ### Troubleshooting RX5808
 
@@ -612,7 +591,7 @@ Before final assembly, test each component:
 
 **Recommended Layout:**
 ```
-    [RX5808 + Antenna]
+    [RX5808]
            |
       [ESP32-S3]
            |
@@ -656,13 +635,12 @@ Before final assembly, test each component:
 
 **Commercial Enclosure:**
 - Hammond plastic project box
-- Cutouts for USB, antenna, LED strip
+- Cutouts for USB, LED strip
 - Use Dremel or step drill
 
 **Mounting:**
 - Velcro to race gate
 - Clamps or zip ties
-- Ensure antenna has clear line-of-sight
 
 ---
 
@@ -794,7 +772,6 @@ Before final assembly, test each component:
 **Solutions:**
 - Lower Enter RSSI threshold
 - Wait for VTx warm-up (30 seconds)
-- Check antenna connected to RX5808
 - Verify frequency match
 - Move timer closer to flight path
 - Increase transmission power on VTx
