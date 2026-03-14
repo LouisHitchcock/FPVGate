@@ -3,6 +3,11 @@
 #include "debug.h"
 #include "config.h"
 
+#ifdef USE_ADC_DMA
+// Included only in this translation unit to avoid polluting the include chain.
+#include "esp_adc/adc_continuous.h"
+#endif
+
 RX5808::RX5808(uint8_t _rssiInputPin, uint8_t _rx5808DataPin, uint8_t _rx5808SelPin, uint8_t _rx5808ClkPin) {
     rssiInputPin = _rssiInputPin;
     rx5808DataPin = _rx5808DataPin;
@@ -38,6 +43,10 @@ void RX5808::init() {
     recentSetFreqFlag = false;
     // Delay to ensure module is ready before first frequency change
     delay(50);
+
+#ifdef USE_ADC_DMA
+    initAdcDma();
+#endif
 }
 
 void RX5808::handleFrequencyChange(uint32_t currentTimeMs, uint16_t potentiallyNewFreq) {
@@ -164,25 +173,126 @@ void RX5808::setFrequency(uint16_t vtxFreq) {
     recentSetFreqFlag = true;  // indicate need to wait RX5808_MIN_TUNETIME before reading RSSI
 }
 
-// Read the RSSI value
+// Read the RSSI value.
+//
+// When USE_ADC_DMA is defined the ADC runs continuously via DMA at 20 kHz.
+// A registered ISR callback (adcConvDoneHandler) fires on each completed DMA
+// frame, averages the samples, and writes the result into lastDmaRssi.
+// readRssi() simply returns that cached value — no IDF calls, no WDT touching.
+// The CPU-based analogRead() path below is compiled in unchanged for all
+// targets that do NOT define USE_ADC_DMA.
 uint8_t RX5808::readRssi() {
-    volatile uint16_t rssi = 0;
+    if (recentSetFreqFlag) return 0;  // RSSI is unstable after a frequency change
 
-    if (recentSetFreqFlag) return rssi;  // RSSI is unstable
+#ifdef USE_ADC_DMA
+    if (adcDmaInitialized) {
+        return lastDmaRssi;  // Updated continuously by adcConvDoneHandler ISR
+    }
+#endif
 
+    // CPU-based (default) path — single analogRead, clamp, and rescale.
     // for (uint8_t i = 0; i < RSSI_READS; i++) {
     //   rssi += map(analogRead(rssiInputPin), 0, analogRead(vbatPin), 0, 4095);
     // }
-
     // rssi = rssi / RSSI_READS; // average of RSSI_READS readings
 
     // reads 5V value as 0-4095, RX5808 is 3.3V powered so RSSI pin will never output the full range
-    rssi = analogRead(rssiInputPin);
+    volatile uint16_t rssi = analogRead(rssiInputPin);
     // clamp upper range to fit scaling
     if (rssi > 2047) rssi = 2047;
     // rescale to fit into a byte and remove some jitter TODO: experiment with exp or log
     return rssi >> 3;
 }
+
+#ifdef USE_ADC_DMA
+// ISR callback: fires on each completed DMA conversion frame.
+// Averages all valid samples in the frame and stores the result in lastDmaRssi.
+// Must be in IRAM and must not call any non-IRAM-safe IDF functions.
+static bool IRAM_ATTR adcConvDoneHandler(adc_continuous_handle_t /*handle*/,
+                                          const adc_continuous_evt_data_t *edata,
+                                          void *user_data) {
+    volatile uint8_t *pLastRssi = (volatile uint8_t *)user_data;
+    uint32_t sum = 0, count = 0;
+    for (uint32_t i = 0; i + SOC_ADC_DIGI_RESULT_BYTES <= edata->size; i += SOC_ADC_DIGI_RESULT_BYTES) {
+        const adc_digi_output_data_t *p =
+            (const adc_digi_output_data_t *)&edata->conv_frame_buffer[i];
+        uint32_t data = p->type2.data;
+        if (data > 2047) data = 2047;
+        sum += data;
+        count++;
+    }
+    if (count > 0) *pLastRssi = (uint8_t)((sum / count) >> 3);
+    return false;  // no high-priority task woken
+}
+
+// Initialise the ADC continuous (DMA) driver for the RSSI input pin.
+// Called once from init().  On any failure the driver is left uninitialised and
+// readRssi() will silently fall through to return lastDmaRssi (0).
+void RX5808::initAdcDma() {
+    // Resolve the GPIO pin to an ADC unit + channel at runtime.
+    adc_unit_t unit;
+    adc_channel_t channel;
+    if (adc_continuous_io_to_channel(rssiInputPin, &unit, &channel) != ESP_OK) {
+        DEBUG("ADC DMA: pin %d cannot be mapped to an ADC channel\n", rssiInputPin);
+        return;
+    }
+    adcChannel = (uint8_t)channel;
+
+    // conv_frame_size: bytes per DMA frame (16 samples × 4 bytes = 64 bytes).
+    // A full frame is produced every 16/20000 s ≈ 0.8 ms at 20 kHz, so a
+    // non-blocking read will typically find data after the first millisecond.
+    adc_continuous_handle_cfg_t handle_cfg = {
+        .max_store_buf_size = 1024,  // ring buffer: 256 samples
+        .conv_frame_size    = 128,   // one frame: 32 samples → ~625 callbacks/sec at 20 kHz
+    };
+    adc_continuous_handle_t handle = nullptr;
+    if (adc_continuous_new_handle(&handle_cfg, &handle) != ESP_OK) {
+        DEBUG("ADC DMA: failed to allocate handle\n");
+        return;
+    }
+
+    adc_digi_pattern_config_t pattern = {
+        .atten     = ADC_ATTEN_DB_12,  // full 0–2500 mV input range
+        .channel   = adcChannel,
+        .unit      = (uint8_t)unit,
+        .bit_width = ADC_BITWIDTH_12,
+    };
+    adc_continuous_config_t cont_cfg = {
+        .pattern_num    = 1,
+        .adc_pattern    = &pattern,
+        .sample_freq_hz = 20 * 1000,              // 20 kHz continuous sampling
+        .conv_mode      = ADC_CONV_SINGLE_UNIT_1, // ADC1 only (avoids WiFi conflict)
+        .format         = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
+    };
+    if (adc_continuous_config(handle, &cont_cfg) != ESP_OK) {
+        DEBUG("ADC DMA: failed to configure\n");
+        adc_continuous_deinit(handle);
+        return;
+    }
+
+    if (adc_continuous_start(handle) != ESP_OK) {
+        DEBUG("ADC DMA: failed to start\n");
+        adc_continuous_deinit(handle);
+        return;
+    }
+
+    // Register ISR callback — fires on each completed DMA frame so readRssi()
+    // never needs to call any IDF function (avoids esp_task_wdt_reset spam).
+    adc_continuous_evt_cbs_t cbs = {};
+    cbs.on_conv_done = adcConvDoneHandler;
+    if (adc_continuous_register_event_callbacks(handle, &cbs, (void*)&lastDmaRssi) != ESP_OK) {
+        DEBUG("ADC DMA: failed to register callback\n");
+        adc_continuous_stop(handle);
+        adc_continuous_deinit(handle);
+        return;
+    }
+
+    adcHandle = (void*)handle;
+    DEBUG("ADC DMA: RSSI pin %d → ADC unit %d ch %d, 20 kHz continuous (callback mode)\n",
+          rssiInputPin, (int)unit, (int)adcChannel);
+    adcDmaInitialized = true;
+}
+#endif
 
 void RX5808::rx5808SerialSendBit1() {
     digitalWrite(rx5808DataPin, HIGH);
