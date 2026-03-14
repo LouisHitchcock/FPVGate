@@ -116,7 +116,7 @@ bool FpvLcdUI::begin() {
     }
     Serial.println("LCD: gfx->begin() succeeded");
     
-    gfx->fillScreen(BLACK);
+    gfx->fillScreen(0x0000);  // BLACK in RGB565 (removed as a global by newer GFX lib versions)
     Serial.println("LCD: Arduino_GFX initialized");
 #endif
 
