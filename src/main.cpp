@@ -16,7 +16,7 @@
 #ifdef HAS_RGB_LED
 #include "rgbled.h"
 #endif
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
 #include "../lib/LCD_UI/fpv_lcd_ui.h"
 #endif
 #ifdef ENABLE_POWER_SWITCH
@@ -81,7 +81,7 @@ AudioAnnouncer* g_audioAnnouncer = &audioAnnouncer;
 void* g_audioAnnouncer = nullptr;
 #endif
 static LapTimer timer;
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
 static FpvLcdUI* g_lcdUi = nullptr;
 static TaskHandle_t g_lcdUiTask = nullptr;
 static uint16_t g_lastKnownFreq = 0;  // Track config frequency for web->LCD sync
@@ -156,11 +156,14 @@ static void parallelTask(void *pvArgs) {
 #endif
         buzzer.handleBuzzer(currentTimeMs);
         led.handleLed(currentTimeMs);
+        vTaskDelay(1);  // Yield to IDLE task so it can feed the WDT (fixes esp_task_wdt_reset spam on IDF 5.x)
     }
 }
 
 static void initParallelTask() {
-    disableCore0WDT();
+    // Note: disableCore0WDT() removed - broken on Arduino ESP32 3.x (IDF 5.x),
+    // causes "esp_task_wdt_reset: task not found" spam. vTaskDelay(1) in the
+    // loop yields to the IDLE task so it can feed the WDT naturally.
     xTaskCreatePinnedToCore(parallelTask, "parallelTask", 8192, NULL, 0, &xTimerTask, 0);
 }
 
@@ -249,7 +252,7 @@ void setup() {
         DEBUG("Generic ESP32 build - WiFi Mode\n");
 #endif
     
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
     // Initialize LVGL-based StarForge-style UI (Arduino_GFX + full-screen buffer)
     DEBUG("Initializing LCD UI...\n");
     
@@ -367,7 +370,7 @@ void setup() {
     
     DEBUG("Transport system initialized (WiFi + USB)\n");
     
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
     // Initialize LCD band/channel display from config
     if (g_lcdUi) {
         uint8_t bandIdx = config.getBandIndex();
@@ -454,7 +457,7 @@ void loop() {
     // Timing always runs
     timer.handleLapTimerUpdate(currentTimeMs);
     
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
     // Feed live RSSI and timing data to LCD UI
     if (g_lcdUi) {
         // Deferred race save from previous LCD Stop (runs one loop later to avoid holding SPI during stop)
@@ -680,7 +683,7 @@ void loop() {
         uint32_t lapTime = timer.getLapTime();
         transportManager.broadcastLapEvent(lapTime);
         
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
         if (g_lcdUi) {
             g_lcdUi->addLap(lapTime);
         }
@@ -768,8 +771,8 @@ void loop() {
             DEBUG("SD card not available - using LittleFS only\n");
         }
     }
-#if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
-    // Boot overlay runs *after* the SD block in the loop, so we only reach this once the SD init has run (or is blocking).
+#if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
+    // Boot overlay runs *after* the SD block in the loop
     // Use absolute time: clear 2.5s after boot so we fire the first time we get here after that (no relative 2000ms wait).
     // Dismiss boot overlay only when both SD init and WiFi services are ready, plus 500ms settle
     static bool bootCompleteSent = false;

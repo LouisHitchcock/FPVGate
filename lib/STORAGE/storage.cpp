@@ -59,7 +59,7 @@ bool Storage::initSD() {
     pinMode(PIN_SD_CS, OUTPUT);
     digitalWrite(PIN_SD_CS, HIGH);
     
-#if defined(WAVESHARE_ESP32S3_LCD2)
+#if defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE)
     // Take mutex before touching shared FSPI so we don't reconfigure the bus while the LCD is
     // mid-blit (which causes tearing/corruption during boot overlay).
     if (!spiMutexTake(pdMS_TO_TICKS(500))) {
@@ -69,8 +69,8 @@ bool Storage::initSD() {
 #endif
     
     // Create custom SPI bus for SD card
-#if defined(WAVESHARE_ESP32S3_LCD2)
-    // Waveshare board: SD card shares SPI pins with LCD (MOSI=38, SCK=39, MISO=40)
+#if defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE)
+    // Waveshare/NovaBlade: SD card shares SPI pins with LCD (MOSI=38, SCK=39, MISO=40)
     // Must use FSPI (same peripheral as LCD) with proper CS management
     spi = new SPIClass(FSPI);
     DEBUG("SPI bus object created (FSPI - shared with LCD)\n");
@@ -85,7 +85,7 @@ bool Storage::initSD() {
     
     // Try to initialize SD card at 10MHz (safe for short wires)
     DEBUG("Attempting SD.begin() at 10MHz...\n");
-#if !defined(WAVESHARE_ESP32S3_LCD2)
+#if !defined(WAVESHARE_ESP32S3_LCD2) && !defined(NOVABLADE)
     spiMutexTake();
 #endif
     bool sdOk = SD.begin(PIN_SD_CS, *spi, 10000000);
@@ -98,7 +98,7 @@ bool Storage::initSD() {
         DEBUG("  3. Loose wiring\n");
         DEBUG("  4. Incompatible card\n");
         DEBUG("  5. Insufficient power\n");
-#if defined(WAVESHARE_ESP32S3_LCD2)
+#if defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE)
         // Do NOT tear down FSPI: LCD shares the same bus. spi->end() leaves the peripheral
         // unusable and gfx->begin() does not fully re-init it. Leave bus begun so LCD keeps working.
         (void)0;
@@ -114,7 +114,7 @@ bool Storage::initSD() {
     if (cardType == CARD_NONE) {
         DEBUG("No SD card attached\n");
         SD.end();
-#if defined(WAVESHARE_ESP32S3_LCD2)
+#if defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE)
         // Do NOT tear down FSPI (shared with LCD) - see comment above.
         (void)0;
 #else

@@ -198,6 +198,13 @@ uint8_t RX5808::readRssi() {
 
     // reads 5V value as 0-4095, RX5808 is 3.3V powered so RSSI pin will never output the full range
     volatile uint16_t rssi = analogRead(rssiInputPin);
+    // Debug: log raw ADC value periodically to diagnose RSSI issues
+    static uint32_t lastRssiDebugMs = 0;
+    uint32_t nowMs = millis();
+    if (nowMs - lastRssiDebugMs > 2000) {
+        lastRssiDebugMs = nowMs;
+        DEBUG("RSSI raw ADC (GPIO%d): %u\n", rssiInputPin, rssi);
+    }
     // clamp upper range to fit scaling
     if (rssi > 2047) rssi = 2047;
     // rescale to fit into a byte and remove some jitter TODO: experiment with exp or log

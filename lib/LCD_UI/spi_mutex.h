@@ -8,7 +8,7 @@
 // The LCD and SD card share FSPI pins (MOSI=38, SCK=39, MISO=40)
 // All SPI bus access must be serialized through this mutex.
 
-#if defined(WAVESHARE_ESP32S3_LCD2) && defined(ENABLE_LCD_UI) && ENABLE_LCD_UI
+#if (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE)) && defined(ENABLE_LCD_UI) && ENABLE_LCD_UI
 
 extern SemaphoreHandle_t g_spiMutex;
 

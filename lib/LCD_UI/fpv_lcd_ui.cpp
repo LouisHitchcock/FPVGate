@@ -85,7 +85,7 @@ FpvLcdUI::~FpvLcdUI() {
 }
 
 bool FpvLcdUI::begin() {
-#if !defined(ENABLE_LCD_UI) || !defined(WAVESHARE_ESP32S3_LCD2)
+#if !defined(ENABLE_LCD_UI) || (!defined(WAVESHARE_ESP32S3_LCD2) && !defined(NOVABLADE))
     return false;
 #endif
 

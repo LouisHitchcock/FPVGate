@@ -83,6 +83,35 @@
 #define PIN_SD_MOSI 35         // SAME AS DEVKITC
 #define PIN_SD_MISO 37         // SAME AS DEVKITC
 
+// NovaBlade (ESP32-S3, based on Waveshare ESP32-S3-LCD-2 layout)
+#elif defined(NOVABLADE)
+
+#define PIN_LED 14             // Status LED (GPIO2 used by RX5808 DATA)
+#define PIN_RGB_LED 15         // WS2812 RGB LED
+#define PIN_VBAT 5             // Battery voltage sense (200K/100K divider)
+#define VBAT_SCALE 3           // 3:1 voltage divider
+#define VBAT_ADD 0             // Calibration offset
+#define PIN_RX5808_RSSI 16     // RSSI on GPIO16
+#define PIN_RX5808_DATA 2      // CH1 (DATA) on GPIO2
+#define PIN_RX5808_SELECT 4    // CH2 (LE) on GPIO4
+#define PIN_RX5808_CLOCK 6     // CH3 (CLK) on GPIO6
+#define PIN_BUZZER 13          // Buzzer on GPIO13 (GPIO6 used by RX5808 CLOCK)
+#define BUZZER_INVERTED false
+#define PIN_MODE_SWITCH 9      // Mode selection
+#define PIN_POWER_SWITCH 7     // Power toggle switch (GPIO7 to GND = deep sleep)
+// SD Card SPI pins (shared with LCD)
+#define PIN_SD_CS 41
+#define PIN_SD_SCK 39
+#define PIN_SD_MOSI 38
+#define PIN_SD_MISO 40
+// Touch I2C pins (CST820)
+#define LCD_I2C_SDA 48
+#define LCD_I2C_SCL 47
+#define LCD_TOUCH_RST -1
+#define LCD_TOUCH_INT -1
+// LCD backlight
+#define LCD_BACKLIGHT 1
+
 // Waveshare ESP32-S3-LCD-2 (16MB Flash, 8MB PSRAM, built-in TF card)
 #elif defined(WAVESHARE_ESP32S3_LCD2)
 
@@ -224,18 +253,18 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
 
 // Boards with RGB LED support
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS) || defined(PIN_RGB_LED)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS) || defined(PIN_RGB_LED)
     #define HAS_RGB_LED 1
 #endif
 
 // Boards with built-in battery monitoring
-#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(SEEED_XIAO_ESP32S3) || defined(ENABLE_BATTERY_TEST)
+#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE) || defined(SEEED_XIAO_ESP32S3) || defined(XIAO_ESP32S3_PLUS) || defined(ENABLE_BATTERY_TEST)
     #define HAS_BATTERY_MONITOR 1
 #endif
 

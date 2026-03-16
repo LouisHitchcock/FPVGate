@@ -11,7 +11,8 @@
 // polluting the include chain.  It is included only in RX5808.cpp.
 #ifdef USE_ADC_DMA
 #if !defined(ESP32S3) && !defined(ESP32S3_SUPERMINI) && !defined(LILYGO_TENERGY_S3) && \
-    !defined(SEEED_XIAO_ESP32S3) && !defined(WAVESHARE_ESP32S3_LCD2) && !defined(ESP32C3)
+    !defined(SEEED_XIAO_ESP32S3) && !defined(WAVESHARE_ESP32S3_LCD2) && !defined(NOVABLADE) && \
+    !defined(FPVGATE_AIO) && !defined(XIAO_ESP32S3_PLUS) && !defined(ESP32C3)
 #error "USE_ADC_DMA is only supported on ESP32-S3 and ESP32-C3 board targets"
 #endif
 #endif
