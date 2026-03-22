@@ -95,6 +95,8 @@ var enterRssi = 120,
   exitRssi = 100;
 var frequency = 0;
 var announcerRate = 1.0;
+var loadedBandIndex = -1; // Band index loaded from device config (fallback for saves)
+var loadedChannelIndex = -1;
 
 
 var lapNo = -1;
@@ -121,6 +123,14 @@ var rhEnabled = 0;   // 1=RotorHazard mode enabled
 var syncedTimers = []; // Array of synced timer hostnames (for master mode)
 var masterHostname = ""; // Master hostname for slave mode
 var configLoaded = false; // Flag to prevent saving before initial config load
+
+// Split time state
+var splitGates = []; // Array of {hostname, gateNumber, distance} from config
+var splitSectors = []; // Latest sector data from SSE
+var splitBestSectors = {}; // Best sector times: key="from-to", value=ms
+var splitPersonalView = localStorage.getItem('splitPersonalView') !== '0'; // true = personal race view with full detail
+var thisSplitGateNumber = 0; // This device's split gate number (0 = not a split gate)
+var splitMasterHostname = ''; // Master hostname this split gate reports to
 
 // Unified sync devices list (new UI)
 // Each device: { address: string, role: 'disabled'|'master'|'slave', isThisDevice: boolean }
@@ -193,6 +203,21 @@ async function loadInitialSyncState() {
       }
       if (config.masterHostname !== undefined) {
         masterHostname = config.masterHostname;
+      }
+      
+      // Load split gate config
+      if (config.splitGates && Array.isArray(config.splitGates)) {
+        splitGates = config.splitGates.map(g => ({
+          hostname: g.hostname || '',
+          gateNumber: g.gateNumber || 1,
+          distance: g.distance || 0
+        }));
+      }
+      if (config.splitGateNumber !== undefined) {
+        thisSplitGateNumber = config.splitGateNumber;
+      }
+      if (config.splitMasterHostname !== undefined) {
+        splitMasterHostname = config.splitMasterHostname;
       }
       
       // Initialize sync devices and update UI
@@ -455,6 +480,21 @@ function setupWiFiEvents() {
       },
       false
     );
+    
+    eventSource.addEventListener(
+      "splitUpdate",
+      function (e) {
+        window.lastSSEEvent = Date.now();
+        console.log("[SSE] splitUpdate event:", e.data);
+        try {
+          const data = JSON.parse(e.data);
+          handleSplitUpdateEvent(data);
+        } catch (err) {
+          console.error("[SSE] Error parsing splitUpdate event:", err);
+        }
+      },
+      false
+    );
   }
 }
 
@@ -512,6 +552,9 @@ function resetLapDisplay() {
   // Clear remote pilots data
   remotePilots = {};
   
+  // Clear split time data
+  clearSplitData();
+  
   // Re-render unified view (will show empty state)
   renderUnifiedRaceView();
 }
@@ -564,6 +607,262 @@ function handleSlaveLapEvent(data) {
 
   // Announce via TTS
   announceRemotePilotLap(remotePilots[slaveHostname], lapTime);
+}
+
+// ============================================
+// Split Time Functions
+// ============================================
+
+// Handle split update SSE event from master
+function handleSplitUpdateEvent(data) {
+  console.log('[Split] Update received:', data);
+  
+  if (data.sectors && Array.isArray(data.sectors)) {
+    splitSectors = data.sectors;
+    
+    // Track best sector times
+    data.sectors.forEach(s => {
+      const key = `${s.from}-${s.to}`;
+      if (!splitBestSectors[key] || s.timeMs < splitBestSectors[key]) {
+        splitBestSectors[key] = s.timeMs;
+      }
+    });
+  }
+  
+  renderSplitTimesDisplay();
+}
+
+// Render split times panel in race tab
+function renderSplitTimesDisplay() {
+  const container = document.getElementById('splitTimesPanel');
+  if (!container) return;
+  
+  if (splitGates.length === 0 && splitSectors.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  
+  container.style.display = 'block';
+  
+  if (splitSectors.length === 0) {
+    container.innerHTML = '<h3>Split Times</h3><p class="no-data">Waiting for gate crossings...</p>';
+    return;
+  }
+  
+  // Group sectors by lap
+  const laps = {};
+  splitSectors.forEach(s => {
+    if (!laps[s.lap]) laps[s.lap] = [];
+    laps[s.lap].push(s);
+  });
+  
+  // Get unique sector keys (columns) in order
+  const sectorKeysSet = new Set();
+  splitSectors.forEach(s => sectorKeysSet.add(`${s.from}-${s.to}`));
+  const sectorKeys = [...sectorKeysSet];
+  
+  const lapKeys = Object.keys(laps).sort((a, b) => parseInt(a) - parseInt(b));
+  
+  let html = '<h3>Split Times</h3>';
+  html += '<table class="split-times-table"><thead><tr>';
+  html += '<th>Lap</th>';
+  
+  // Sector columns
+  sectorKeys.forEach(key => {
+    const [from, to] = key.split('-');
+    html += `<th>G${from} > G${to}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  
+  // One row per lap
+  lapKeys.forEach(lap => {
+    html += `<tr><td>Lap ${parseInt(lap) + 1}</td>`;
+    
+    sectorKeys.forEach(key => {
+      const sector = laps[lap].find(s => `${s.from}-${s.to}` === key);
+      if (sector) {
+        const timeStr = (sector.timeMs / 1000).toFixed(2);
+        const isBest = splitBestSectors[key] && sector.timeMs <= splitBestSectors[key];
+        const cls = isBest ? 'split-best' : '';
+        html += `<td class="${cls}">${timeStr}s</td>`;
+      } else {
+        html += '<td>-</td>';
+      }
+    });
+    
+    html += '</tr>';
+  });
+  
+  // Best row at bottom
+  html += '<tr style="font-weight: bold; border-top: 2px solid var(--border-color);"><td>Best</td>';
+  sectorKeys.forEach(key => {
+    const best = splitBestSectors[key];
+    html += `<td class="split-best">${best ? (best / 1000).toFixed(2) + 's' : '-'}</td>`;
+  });
+  html += '</tr>';
+  
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+// Clear split time data (called on race clear)
+function clearSplitData() {
+  splitSectors = [];
+  splitBestSectors = {};
+  renderSplitTimesDisplay();
+}
+
+// Render the Split Times config tab
+function renderSplitGatesConfig() {
+  const emptyState = document.getElementById('splitGatesEmptyState');
+  const configPanel = document.getElementById('splitGatesConfig');
+  const listContainer = document.getElementById('splitGatesList');
+  
+  if (!emptyState || !configPanel || !listContainer) return;
+  
+  if (splitGates.length === 0) {
+    emptyState.style.display = 'block';
+    configPanel.style.display = 'none';
+    return;
+  }
+  
+  emptyState.style.display = 'none';
+  configPanel.style.display = 'block';
+  
+  // Restore toggle state
+  const toggle = document.getElementById('splitPersonalViewToggle');
+  if (toggle) toggle.checked = splitPersonalView;
+  
+  // Sort gates by gate number
+  const sorted = [...splitGates].sort((a, b) => a.gateNumber - b.gateNumber);
+  
+  let html = '';
+  sorted.forEach((gate, idx) => {
+    const origIdx = splitGates.indexOf(gate);
+    html += `
+      <div style="padding: 12px; background-color: var(--bg-secondary); border-radius: 6px; margin-bottom: 8px; border-left: 3px solid var(--primary-color);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-weight: bold;">${gate.hostname}</span>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <label style="font-size: 13px; min-width: 80px;">Gate #:</label>
+          <select onchange="updateSplitGateNumber(${origIdx}, parseInt(this.value))" style="padding: 4px 8px; font-size: 13px;">
+            ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${gate.gateNumber === n ? 'selected' : ''}>Gate ${n}</option>`).join('')}
+          </select>
+          <label style="font-size: 13px; min-width: 100px; margin-left: 12px;">Distance (m):</label>
+          <input type="number" value="${gate.distance || 0}" min="0" step="0.1" style="width: 80px; padding: 4px 8px; font-size: 13px;" 
+            onchange="updateSplitGateDistance(${origIdx}, parseFloat(this.value))" placeholder="0" />
+        </div>
+      </div>
+    `;
+  });
+  
+  listContainer.innerHTML = html;
+  
+  // Render timeline
+  renderSplitTimeline(sorted);
+}
+
+// Update a split gate's gate number
+function updateSplitGateNumber(index, gateNum) {
+  if (index >= 0 && index < splitGates.length) {
+    splitGates[index].gateNumber = gateNum;
+    renderSplitGatesConfig();
+    autoSaveConfig();
+  }
+}
+
+// Update a split gate's distance
+function updateSplitGateDistance(index, distance) {
+  if (index >= 0 && index < splitGates.length) {
+    splitGates[index].distance = distance;
+    renderSplitGatesConfig();
+    autoSaveConfig();
+  }
+}
+
+// Render the visual course timeline
+function renderSplitTimeline(sortedGates) {
+  const container = document.getElementById('splitTimelineVisual');
+  if (!container || sortedGates.length === 0) return;
+  
+  const totalGates = sortedGates.length + 1; // +1 for finish/start gate
+  const width = container.clientWidth || 300;
+  const y = 30;
+  
+  let svg = `<svg width="${width}" height="60" viewBox="0 0 ${width} 60">`;
+  
+  // Draw line
+  svg += `<line x1="20" y1="${y}" x2="${width - 20}" y2="${y}" stroke="var(--secondary-color)" stroke-width="2" stroke-dasharray="4,4" />`;
+  
+  // Draw gate points
+  const spacing = (width - 40) / totalGates;
+  
+  sortedGates.forEach((gate, i) => {
+    const x = 20 + spacing * (i + 1);
+    svg += `<circle cx="${x}" cy="${y}" r="8" fill="var(--primary-color)" />`;
+    svg += `<text x="${x}" y="${y - 14}" text-anchor="middle" fill="var(--text-color)" font-size="11" font-weight="bold">G${gate.gateNumber}</text>`;
+    
+    if (gate.distance > 0) {
+      svg += `<text x="${x - spacing/2}" y="${y + 18}" text-anchor="middle" fill="var(--secondary-color)" font-size="10">${gate.distance}m</text>`;
+    }
+  });
+  
+  // Start/Finish gate
+  const startX = 20;
+  svg += `<circle cx="${startX}" cy="${y}" r="8" fill="#2ecc71" />`;
+  svg += `<text x="${startX}" y="${y - 14}" text-anchor="middle" fill="var(--text-color)" font-size="11" font-weight="bold">S/F</text>`;
+  
+  const finishX = width - 20;
+  svg += `<circle cx="${finishX}" cy="${y}" r="8" fill="#2ecc71" />`;
+  svg += `<text x="${finishX}" y="${y - 14}" text-anchor="middle" fill="var(--text-color)" font-size="11" font-weight="bold">S/F</text>`;
+  
+  svg += '</svg>';
+  container.innerHTML = svg;
+}
+
+// Toggle personal race view for split times mode
+function toggleSplitPersonalView(enabled) {
+  splitPersonalView = enabled;
+  console.log('[Split] Personal view:', enabled);
+  updateSlaveModelUI();
+  localStorage.setItem('splitPersonalView', enabled ? '1' : '0');
+}
+
+// Trigger manual clock sync with all split gates
+async function triggerSplitSync() {
+  try {
+    const response = await fetch('/api/splits/sync', { method: 'POST' });
+    if (response.ok) {
+      console.log('[Split] Manual sync triggered');
+      // Refresh sync status
+      setTimeout(loadSplitSyncStatus, 500);
+    }
+  } catch (err) {
+    console.error('[Split] Sync failed:', err);
+  }
+}
+
+// Load sync status from device
+async function loadSplitSyncStatus() {
+  try {
+    const response = await fetch('/api/splits/config');
+    if (response.ok) {
+      const data = await response.json();
+      const statusContainer = document.getElementById('splitSyncStatus');
+      if (statusContainer && data.gates) {
+        let html = '';
+        data.gates.forEach(gate => {
+          const syncColor = gate.synced ? '#2ecc71' : '#e74c3c';
+          const syncText = gate.synced ? `Synced (RTT: ${gate.rttMs}ms, offset: ${gate.offsetMs}ms)` : 'Not synced';
+          html += `<div style="padding: 8px; margin-bottom: 4px; font-size: 13px;"><span style="color: ${syncColor};">&#9679;</span> Gate ${gate.gateNumber} (${gate.hostname}): ${syncText}</div>`;
+        });
+        statusContainer.innerHTML = html;
+      }
+    }
+  } catch (err) {
+    console.error('[Split] Failed to load sync status:', err);
+  }
 }
 
 // Announce remote pilot lap via TTS
@@ -627,6 +926,12 @@ function getLocalPilotInfo() {
 
 // Render the race view - switches between personal (single) and multi-pilot view
 function renderUnifiedRaceView() {
+  // Split times mode uses personal view if toggle is on
+  if (splitGates.length > 0 && splitPersonalView) {
+    renderPersonalRaceView();
+    return;
+  }
+  
   // Use personal (single-pilot) view when sync is disabled
   if (raceSyncMode === 0) {
     renderPersonalRaceView();
@@ -1058,6 +1363,8 @@ onload = async function (e) {
     populateBandsBySystem("analog", calibBandSelect);
     
     // Restore band/channel selection - prioritize bandIndex/channelIndex if available
+    if (configData.bandIndex !== undefined) loadedBandIndex = configData.bandIndex;
+    if (configData.channelIndex !== undefined) loadedChannelIndex = configData.channelIndex;
     if (configData.bandIndex !== undefined && configData.channelIndex !== undefined) {
       // Determine which system this band belongs to
       const bandDef = bandDefinitions[configData.bandIndex];
@@ -1853,15 +2160,15 @@ async function saveConfig() {
   const receiverRadioSelect = document.getElementById("receiverRadio");
   
   // Save band and channel indices along with frequency for accurate restoration
-  // Get the actual band index from the dataset
-  let selectedBandIndex = 0;
+  // Get the actual band index from the dataset, falling back to last loaded value
+  let selectedBandIndex = loadedBandIndex >= 0 ? loadedBandIndex : 0;
   if (bandSelect && bandSelect.selectedIndex !== -1) {
     const selectedOption = bandSelect.options[bandSelect.selectedIndex];
-    if (selectedOption && selectedOption.dataset.bandIndex) {
+    if (selectedOption && selectedOption.dataset.bandIndex !== undefined) {
       selectedBandIndex = parseInt(selectedOption.dataset.bandIndex);
     }
   }
-  const selectedChannelIndex = channelSelect.selectedIndex;
+  const selectedChannelIndex = channelSelect.selectedIndex >= 0 ? channelSelect.selectedIndex : (loadedChannelIndex >= 0 ? loadedChannelIndex : 0);
   
   // Get battery settings
   const batteryTypeSelect = document.getElementById("batteryType");
@@ -1924,6 +2231,7 @@ async function saveConfig() {
     rhEnabled: (syncDevices.find(d => d.isThisDevice) || {}).role === 'rotorhazard' ? 1 : 0,
     rhHostIP: document.getElementById("rhHostIP") ? document.getElementById("rhHostIP").value : "",
     rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
+    splitGates: splitGates.map(g => ({ hostname: g.hostname, gateNumber: g.gateNumber, distance: g.distance || 0 })),
   };
 
   if (usbConnected && transportManager) {
@@ -3182,12 +3490,15 @@ function updateSlaveModelUI() {
   const stopBtn = document.getElementById("stopRaceButton");
   const clearBtn = document.getElementById("clearLapsButton");
   
+  const gateBannerEl = document.getElementById("splitGateBanner");
+  
   if (raceSyncMode === 2) {
     // Slave mode - disable buttons and show slave banner
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "block";
     if (masterBanner) masterBanner.style.display = "none";
     if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (gateBannerEl) gateBannerEl.style.display = "none";
     if (startBtn) {
       startBtn.disabled = true;
       startBtn.style.opacity = "0.5";
@@ -3202,6 +3513,7 @@ function updateSlaveModelUI() {
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "block";
     if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (gateBannerEl) gateBannerEl.style.display = "none";
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.style.opacity = "1";
@@ -3211,17 +3523,38 @@ function updateSlaveModelUI() {
       clearBtn.style.opacity = "1";
     }
   } else {
-    // Personal or RotorHazard mode - enable buttons
+    // Personal, Split Times, or RotorHazard mode - enable buttons
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "none";
+    const splitBanner = document.getElementById("splitModeRaceBanner");
     if (rhEnabled === 1) {
-      // RotorHazard mode - show RH banner instead of personal
+      // RotorHazard mode
       if (personalBanner) personalBanner.style.display = "none";
+      if (splitBanner) splitBanner.style.display = "none";
       if (rotorhazardBanner) rotorhazardBanner.style.display = "block";
+    } else if (thisSplitGateNumber > 0) {
+      // This device is a split gate
+      if (personalBanner) personalBanner.style.display = "none";
+      if (splitBanner) splitBanner.style.display = "none";
+      if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+      const gateBanner = document.getElementById("splitGateBanner");
+      if (gateBanner) {
+        gateBanner.textContent = `GATE ${thisSplitGateNumber}`;
+        gateBanner.style.display = "block";
+      }
+    } else if (splitGates.length > 0 && splitPersonalView) {
+      // Split Times mode (master with personal view)
+      if (personalBanner) personalBanner.style.display = "none";
+      if (splitBanner) splitBanner.style.display = "block";
+      if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+      const gateBanner = document.getElementById("splitGateBanner");
+      if (gateBanner) gateBanner.style.display = "none";
     } else {
       // Personal mode
       if (personalBanner) personalBanner.style.display = "block";
+      if (splitBanner) splitBanner.style.display = "none";
       if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+      if (gateBannerEl) gateBannerEl.style.display = "none";
     }
     if (startBtn) {
       startBtn.disabled = false;
@@ -3443,6 +3776,8 @@ function initSyncDevicesFromConfig() {
   let thisDeviceRole = 'personal';
   if (rhEnabled === 1) {
     thisDeviceRole = 'rotorhazard';
+  } else if (thisSplitGateNumber > 0) {
+    thisDeviceRole = 'splitgate';
   } else if (raceSyncMode === 1) {
     thisDeviceRole = 'master';
   } else if (raceSyncMode === 2) {
@@ -3466,9 +3801,8 @@ function initSyncDevicesFromConfig() {
     });
   }
   
-  // Add master hostname (from slave config) as master
+  // Add master hostname (from slave config or split gate config) as master
   if (masterHostname && raceSyncMode === 2) {
-    // Check if already in list
     const exists = syncDevices.some(d => d.address === masterHostname);
     if (!exists) {
       syncDevices.push({
@@ -3477,6 +3811,32 @@ function initSyncDevicesFromConfig() {
         isThisDevice: false
       });
     }
+  }
+  
+  // For split gate devices: add the split master as a "master" device
+  if (thisSplitGateNumber > 0 && splitMasterHostname) {
+    const exists = syncDevices.some(d => d.address === splitMasterHostname);
+    if (!exists) {
+      syncDevices.push({
+        address: splitMasterHostname,
+        role: 'master',
+        isThisDevice: false
+      });
+    }
+  }
+  
+  // Add split gate devices
+  if (splitGates && splitGates.length > 0) {
+    splitGates.forEach(gate => {
+      const exists = syncDevices.some(d => d.address === gate.hostname);
+      if (!exists) {
+        syncDevices.push({
+          address: gate.hostname,
+          role: 'splitgate',
+          isThisDevice: false
+        });
+      }
+    });
   }
   
   console.log('[Sync] Initialized sync devices:', syncDevices);
@@ -3490,15 +3850,23 @@ function mapSyncDevicesToConfig() {
     if (thisDevice.role === 'rotorhazard') {
       raceSyncMode = 0;
       rhEnabled = 1;
+      thisSplitGateNumber = 0;
+    } else if (thisDevice.role === 'splitgate') {
+      raceSyncMode = 0;
+      rhEnabled = 0;
+      // thisSplitGateNumber is set by master push, don't clear it here
     } else if (thisDevice.role === 'master') {
       raceSyncMode = 1;
       rhEnabled = 0;
+      thisSplitGateNumber = 0;
     } else if (thisDevice.role === 'slave') {
       raceSyncMode = 2;
       rhEnabled = 0;
+      thisSplitGateNumber = 0;
     } else {
       raceSyncMode = 0;
       rhEnabled = 0;
+      thisSplitGateNumber = 0;
     }
   }
   
@@ -3511,10 +3879,26 @@ function mapSyncDevicesToConfig() {
     .filter(d => d.role === 'slave' && !d.isThisDevice)
     .map(d => d.address);
   
-  console.log('[Sync] Mapped config - mode:', raceSyncMode, 'master:', masterHostname, 'slaves:', syncedTimers);
+  // Build splitGates array - preserve existing gate config (gate numbers, distances)
+  const newSplitGateDevices = syncDevices.filter(d => d.role === 'splitgate' && !d.isThisDevice);
+  const updatedSplitGates = [];
+  newSplitGateDevices.forEach((d, i) => {
+    const existing = splitGates.find(g => g.hostname === d.address);
+    if (existing) {
+      updatedSplitGates.push(existing);
+    } else {
+      updatedSplitGates.push({ hostname: d.address, gateNumber: i + 1, distance: 0 });
+    }
+  });
+  splitGates = updatedSplitGates;
+  
+  console.log('[Sync] Mapped config - mode:', raceSyncMode, 'master:', masterHostname, 'slaves:', syncedTimers, 'splitGates:', splitGates);
   
   // Update UI elements that depend on mode
   updateRaceSyncMode(raceSyncMode, true);
+  
+  // Update split gates config tab
+  renderSplitGatesConfig();
 }
 
 // Render the unified sync devices list
@@ -3552,6 +3936,7 @@ function renderSyncDevicesList() {
             <option value="personal" ${device.role === 'personal' ? 'selected' : ''}>${i18n.t("settings.sync.role_personal") || "Personal"}</option>
             <option value="master" ${device.role === 'master' ? 'selected' : ''} ${!canBeMaster ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
             <option value="slave" ${device.role === 'slave' ? 'selected' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
+            <option value="splitgate" ${device.role === 'splitgate' ? 'selected' : ''}>Split Gate</option>
             ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''}>RotorHazard</option>` : ''}
           </select>
           ${!isThisDevice ? `
@@ -4456,13 +4841,15 @@ function updateAnalysisSectionVisibility() {
   const lapAnalysis = document.getElementById("lapAnalysis");
   const raceAnalysis = document.getElementById("raceAnalysis");
   
-  if (raceSyncMode === 1 || raceSyncMode === 2) {
+  const usePersonal = (splitGates.length > 0 && splitPersonalView) || raceSyncMode === 0;
+  
+  if (!usePersonal) {
     // Sync mode - show Race Analysis
     if (lapAnalysis) lapAnalysis.style.display = "none";
     if (raceAnalysis) raceAnalysis.style.display = "block";
     updateRaceAnalysisView();
   } else {
-    // Personal mode - show Lap Analysis
+    // Personal mode or Split Times personal mode - show Lap Analysis
     if (lapAnalysis) lapAnalysis.style.display = "block";
     if (raceAnalysis) raceAnalysis.style.display = "none";
     updateAnalysisView();
@@ -7863,8 +8250,25 @@ function openSettingsModal() {
     fetch("/config")
       .then((response) => response.json())
       .then((config) => {
-        // Populate all device config fields
-        if (config.freq !== undefined) setBandChannelIndex(config.freq);
+        // Populate all device config fields - restore band/channel from indices if available
+        if (config.bandIndex !== undefined && config.channelIndex !== undefined) {
+          loadedBandIndex = config.bandIndex;
+          loadedChannelIndex = config.channelIndex;
+          const bandDef = bandDefinitions[config.bandIndex];
+          if (bandDef) {
+            currentSystem = bandDef.system;
+            if (systemSelect) systemSelect.value = currentSystem;
+            if (calibSystemSelect) calibSystemSelect.value = currentSystem;
+            populateBandsBySystem(currentSystem, bandSelect);
+            populateBandsBySystem(currentSystem, calibBandSelect);
+            const bandOption = Array.from(bandSelect.options).find(opt => opt.value === bandDef.value);
+            if (bandOption) bandSelect.value = bandDef.value;
+            channelSelect.selectedIndex = config.channelIndex;
+            updateChannelAvailability(bandSelect);
+          }
+        } else if (config.freq !== undefined) {
+          setBandChannelIndex(config.freq);
+        }
         if (config.minLap !== undefined) {
           minLapInput.value = (parseFloat(config.minLap) / 10).toFixed(1);
           updateMinLap(minLapInput, minLapInput.value);
@@ -8016,9 +8420,25 @@ function openSettingsModal() {
           masterHostname = config.masterHostname;
         }
         
+      // Load split gate config BEFORE initializing sync devices
+        if (config.splitGates && Array.isArray(config.splitGates)) {
+          splitGates = config.splitGates.map(g => ({
+            hostname: g.hostname || '',
+            gateNumber: g.gateNumber || 1,
+            distance: g.distance || 0
+          }));
+        }
+        if (config.splitGateNumber !== undefined) {
+          thisSplitGateNumber = config.splitGateNumber;
+        }
+        if (config.splitMasterHostname !== undefined) {
+          splitMasterHostname = config.splitMasterHostname;
+        }
+        
         // Initialize unified sync devices list from loaded config
         initSyncDevicesFromConfig();
         renderSyncDevicesList();
+        renderSplitGatesConfig();
         
         // Ensure mode UI is updated (badges, race view)
         updateSlaveModelUI();

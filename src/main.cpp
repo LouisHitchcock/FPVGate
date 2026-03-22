@@ -9,6 +9,7 @@
 #include "usb.h"
 #include "webhook.h"
 #include "rotorhazard.h"
+#include "splittime.h"
 // DISABLED FOR NOW: #include "nodemode.h"  // Uncomment to re-enable RotorHazard support
 #include <ElegantOTA.h>
 #ifdef HAS_RGB_LED
@@ -61,6 +62,7 @@ static RaceHistory raceHistory;
 static TrackManager trackManager;
 static WebhookManager webhookManager;
 static RHManager rhManager;
+static SplitTimeManager splitManager;
 #ifdef HAS_RGB_LED
 static RgbLed rgbLed;
 RgbLed* g_rgbLed = &rgbLed;
@@ -242,10 +244,15 @@ void setup() {
     rhManager.init(&config);
     
 #ifdef HAS_BATTERY_MONITOR
-    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager, &splitManager);
 #else
-    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager, &splitManager);
 #endif
+    
+    // Load split gate distances from config into SplitTimeManager
+    for (uint8_t i = 0; i < config.getSplitGateCount(); i++) {
+        splitManager.setGateDistance(config.getSplitGateNumberAt(i), config.getSplitGateDistance(i));
+    }
     
     // Initialize USB transport
 #ifdef HAS_BATTERY_MONITOR
@@ -309,6 +316,19 @@ void loop() {
         
         // If in slave mode, also send lap to master
         ws.sendLapToMaster(lapTime);
+        
+        // If this device is a split gate, send crossing to master
+        if (config.getSplitGateNumber() > 0) {
+            ws.sendSplitCrossingToMaster(timer.getLastCrossingRaceTimeMs());
+        }
+        
+        // If this device has split gates configured (is master), feed local crossing
+        if (config.getSplitGateCount() > 0) {
+            // Master's own gate - use its own gate number or treat as finish gate
+            // The master gate is implicitly the start/finish gate
+            uint8_t masterGateNum = config.getSplitGateCount() + 1; // After all split gates
+            splitManager.addCrossing(masterGateNum, timer.getLastCrossingRaceTimeMs());
+        }
     }
     
 #ifdef HAS_I2S_AUDIO

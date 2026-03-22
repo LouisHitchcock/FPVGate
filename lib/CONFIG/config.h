@@ -211,15 +211,17 @@
 #define WIFI_MODE LOW          // GND on switch pin = WiFi/Standalone mode
 #define ROTORHAZARD_MODE HIGH  // HIGH (floating/pullup) = RotorHazard node mode
 
-#define EEPROM_RESERVED_SIZE 768
+#define EEPROM_RESERVED_SIZE 1024
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 16U
+#define CONFIG_VERSION 17U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
 #define RACE_SYNC_MASTER 1
 #define RACE_SYNC_SLAVE 2
+
+#define MAX_SPLIT_GATES 8
 
 #define EEPROM_CHECK_TIME_MS 1000
 
@@ -295,6 +297,13 @@ typedef struct {
     uint8_t rhEnabled;               // RH integration enabled (0=disabled, 1=enabled)
     char rhHostIP[32];               // RH server IP or hostname
     uint8_t rhNodeIndex;             // Node/seat index on RH (0-7)
+    // Split time gate configuration
+    uint8_t splitGateNumber;         // This device's gate number (0=not a split gate, 1-8)
+    char splitMasterHostname[32];    // Master hostname to report crossings to (for gate devices)
+    char splitGates[MAX_SPLIT_GATES][32];  // Split gate device hostnames (master stores these)
+    uint8_t splitGateCount;          // Number of configured split gates
+    uint8_t splitGateNumbers[MAX_SPLIT_GATES]; // Gate order (1-8) for each split gate device
+    float splitGateDistances[MAX_SPLIT_GATES]; // Distance in meters from previous gate to this gate
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -436,6 +445,21 @@ class Config {
     uint16_t getNovaKalmanQ();
     uint8_t getNovaEmaAlpha();
     uint8_t getNovaStepMax();
+    
+    // Split time gate config
+    uint8_t getSplitGateNumber();
+    void setSplitGateNumber(uint8_t gateNum);
+    char* getSplitMasterHostname();
+    void setSplitMasterHostname(const char* hostname);
+    uint8_t getSplitGateCount();
+    const char* getSplitGate(uint8_t index);
+    uint8_t getSplitGateNumberAt(uint8_t index);
+    float getSplitGateDistance(uint8_t index);
+    bool addSplitGate(const char* hostname);
+    bool removeSplitGate(const char* hostname);
+    void clearSplitGates();
+    void setSplitGateNumberAt(uint8_t index, uint8_t gateNum);
+    void setSplitGateDistance(uint8_t index, float distance);
 
    private:
     laptimer_config_t conf;

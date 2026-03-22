@@ -41,7 +41,7 @@ static const char *wifi_ap_password = "fpvgate1";
 static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
-void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr) {
+void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr, SplitTimeManager *splitMgr) {
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -63,6 +63,7 @@ void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMoni
     trackManager = trackMgr;
     webhooks = webhookMgr;
     rhManager = rhMgr;
+    splitManager = splitMgr;
     transportMgr = nullptr;
 
     wifi_ap_ssid = String(wifi_ap_ssid_prefix) + "_" + WiFi.macAddress().substring(WiFi.macAddress().length() - 6);
@@ -136,6 +137,162 @@ void Webserver::sendSlaveLapEvent(uint32_t lapTimeMs, const char* pilotName, con
     String output;
     serializeJson(doc, output);
     events.send(output.c_str(), "slaveLap");
+}
+
+// Send split gate crossing to master
+void Webserver::sendSplitCrossingToMaster(uint32_t raceElapsedMs) {
+    uint8_t gateNumber = conf->getSplitGateNumber();
+    if (gateNumber == 0) return;
+    
+    const char* masterHostname = conf->getSplitMasterHostname();
+    if (masterHostname[0] == '\0') {
+        DEBUG("[SplitGate] No master hostname configured\n");
+        return;
+    }
+    
+    char url[96];
+    snprintf(url, sizeof(url), "http://%s/timer/splitCrossing", masterHostname);
+    
+    DEBUG("[SplitGate] Sending crossing to master: %s (gate=%u elapsed=%u ms)\n", url, gateNumber, raceElapsedMs);
+    
+    HTTPClient http;
+    http.setConnectTimeout(500);
+    http.setTimeout(1000);
+    
+    if (http.begin(url)) {
+        http.addHeader("Content-Type", "application/json");
+        
+        DynamicJsonDocument doc(128);
+        doc["gateNumber"] = gateNumber;
+        doc["raceElapsedMs"] = raceElapsedMs;
+        doc["gateHostname"] = String(wifi_hostname) + ".local";
+        
+        String payload;
+        serializeJson(doc, payload);
+        
+        int httpCode = http.POST(payload);
+        if (httpCode <= 0) {
+            DEBUG("[SplitGate] FAILED: %s\n", http.errorToString(httpCode).c_str());
+        } else {
+            DEBUG("[SplitGate] Sent OK (HTTP %d)\n", httpCode);
+        }
+        http.end();
+    } else {
+        DEBUG("[SplitGate] http.begin() FAILED\n");
+    }
+}
+
+// Push gate config to all split gate devices (tell each gate its number and our address)
+void Webserver::pushSplitGateConfigs() {
+    uint8_t gateCount = conf->getSplitGateCount();
+    if (gateCount == 0) return;
+    
+    // Determine our address (what gate devices should report back to)
+    String masterAddr;
+    if (WiFi.getMode() == WIFI_AP) {
+        masterAddr = WiFi.softAPIP().toString();
+    } else {
+        masterAddr = WiFi.localIP().toString();
+    }
+    
+    DEBUG("[Split] Pushing gate config to %d device(s), master=%s\n", gateCount, masterAddr.c_str());
+    
+    for (uint8_t i = 0; i < gateCount; i++) {
+        const char* hostname = conf->getSplitGate(i);
+        if (!hostname || hostname[0] == '\0') continue;
+        
+        uint8_t gateNumber = conf->getSplitGateNumberAt(i);
+        
+        char url[96];
+        snprintf(url, sizeof(url), "http://%s/timer/splitGateConfig", hostname);
+        
+        HTTPClient http;
+        http.setConnectTimeout(500);
+        http.setTimeout(1000);
+        
+        if (http.begin(url)) {
+            http.addHeader("Content-Type", "application/json");
+            
+            DynamicJsonDocument doc(128);
+            doc["gateNumber"] = gateNumber;
+            doc["masterHostname"] = masterAddr;
+            
+            String payload;
+            serializeJson(doc, payload);
+            
+            int httpCode = http.POST(payload);
+            if (httpCode > 0) {
+                DEBUG("[Split] Pushed config to %s: gate=%u (HTTP %d)\n", hostname, gateNumber, httpCode);
+            } else {
+                DEBUG("[Split] FAILED to push config to %s: %s\n", hostname, http.errorToString(httpCode).c_str());
+            }
+            http.end();
+        }
+    }
+}
+
+// Sync clocks with all split gate devices (NTP-style)
+void Webserver::syncSplitGateClocks() {
+    if (!splitManager) return;
+    
+    uint8_t gateCount = conf->getSplitGateCount();
+    if (gateCount == 0) return;
+    
+    DEBUG("[Split] Syncing clocks with %d gate(s)...\n", gateCount);
+    
+    for (uint8_t i = 0; i < gateCount; i++) {
+        const char* hostname = conf->getSplitGate(i);
+        if (!hostname || hostname[0] == '\0') continue;
+        
+        int32_t bestOffset = 0;
+        uint32_t bestRtt = UINT32_MAX;
+        
+        // Perform 3 sync attempts, keep the one with lowest RTT
+        for (uint8_t attempt = 0; attempt < 3; attempt++) {
+            uint32_t sendMs = millis();
+            
+            char url[96];
+            snprintf(url, sizeof(url), "http://%s/timer/clockSync?masterMs=%u", hostname, sendMs);
+            
+            HTTPClient http;
+            http.setConnectTimeout(500);
+            http.setTimeout(1000);
+            
+            if (http.begin(url)) {
+                int httpCode = http.GET();
+                uint32_t receiveMs = millis();
+                
+                if (httpCode == 200) {
+                    String response = http.getString();
+                    DynamicJsonDocument doc(128);
+                    if (!deserializeJson(doc, response)) {
+                        uint32_t gateMs = doc["gateMs"] | 0;
+                        uint32_t rtt = receiveMs - sendMs;
+                        int32_t offset = (int32_t)((sendMs + receiveMs) / 2) - (int32_t)gateMs;
+                        
+                        if (rtt < bestRtt) {
+                            bestRtt = rtt;
+                            bestOffset = offset;
+                        }
+                        DEBUG("[Split] Sync attempt %d: gate=%s RTT=%u offset=%d\n",
+                              attempt + 1, hostname, rtt, offset);
+                    }
+                }
+                http.end();
+            }
+            
+            delay(50); // Brief pause between attempts
+        }
+        
+        if (bestRtt < UINT32_MAX) {
+            splitManager->setClockOffset(i, bestOffset, bestRtt);
+            DEBUG("[Split] Gate %d (%s): offset=%d ms, RTT=%u ms\n", i, hostname, bestOffset, bestRtt);
+        } else {
+            DEBUG("[Split] Gate %d (%s): sync FAILED\n", i, hostname);
+        }
+    }
+    
+    DEBUG("[Split] Clock sync complete\n");
 }
 
 // Send lap data to master (for slave mode)
@@ -635,8 +792,31 @@ EEPROM:\n\
     });
     
     server.on("/timer/start", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
-        // Send sync to slaves first (if master)
-        sendSyncCommand(conf, "/timer/start");
+        // Configure and sync split gates before starting (if configured)
+        if (splitManager && conf->getSplitGateCount() > 0) {
+            pushSplitGateConfigs();
+            syncSplitGateClocks();
+            splitManager->clearAll();
+            // Send start command to split gate devices
+            sendSyncCommand(conf, "/timer/start");
+            for (uint8_t i = 0; i < conf->getSplitGateCount(); i++) {
+                const char* hostname = conf->getSplitGate(i);
+                if (hostname && hostname[0] != '\0') {
+                    char url[64];
+                    snprintf(url, sizeof(url), "http://%s/timer/start", hostname);
+                    HTTPClient http;
+                    http.setConnectTimeout(500);
+                    http.setTimeout(1000);
+                    if (http.begin(url)) {
+                        http.POST("");
+                        http.end();
+                    }
+                }
+            }
+        } else {
+            // Send sync to slaves first (if master)
+            sendSyncCommand(conf, "/timer/start");
+        }
         // Start local timer
         timer->start();
         // Notify RotorHazard (queued, sent on next process() tick)
@@ -664,6 +844,23 @@ EEPROM:\n\
     });
 
     server.on("/timer/stop", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        // Send stop to split gate devices (if configured)
+        if (conf->getSplitGateCount() > 0) {
+            for (uint8_t i = 0; i < conf->getSplitGateCount(); i++) {
+                const char* hostname = conf->getSplitGate(i);
+                if (hostname && hostname[0] != '\0') {
+                    char url[64];
+                    snprintf(url, sizeof(url), "http://%s/timer/stop", hostname);
+                    HTTPClient http;
+                    http.setConnectTimeout(500);
+                    http.setTimeout(1000);
+                    if (http.begin(url)) {
+                        http.POST("");
+                        http.end();
+                    }
+                }
+            }
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/stop");
         // Stop local timer
@@ -874,6 +1071,198 @@ EEPROM:\n\
         request->send(response);
     });
     server.addHandler(remoteLapHandler);
+
+    // Split gate config push endpoint - master tells gate device its role
+    server.on("/timer/splitGateConfig", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse(204);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+        request->send(response);
+    });
+    
+    AsyncCallbackJsonWebHandler *splitGateConfigHandler = new AsyncCallbackJsonWebHandler("/timer/splitGateConfig", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject jsonObj = json.as<JsonObject>();
+        
+        uint8_t gateNumber = jsonObj["gateNumber"] | 0;
+        const char* masterHostname = jsonObj["masterHostname"] | "";
+        
+        DEBUG("[SplitGate] Config received: gate=%u master=%s\n", gateNumber, masterHostname);
+        
+        if (gateNumber > 0 && gateNumber <= MAX_SPLIT_GATES) {
+            conf->setSplitGateNumber(gateNumber);
+            conf->setSplitMasterHostname(masterHostname);
+            DEBUG("[SplitGate] Configured as gate %u, reporting to %s\n", gateNumber, masterHostname);
+        } else if (gateNumber == 0) {
+            // Clear split gate config
+            conf->setSplitGateNumber(0);
+            conf->setSplitMasterHostname("");
+            DEBUG("[SplitGate] Split gate config cleared\n");
+        }
+        
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"status\": \"OK\"}");
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+    server.addHandler(splitGateConfigHandler);
+
+    // Clock sync endpoint for split gate devices (responds as fast as possible)
+    server.on("/timer/clockSync", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        uint32_t gateMs = millis();
+        uint32_t masterMs = 0;
+        if (request->hasParam("masterMs")) {
+            masterMs = request->getParam("masterMs")->value().toInt();
+        }
+        
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{\"gateMs\":%u,\"masterMs\":%u}", gateMs, masterMs);
+        
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", buf);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+
+    // Split crossing endpoint - receives crossing data from split gate devices
+    server.on("/timer/splitCrossing", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse(204);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        response->addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+        request->send(response);
+    });
+    
+    AsyncCallbackJsonWebHandler *splitCrossingHandler = new AsyncCallbackJsonWebHandler("/timer/splitCrossing", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject jsonObj = json.as<JsonObject>();
+        
+        uint8_t gateNumber = jsonObj["gateNumber"] | 0;
+        uint32_t raceElapsedMs = jsonObj["raceElapsedMs"] | 0;
+        const char* gateHostname = jsonObj["gateHostname"] | "unknown";
+        
+        DEBUG("[Master] Split crossing from %s: gate=%u elapsed=%u ms\n", gateHostname, gateNumber, raceElapsedMs);
+        
+        if (splitManager && gateNumber > 0) {
+            // Apply clock offset correction
+            // Find gate index by hostname
+            for (uint8_t i = 0; i < conf->getSplitGateCount(); i++) {
+                const char* cfgHostname = conf->getSplitGate(i);
+                if (cfgHostname && strcmp(cfgHostname, gateHostname) == 0) {
+                    GateClockSync sync = splitManager->getClockSync(i);
+                    if (sync.synced) {
+                        int32_t corrected = (int32_t)raceElapsedMs + sync.offsetMs;
+                        if (corrected > 0) {
+                            raceElapsedMs = (uint32_t)corrected;
+                        }
+                        DEBUG("[Master] Clock corrected: offset=%d corrected=%u\n", sync.offsetMs, raceElapsedMs);
+                    }
+                    break;
+                }
+            }
+            
+            splitManager->addCrossing(gateNumber, raceElapsedMs);
+            
+            // Broadcast split update via SSE
+            if (servicesStarted) {
+                DynamicJsonDocument doc(256);
+                doc["gateNumber"] = gateNumber;
+                doc["raceElapsedMs"] = raceElapsedMs;
+                doc["gateHostname"] = gateHostname;
+                
+                // Include latest sector times
+                SectorSplit splits[16];
+                uint8_t splitCount = splitManager->getSplits(splits, 16);
+                JsonArray splitsArr = doc.createNestedArray("sectors");
+                for (uint8_t i = 0; i < splitCount; i++) {
+                    JsonObject s = splitsArr.createNestedObject();
+                    s["from"] = splits[i].fromGate;
+                    s["to"] = splits[i].toGate;
+                    s["timeMs"] = splits[i].sectorTimeMs;
+                    s["lap"] = splits[i].lapIndex;
+                }
+                
+                String output;
+                serializeJson(doc, output);
+                events.send(output.c_str(), "splitUpdate");
+            }
+        }
+        
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"status\": \"OK\"}");
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+    server.addHandler(splitCrossingHandler);
+
+    // Split time data endpoint
+    server.on("/api/splits", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(2048);
+        
+        if (splitManager) {
+            SectorSplit splits[64];
+            uint8_t splitCount = splitManager->getSplits(splits, 64);
+            
+            JsonArray sectorsArr = doc.createNestedArray("sectors");
+            for (uint8_t i = 0; i < splitCount; i++) {
+                JsonObject s = sectorsArr.createNestedObject();
+                s["fromGate"] = splits[i].fromGate;
+                s["toGate"] = splits[i].toGate;
+                s["sectorTimeMs"] = splits[i].sectorTimeMs;
+                s["distanceM"] = splits[i].distanceM;
+                s["speedMps"] = splits[i].speedMps;
+                s["lapIndex"] = splits[i].lapIndex;
+                
+                // Include best time for this sector
+                s["bestTimeMs"] = splitManager->getBestSectorTime(splits[i].fromGate, splits[i].toGate);
+            }
+            doc["crossingCount"] = splitManager->getCrossingCount();
+            doc["gateCount"] = splitManager->getGateCount();
+        } else {
+            doc["sectors"] = serialized("[]");
+            doc["crossingCount"] = 0;
+            doc["gateCount"] = 0;
+        }
+        
+        String output;
+        serializeJson(doc, output);
+        
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", output);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+
+    // Split time config endpoint
+    server.on("/api/splits/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(1024);
+        
+        doc["splitGateCount"] = conf->getSplitGateCount();
+        JsonArray gates = doc.createNestedArray("gates");
+        for (uint8_t i = 0; i < conf->getSplitGateCount(); i++) {
+            JsonObject gate = gates.createNestedObject();
+            gate["hostname"] = conf->getSplitGate(i);
+            gate["gateNumber"] = conf->getSplitGateNumberAt(i);
+            gate["distance"] = conf->getSplitGateDistance(i);
+            
+            if (splitManager) {
+                GateClockSync sync = splitManager->getClockSync(i);
+                gate["synced"] = sync.synced;
+                gate["offsetMs"] = sync.offsetMs;
+                gate["rttMs"] = sync.rttMs;
+                gate["lastSyncMs"] = sync.lastSyncMs;
+            }
+        }
+        
+        String output;
+        serializeJson(doc, output);
+        
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", output);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+
+    // Manual clock sync trigger (also pushes gate config)
+    server.on("/api/splits/sync", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        pushSplitGateConfigs();
+        syncSplitGateClocks();
+        sendCorsResponse(request, "{\"status\": \"OK\"}");
+    });
 
     server.on("/timer/rssiStart", HTTP_POST, [this](AsyncWebServerRequest *request) {
         sendRssi = true;

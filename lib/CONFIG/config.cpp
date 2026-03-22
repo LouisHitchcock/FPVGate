@@ -86,12 +86,32 @@ void Config::load(void) {
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
         
-        // Migration from version 15 to 16: add RotorHazard integration fields
-        if (version == 15) {
-            DEBUG("Migrating config from v15 to v16 (adding RH integration fields)\n");
+        // Migration from version 16 to 17: add split time gate fields
+        if (version == 16) {
+            DEBUG("Migrating config from v16 to v17 (adding split time gate fields)\n");
+            conf.splitGateNumber = 0;
+            memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+            memset(conf.splitGates, 0, sizeof(conf.splitGates));
+            conf.splitGateCount = 0;
+            memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+            memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 15 to 17
+        else if (version == 15) {
+            DEBUG("Migrating config from v15 to v17 (adding RH + split gate fields)\n");
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.splitGateNumber = 0;
+            memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+            memset(conf.splitGates, 0, sizeof(conf.splitGates));
+            conf.splitGateCount = 0;
+            memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+            memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -240,7 +260,7 @@ void Config::write(void) {
 
 void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor) {
     // Use https://arduinojson.org/v6/assistant to estimate memory
-    DynamicJsonDocument config(1024);
+    DynamicJsonDocument config(2048);
     config["freq"] = conf.frequency;
     
     // Use stored band/channel indices if valid, otherwise compute from frequency
@@ -344,6 +364,18 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["rhEnabled"] = conf.rhEnabled;
     config["rhHostIP"] = conf.rhHostIP;
     config["rhNodeIndex"] = conf.rhNodeIndex;
+    
+    // Split time gate config
+    config["splitGateNumber"] = conf.splitGateNumber;
+    config["splitMasterHostname"] = conf.splitMasterHostname;
+    config["splitGateCount"] = conf.splitGateCount;
+    JsonArray splitGatesArr = config.createNestedArray("splitGates");
+    for (uint8_t i = 0; i < conf.splitGateCount; i++) {
+        JsonObject gate = splitGatesArr.createNestedObject();
+        gate["hostname"] = conf.splitGates[i];
+        gate["gateNumber"] = conf.splitGateNumbers[i];
+        gate["distance"] = conf.splitGateDistances[i];
+    }
     
     // Add battery voltage if monitor exists
     if (batteryMonitor) {
@@ -768,6 +800,38 @@ void Config::fromJson(JsonObject source) {
             conf.rhNodeIndex = val;
             modified = true;
         }
+    }
+    // Split time gate config
+    if (source.containsKey("splitGateNumber") && source["splitGateNumber"] != conf.splitGateNumber) {
+        uint8_t val = source["splitGateNumber"].as<uint8_t>();
+        if (val <= MAX_SPLIT_GATES) {
+            conf.splitGateNumber = val;
+            modified = true;
+        }
+    }
+    if (source.containsKey("splitMasterHostname")) {
+        const char* v = source["splitMasterHostname"] | "";
+        if (strcmp(v, conf.splitMasterHostname) != 0) {
+            strlcpy(conf.splitMasterHostname, v, sizeof(conf.splitMasterHostname));
+            modified = true;
+        }
+    }
+    if (source.containsKey("splitGates")) {
+        JsonArray gateArray = source["splitGates"].as<JsonArray>();
+        memset(conf.splitGates, 0, sizeof(conf.splitGates));
+        memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+        memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+        conf.splitGateCount = 0;
+        for (JsonVariant gateVar : gateArray) {
+            if (conf.splitGateCount >= MAX_SPLIT_GATES) break;
+            JsonObject gate = gateVar.as<JsonObject>();
+            const char* hostname = gate["hostname"] | "";
+            strlcpy(conf.splitGates[conf.splitGateCount], hostname, 32);
+            conf.splitGateNumbers[conf.splitGateCount] = gate["gateNumber"] | 0;
+            conf.splitGateDistances[conf.splitGateCount] = gate["distance"] | 0.0f;
+            conf.splitGateCount++;
+        }
+        modified = true;
     }
 }
 
@@ -1304,6 +1368,84 @@ void Config::setRhNodeIndex(uint8_t index) {
     }
 }
 
+// Split time gate getters/setters
+uint8_t Config::getSplitGateNumber() { return conf.splitGateNumber; }
+void Config::setSplitGateNumber(uint8_t gateNum) {
+    if (gateNum <= MAX_SPLIT_GATES && conf.splitGateNumber != gateNum) {
+        conf.splitGateNumber = gateNum;
+        modified = true;
+    }
+}
+char* Config::getSplitMasterHostname() { return conf.splitMasterHostname; }
+void Config::setSplitMasterHostname(const char* hostname) {
+    if (strcmp(hostname, conf.splitMasterHostname) != 0) {
+        strlcpy(conf.splitMasterHostname, hostname, sizeof(conf.splitMasterHostname));
+        modified = true;
+    }
+}
+uint8_t Config::getSplitGateCount() { return conf.splitGateCount; }
+const char* Config::getSplitGate(uint8_t index) {
+    if (index < conf.splitGateCount) return conf.splitGates[index];
+    return nullptr;
+}
+uint8_t Config::getSplitGateNumberAt(uint8_t index) {
+    if (index < conf.splitGateCount) return conf.splitGateNumbers[index];
+    return 0;
+}
+float Config::getSplitGateDistance(uint8_t index) {
+    if (index < conf.splitGateCount) return conf.splitGateDistances[index];
+    return 0.0f;
+}
+bool Config::addSplitGate(const char* hostname) {
+    if (conf.splitGateCount >= MAX_SPLIT_GATES) return false;
+    for (uint8_t i = 0; i < conf.splitGateCount; i++) {
+        if (strcmp(conf.splitGates[i], hostname) == 0) return false;
+    }
+    strlcpy(conf.splitGates[conf.splitGateCount], hostname, 32);
+    conf.splitGateNumbers[conf.splitGateCount] = conf.splitGateCount + 1;
+    conf.splitGateDistances[conf.splitGateCount] = 0.0f;
+    conf.splitGateCount++;
+    modified = true;
+    return true;
+}
+bool Config::removeSplitGate(const char* hostname) {
+    for (uint8_t i = 0; i < conf.splitGateCount; i++) {
+        if (strcmp(conf.splitGates[i], hostname) == 0) {
+            for (uint8_t j = i; j < conf.splitGateCount - 1; j++) {
+                strlcpy(conf.splitGates[j], conf.splitGates[j + 1], 32);
+                conf.splitGateNumbers[j] = conf.splitGateNumbers[j + 1];
+                conf.splitGateDistances[j] = conf.splitGateDistances[j + 1];
+            }
+            conf.splitGateCount--;
+            memset(conf.splitGates[conf.splitGateCount], 0, 32);
+            conf.splitGateNumbers[conf.splitGateCount] = 0;
+            conf.splitGateDistances[conf.splitGateCount] = 0.0f;
+            modified = true;
+            return true;
+        }
+    }
+    return false;
+}
+void Config::clearSplitGates() {
+    memset(conf.splitGates, 0, sizeof(conf.splitGates));
+    memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+    memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+    conf.splitGateCount = 0;
+    modified = true;
+}
+void Config::setSplitGateNumberAt(uint8_t index, uint8_t gateNum) {
+    if (index < conf.splitGateCount && gateNum <= MAX_SPLIT_GATES) {
+        conf.splitGateNumbers[index] = gateNum;
+        modified = true;
+    }
+}
+void Config::setSplitGateDistance(uint8_t index, float distance) {
+    if (index < conf.splitGateCount) {
+        conf.splitGateDistances[index] = distance;
+        modified = true;
+    }
+}
+
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -1374,6 +1516,13 @@ void Config::setDefaults(void) {
     conf.rhEnabled = 0;              // Disabled by default
     memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
     conf.rhNodeIndex = 0;            // Seat 0 by default
+    // Split time gate defaults
+    conf.splitGateNumber = 0;        // Not a split gate
+    memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+    memset(conf.splitGates, 0, sizeof(conf.splitGates));
+    conf.splitGateCount = 0;
+    memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+    memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
     modified = true;
     write();
 }

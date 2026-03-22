@@ -23,6 +23,8 @@
         </div>
         <div class="header-right">
           <div id="personalModeRaceBanner" class="personal-mode-indicator" style="display: none;" data-i18n="race.personal_mode_short">PERSONAL</div>
+          <div id="splitModeRaceBanner" class="personal-mode-indicator" style="display: none;">SPLIT TIMES</div>
+          <div id="splitGateBanner" class="slave-mode-indicator" style="display: none;">GATE</div>
           <div id="masterModeRaceBanner" class="master-mode-indicator" style="display: none;" data-i18n="race.master_mode_short">MASTER</div>
           <div id="slaveModeRaceBanner" class="slave-mode-indicator" style="display: none;" data-i18n="race.slave_mode_short">SLAVE</div>
           <div id="rotorhazardModeRaceBanner" class="rotorhazard-mode-indicator" style="display: none;">RotorHazard</div>
@@ -123,6 +125,12 @@
             <span id="debugRssiValue" style="font-size: 10px; color: var(--primary-color); font-family: monospace;">--</span>
           </div>
           <canvas id="debugRssiChart" style="width: 100%; height: 90px;"></canvas>
+        </div>
+
+        <!-- Split Times Panel (shown when split gates are configured) -->
+        <div id="splitTimesPanel" class="lap-analysis" style="display: none;">
+          <h3>Split Times</h3>
+          <p class="no-data">Waiting for gate crossings...</p>
         </div>
 
         <!-- Sync Mode: Race Analysis (Multi-Pilot) -->
@@ -464,6 +472,9 @@
             </div>
             <div class="settings-nav-item" onclick="switchSettingsSection('webhooks')">
               <span data-i18n="settings.tabs.webhooks">Webhooks</span>
+            </div>
+            <div class="settings-nav-item" onclick="switchSettingsSection('splittimes')">
+              <span>Split Times</span>
             </div>
             <div class="settings-nav-item" onclick="switchSettingsSection('osd')">
               <span data-i18n="settings.tabs.osd">On Screen Displays</span>
@@ -857,6 +868,55 @@
                 <div id="gateDevicesList">
                   <p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">Loading gate devices...</p>
                 </div>
+              </div>
+            </div>
+
+            <!-- Split Times Section -->
+            <div id="settings-splittimes" class="settings-section">
+              <h2>Split Times</h2>
+              
+              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                <p style="margin: 0">Configure split timing by adding devices as <strong>Split Gate</strong> in the Sync Devices section. Split gates measure intermediate crossing times around your course for detailed sector analysis during practice.</p>
+              </div>
+
+              <!-- Empty state (shown when no split gates configured) -->
+              <div id="splitGatesEmptyState">
+                <div style="text-align: center; padding: 40px 20px; color: var(--secondary-color)">
+                  <p style="font-size: 16px; margin-bottom: 8px">No Split Gates Configured</p>
+                  <p style="font-size: 13px">Go to <strong>WiFi & Connection > Race Synchronization</strong> and set one or more devices as <strong>Split Gate</strong> to enable split timing.</p>
+                </div>
+              </div>
+
+              <!-- Gate configuration (shown when split gates exist) -->
+              <div id="splitGatesConfig" style="display: none">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                  <label class="switch" style="flex-shrink: 0;">
+                    <input type="checkbox" id="splitPersonalViewToggle" checked onchange="toggleSplitPersonalView(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                  <div>
+                    <div style="font-weight: bold; font-size: 14px;">Personal Race View</div>
+                    <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show full lap detail (times, gaps, analysis) during split time sessions</div>
+                  </div>
+                </div>
+
+                <h3>Gate Configuration</h3>
+                <div id="splitGatesList" style="margin-bottom: 16px">
+                  <!-- Gate devices auto-populated by JS -->
+                </div>
+
+                <!-- Visual Timeline -->
+                <div id="splitGateTimeline" style="margin: 20px 0; padding: 16px; background-color: var(--bg-secondary); border-radius: 8px">
+                  <h4 style="margin: 0 0 12px 0">Course Layout</h4>
+                  <div id="splitTimelineVisual" style="position: relative; height: 60px; margin: 0 20px"></div>
+                </div>
+
+                <!-- Sync Status -->
+                <h3>Clock Synchronization</h3>
+                <div id="splitSyncStatus" style="margin-bottom: 12px">
+                  <p style="color: var(--secondary-color); font-size: 13px">Clock sync runs automatically before each race start.</p>
+                </div>
+                <button onclick="triggerSplitSync()" style="width: 100%; background-color: var(--accent-color)">Sync Clocks Now</button>
               </div>
             </div>
 

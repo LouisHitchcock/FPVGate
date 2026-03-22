@@ -409,40 +409,36 @@ nav {
   font-size: 32px;
 }
 
-.slave-mode-indicator {
-  display: flex;
-  align-items: center;
-  padding: 6px 12px;
-  background-color: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: bold;
-  color: white;
-  letter-spacing: 0.5px;
-}
-
-.master-mode-indicator {
-  display: flex;
-  align-items: center;
-  padding: 6px 12px;
-  background-color: rgba(255, 193, 7, 0.3);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: bold;
-  color: white;
-  letter-spacing: 0.5px;
-}
-
+/* Mode indicator banners - shared base */
+.personal-mode-indicator,
+.slave-mode-indicator,
+.master-mode-indicator,
 .rotorhazard-mode-indicator {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
-  background-color: rgba(231, 76, 60, 0.5);
+  padding: 4px 10px;
   border-radius: 4px;
   font-size: 11px;
   font-weight: bold;
   color: white;
   letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.personal-mode-indicator {
+  background-color: rgba(52, 152, 219, 0.5);
+}
+
+.slave-mode-indicator {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.master-mode-indicator {
+  background-color: rgba(255, 193, 7, 0.3);
+}
+
+.rotorhazard-mode-indicator {
+  background-color: rgba(231, 76, 60, 0.5);
 }
 
 .connection-indicator {
@@ -699,6 +695,31 @@ table tr.fastest-lap {
 
 table tr.fastest-lap td {
   border-color: #e67e22;
+}
+
+/* Split times table */
+.split-times-table {
+  margin-top: 12px;
+}
+
+.split-times-table th {
+  background-color: var(--bg-secondary);
+  color: var(--text-color);
+  font-weight: bold;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.split-times-table td {
+  text-align: center;
+  font-family: monospace;
+  font-size: 14px;
+  padding: 8px;
+}
+
+.split-times-table td.split-best {
+  color: #2ecc71;
+  font-weight: bold;
 }
 
 #timer {
@@ -2185,16 +2206,7 @@ footer {
   filter: brightness(0) saturate(100%) invert(100%);
 }
 
-/* Mode Indicators */
-.personal-mode-indicator {
-  background-color: #3498db;
-  color: white;
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: bold;
-  letter-spacing: 1px;
-}
+/* Mode Indicators - colors defined above in shared banner rules */
 
 /* Unified Multi-Pilot Race Table */
 .unified-lap-table {

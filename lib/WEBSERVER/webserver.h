@@ -10,6 +10,7 @@
 #include "trackmanager.h"
 #include "webhook.h"
 #include "rotorhazard.h"
+#include "splittime.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -18,7 +19,7 @@
 
 class Webserver : public TransportInterface {
    public:
-    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr = nullptr);
+    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr = nullptr, SplitTimeManager *splitMgr = nullptr);
     void setTransportManager(TransportManager *tm);
     void recheckWifiMode();  // Re-evaluate WiFi mode after config changes
     void handleWebUpdate(uint32_t currentTimeMs);
@@ -33,6 +34,15 @@ class Webserver : public TransportInterface {
     
     // Send lap data to master (for slave mode)
     void sendLapToMaster(uint32_t lapTimeMs);
+    
+    // Send split crossing to master (for split gate mode)
+    void sendSplitCrossingToMaster(uint32_t raceElapsedMs);
+    
+    // Sync clocks with all split gate devices (called from master before race start)
+    void syncSplitGateClocks();
+    
+    // Push gate config (gate number + master address) to all split gate devices
+    void pushSplitGateConfigs();
 
    private:
     void startServices();
@@ -49,6 +59,7 @@ class Webserver : public TransportInterface {
     TrackManager *trackManager;
     WebhookManager *webhooks;
     RHManager *rhManager;
+    SplitTimeManager *splitManager;
     TransportManager *transportMgr;
 
     wifi_mode_t wifiMode = WIFI_OFF;
