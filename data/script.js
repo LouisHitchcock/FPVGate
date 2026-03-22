@@ -2029,6 +2029,17 @@ function updateDebugOverlay() {
   var raceVisible = race.style.display != "none";
   if (debugMode && raceVisible) {
     overlay.style.display = "block";
+    // Restore saved position
+    var saved = localStorage.getItem('debugRssiPos');
+    if (saved) {
+      try {
+        var pos = JSON.parse(saved);
+        overlay.style.top = pos.top + 'px';
+        overlay.style.left = pos.left + 'px';
+        overlay.style.bottom = 'auto';
+        overlay.style.right = 'auto';
+      } catch(e) {}
+    }
     if (debugRssiChart) debugRssiChart.start();
     // Ensure RSSI streaming is active
     if (!rssiSending) startRssiStreaming();
@@ -2037,6 +2048,94 @@ function updateDebugOverlay() {
     if (debugRssiChart) debugRssiChart.stop();
   }
 }
+
+// --- Debug RSSI Overlay Drag ---
+(function() {
+  var dragHandle, overlay, offsetX, offsetY, dragging = false;
+
+  function onMouseDown(e) {
+    if (e.button !== 0) return;
+    overlay = document.getElementById('debugRssiOverlay');
+    if (!overlay) return;
+    dragging = true;
+    var rect = overlay.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    dragHandle.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+
+  function onMouseMove(e) {
+    if (!dragging) return;
+    var newLeft = e.clientX - offsetX;
+    var newTop = e.clientY - offsetY;
+    // Clamp to viewport
+    var w = overlay.offsetWidth, h = overlay.offsetHeight;
+    newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - w));
+    newTop = Math.max(0, Math.min(newTop, window.innerHeight - h));
+    overlay.style.left = newLeft + 'px';
+    overlay.style.top = newTop + 'px';
+    overlay.style.bottom = 'auto';
+    overlay.style.right = 'auto';
+  }
+
+  function onMouseUp() {
+    if (!dragging) return;
+    dragging = false;
+    dragHandle.style.cursor = 'grab';
+    // Persist position
+    localStorage.setItem('debugRssiPos', JSON.stringify({
+      top: parseInt(overlay.style.top),
+      left: parseInt(overlay.style.left)
+    }));
+  }
+
+  // Touch support
+  function onTouchStart(e) {
+    var t = e.touches[0];
+    overlay = document.getElementById('debugRssiOverlay');
+    if (!overlay) return;
+    dragging = true;
+    var rect = overlay.getBoundingClientRect();
+    offsetX = t.clientX - rect.left;
+    offsetY = t.clientY - rect.top;
+    e.preventDefault();
+  }
+
+  function onTouchMove(e) {
+    if (!dragging) return;
+    var t = e.touches[0];
+    var newLeft = t.clientX - offsetX;
+    var newTop = t.clientY - offsetY;
+    var w = overlay.offsetWidth, h = overlay.offsetHeight;
+    newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - w));
+    newTop = Math.max(0, Math.min(newTop, window.innerHeight - h));
+    overlay.style.left = newLeft + 'px';
+    overlay.style.top = newTop + 'px';
+    overlay.style.bottom = 'auto';
+    overlay.style.right = 'auto';
+    e.preventDefault();
+  }
+
+  function onTouchEnd() {
+    if (!dragging) return;
+    dragging = false;
+    localStorage.setItem('debugRssiPos', JSON.stringify({
+      top: parseInt(overlay.style.top),
+      left: parseInt(overlay.style.left)
+    }));
+  }
+
+  dragHandle = document.getElementById('debugRssiDragHandle');
+  if (dragHandle) {
+    dragHandle.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    dragHandle.addEventListener('touchstart', onTouchStart, { passive: false });
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd);
+  }
+})();
 
 function startRssiStreaming() {
   if (rssiSending) return;
