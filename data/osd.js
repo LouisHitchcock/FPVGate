@@ -10,6 +10,9 @@ let raceRunning = false;
 let timerInterval = null;
 let currentLapStartTime = 0;
 
+// Split time state: key "from-to" -> {from, to, latest, best, latestLap}
+let splitSectors = {};
+
 // Pilot info
 let pilotCallsign = '';
 let pilotChannel = '';
@@ -25,6 +28,8 @@ const medianLap = document.getElementById('medianLap');
 const pilotCallsignElem = document.getElementById('pilotCallsign');
 const pilotChannelElem = document.getElementById('pilotChannel');
 const lapsTableBody = document.getElementById('lapsTableBody');
+const splitsSection = document.getElementById('splitsSection');
+const splitsTableBody = document.getElementById('splitsTableBody');
 
 // Band/Channel lookup table (same as main script.js)
 const freqLookup = [
@@ -81,6 +86,7 @@ window.addEventListener('load', () => {
   loadConfig();
   connectToEvents();
   startCurrentLapTimer();
+  loadSplits();
 });
 
 // Load configuration
@@ -168,6 +174,18 @@ function connectToEvents() {
   source.addEventListener('rssi', (e) => {
     // RSSI value received - could be displayed if needed
   });
+
+  // Listen for split gate crossing events
+  source.addEventListener('splitUpdate', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.sectors && data.sectors.length > 0) {
+        updateSplits(data.sectors);
+      }
+    } catch (err) {
+      console.error('Failed to parse splitUpdate:', err);
+    }
+  });
 }
 
 // Update timer display
@@ -225,10 +243,12 @@ function handleRaceStart() {
   // Reset everything
   lapNo = -1;
   lapTimes = [];
+  splitSectors = {};
   startTimer();
   updateLapCounter();
   clearStats();
   clearLapsTable();
+  updateSplitsDisplay();
 }
 
 // Handle race stop from backend
@@ -243,9 +263,11 @@ function handleClearLaps() {
   // Reset lap data
   lapNo = -1;
   lapTimes = [];
+  splitSectors = {};
   updateLapCounter();
   clearStats();
   clearLapsTable();
+  updateSplitsDisplay();
   // Reset timer display to default
   timer.textContent = '00:00.00';
   currentLapTime.textContent = '00.00' + i18n.t('race.table.seconds_short');
@@ -357,6 +379,74 @@ function clearStats() {
 // Clear laps table
 function clearLapsTable() {
   lapsTableBody.innerHTML = '';
+}
+
+// Load initial split times (for late-joining or page refresh during a race)
+function loadSplits() {
+  fetch('/api/splits')
+    .then(r => r.json())
+    .then(data => {
+      if (data.sectors && data.sectors.length > 0) {
+        const sectors = data.sectors.map(s => ({
+          from: s.fromGate,
+          to: s.toGate,
+          timeMs: s.sectorTimeMs,
+          lap: s.lapIndex
+        }));
+        updateSplits(sectors);
+      }
+    })
+    .catch(() => {});
+}
+
+// Rebuild split sector state from a full sector list (SSE or REST)
+function updateSplits(sectors) {
+  const newSectors = {};
+  sectors.forEach(s => {
+    const key = `${s.from}-${s.to}`;
+    if (!newSectors[key]) {
+      newSectors[key] = { from: s.from, to: s.to, latest: s.timeMs, best: s.timeMs, latestLap: s.lap };
+    } else {
+      if (s.timeMs < newSectors[key].best) newSectors[key].best = s.timeMs;
+      if (s.lap > newSectors[key].latestLap) {
+        newSectors[key].latest = s.timeMs;
+        newSectors[key].latestLap = s.lap;
+      }
+    }
+  });
+  splitSectors = newSectors;
+  updateSplitsDisplay();
+}
+
+// Render the split times table
+function updateSplitsDisplay() {
+  if (!splitsSection || !splitsTableBody) return;
+
+  const keys = Object.keys(splitSectors);
+  if (keys.length === 0) {
+    splitsSection.style.display = 'none';
+    return;
+  }
+
+  splitsSection.style.display = '';
+  splitsTableBody.innerHTML = '';
+
+  keys.sort().forEach(key => {
+    const s = splitSectors[key];
+    const isNewBest = s.latest === s.best;
+    const row = splitsTableBody.insertRow();
+    if (isNewBest) row.classList.add('split-best-row');
+
+    const labelCell = row.insertCell(0);
+    labelCell.textContent = `G${s.from}-G${s.to}`;
+
+    const latestCell = row.insertCell(1);
+    latestCell.textContent = (s.latest / 1000).toFixed(2) + i18n.t('race.table.seconds_short');
+
+    const bestCell = row.insertCell(2);
+    bestCell.textContent = (s.best / 1000).toFixed(2) + i18n.t('race.table.seconds_short');
+    bestCell.classList.add('split-best');
+  });
 }
 
 // Update laps table (show last 5 laps)

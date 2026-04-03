@@ -38,6 +38,13 @@ void RX5808::init() {
     recentSetFreqFlag = false;
     // Delay to ensure module is ready before first frequency change
     delay(50);
+
+    // Pre-configure and prime the ADC while only Core 1 is running (before
+    // initParallelTask() starts Core 0 and WiFi). Without this, the first
+    // analogRead() call in loop() can hang indefinitely in the SAR ADC
+    // polling loop when WiFi init on Core 0 races with the ADC.
+    analogSetPinAttenuation(rssiInputPin, ADC_11db);
+    (void)analogRead(rssiInputPin);  // Prime ADC state machine, discard result
 }
 
 void RX5808::handleFrequencyChange(uint32_t currentTimeMs, uint16_t potentiallyNewFreq) {

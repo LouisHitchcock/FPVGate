@@ -213,6 +213,60 @@ body {
   color: #ff6666;
 }
 
+/* Split Times Section */
+.splits-section {
+  width: 90%;
+  max-width: 900px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 20px 25px;
+  border-radius: 10px;
+  border: 2px solid rgba(0, 170, 255, 0.5);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.9);
+  pointer-events: auto;
+}
+
+.splits-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.splits-table thead {
+  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.splits-table th {
+  padding: 10px 15px;
+  font-size: 16px;
+  color: #cccccc;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9);
+}
+
+.splits-table td {
+  padding: 10px 15px;
+  font-size: 22px;
+  font-weight: 600;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.9);
+  font-family: 'Courier New', monospace;
+  color: #00aaff;
+}
+
+.splits-table .split-best {
+  color: #ffd700;
+  text-shadow: 0 0 15px rgba(255, 215, 0, 0.8),
+               2px 2px 8px rgba(0, 0, 0, 0.9);
+}
+
+.splits-table tbody tr.split-best-row td {
+  color: #ffd700;
+  text-shadow: 0 0 15px rgba(255, 215, 0, 0.8),
+               2px 2px 8px rgba(0, 0, 0, 0.9);
+}
+
 /* No responsive design needed - fixed for 1080x1440 vertical streaming */
 
 /* Animation for new lap highlight */

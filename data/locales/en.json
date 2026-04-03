@@ -556,7 +556,11 @@
         "table_gap": "Gap",
         "gate1_short": "G1",
         "lap_prefix": "L",
-        "connection_error": "Connection Error"
+        "connection_error": "Connection Error",
+        "split_times": "Split Times",
+        "table_sector": "Sector",
+        "table_latest": "Latest",
+        "table_best": "Best"
     },
     "conn": {
         "wifi_connected": "WiFi Connected",
