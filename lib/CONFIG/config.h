@@ -88,8 +88,8 @@
 #define PIN_SD_MOSI 38
 #define PIN_SD_MISO 40
 
-// FPVGate AIO V3 (XIAO ESP32S3-based, custom pinout)
-#elif defined(FPVGATE_AIO_V3)
+// FPVGate AIO V4 (XIAO ESP32S3-based, custom pinout)
+#elif defined(FPVGATE_AIO_V4)
 
 #define PIN_LED 21             // Onboard user LED
 #define PIN_RGB_LED 44         // NeoPixel chain on D7 (GPIO44)
@@ -187,13 +187,13 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V3) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V4) || defined(XIAO_ESP32S3_PLUS)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
 
 // Boards with RGB LED support
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V3) || defined(XIAO_ESP32S3_PLUS) || defined(PIN_RGB_LED)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V4) || defined(XIAO_ESP32S3_PLUS) || defined(PIN_RGB_LED)
     #define HAS_RGB_LED 1
 #endif
 
