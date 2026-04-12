@@ -769,6 +769,23 @@ void loop() {
             }
         } else {
             DEBUG("SD card not available - using LittleFS only\n");
+            
+            // Load race history from LittleFS (no SD card available)
+            if (raceHistory.loadRaces()) {
+                DEBUG("Race history loaded from LittleFS, %d races available\n", raceHistory.getRaceCount());
+            }
+            
+            // Reload tracks from LittleFS
+            if (trackManager.loadTracks()) {
+                DEBUG("Tracks loaded from LittleFS, %d tracks available\n", trackManager.getTrackCount());
+                if (config.getTracksEnabled() && config.getSelectedTrackId() != 0) {
+                    Track* selectedTrack = trackManager.getTrackById(config.getSelectedTrackId());
+                    if (selectedTrack) {
+                        timer.setTrack(selectedTrack);
+                        DEBUG("Selected track loaded: %s\n", selectedTrack->name.c_str());
+                    }
+                }
+            }
         }
     }
 #if ENABLE_LCD_UI && (defined(WAVESHARE_ESP32S3_LCD2) || defined(NOVABLADE))
