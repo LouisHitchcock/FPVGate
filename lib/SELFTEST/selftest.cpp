@@ -213,7 +213,7 @@ TestResult SelfTest::testEEPROM() {
     
     // Write test pattern
     uint8_t testValue = 0xAA;
-    uint8_t testAddr = EEPROM_RESERVED_SIZE - 1; // Use last byte
+    uint16_t testAddr = EEPROM_RESERVED_SIZE - 1; // Use last byte
     uint8_t originalValue = EEPROM.read(testAddr);
     
     EEPROM.write(testAddr, testValue);
@@ -667,13 +667,13 @@ TestResult SelfTest::testSPIMod(RX5808* rx5808) {
 }
 
 String SelfTest::getResultsJSON() {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     doc["allPassed"] = allPassed;
     doc["totalTests"] = results.size();
     
-    JsonArray testsArray = doc.createNestedArray("tests");
+    JsonArray testsArray = doc["tests"].to<JsonArray>();
     for (const auto& result : results) {
-        JsonObject test = testsArray.createNestedObject();
+        JsonObject test = testsArray.add<JsonObject>();
         test["name"] = result.name;
         test["passed"] = result.passed;
         test["details"] = result.details;

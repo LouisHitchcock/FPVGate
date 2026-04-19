@@ -29,7 +29,7 @@ bool RaceHistory::saveRace(const RaceSession& race) {
     String filepath = String(RACES_DIR) + "/" + String(filename);
     
     // Create JSON for single race
-    DynamicJsonDocument doc(16384);
+    JsonDocument doc;
     JsonObject raceObj = doc.to<JsonObject>();
     raceObj["timestamp"] = race.timestamp;
     raceObj["fastestLap"] = race.fastestLap;
@@ -47,22 +47,22 @@ bool RaceHistory::saveRace(const RaceSession& race) {
     raceObj["totalDistance"] = race.totalDistance;
     raceObj["syncMode"] = race.syncMode;
     
-    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
     for (uint32_t lap : race.lapTimes) {
         lapsArray.add(lap);
     }
     
     // Multi-pilot support
     if (!race.pilots.empty()) {
-        JsonArray pilotsArray = raceObj.createNestedArray("pilots");
+        JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
         for (const auto& pilot : race.pilots) {
-            JsonObject pilotObj = pilotsArray.createNestedObject();
+            JsonObject pilotObj = pilotsArray.add<JsonObject>();
             pilotObj["name"] = pilot.name;
             pilotObj["callsign"] = pilot.callsign;
             pilotObj["color"] = pilot.color;
             pilotObj["fastestLap"] = pilot.fastestLap;
             pilotObj["isLocal"] = pilot.isLocal;
-            JsonArray pilotLaps = pilotObj.createNestedArray("lapTimes");
+            JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
             for (uint32_t lap : pilot.lapTimes) {
                 pilotLaps.add(lap);
             }
@@ -123,7 +123,7 @@ bool RaceHistory::loadRaces() {
             continue;
         }
         
-        DynamicJsonDocument doc(16384);
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, json);
         if (error) {
             DEBUG("Failed to parse %s: %s\n", filepath.c_str(), error.c_str());
@@ -153,7 +153,7 @@ bool RaceHistory::loadRaces() {
         }
         
         // Load pilots array if present
-        if (doc.containsKey("pilots")) {
+        if (!doc["pilots"].isNull()) {
             JsonArray pilotsArray = doc["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
                 PilotData pilot;
@@ -237,7 +237,7 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
     String filepath = String(RACES_DIR) + "/" + String(filename);
     
     // Create JSON
-    DynamicJsonDocument doc(16384);
+    JsonDocument doc;
     JsonObject raceObj = doc.to<JsonObject>();
     raceObj["timestamp"] = targetRace->timestamp;
     raceObj["fastestLap"] = targetRace->fastestLap;
@@ -254,7 +254,7 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
     raceObj["trackName"] = targetRace->trackName;
     raceObj["totalDistance"] = targetRace->totalDistance;
     
-    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
     for (uint32_t lap : targetRace->lapTimes) {
         lapsArray.add(lap);
     }
@@ -323,7 +323,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
     String filepath = String(RACES_DIR) + "/" + String(filename);
     
     // Create JSON
-    DynamicJsonDocument doc(16384);
+    JsonDocument doc;
     JsonObject raceObj = doc.to<JsonObject>();
     raceObj["timestamp"] = targetRace->timestamp;
     raceObj["fastestLap"] = targetRace->fastestLap;
@@ -340,7 +340,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
     raceObj["trackName"] = targetRace->trackName;
     raceObj["totalDistance"] = targetRace->totalDistance;
     
-    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
     for (uint32_t lap : targetRace->lapTimes) {
         lapsArray.add(lap);
     }
@@ -376,14 +376,14 @@ const std::vector<RaceSession>& RaceHistory::getRaces() {
 }
 
 String RaceHistory::toJsonString() {
-    DynamicJsonDocument doc(131072);  // 128KB - enough for ~50 races with multi-pilot data
-    JsonArray racesArray = doc.createNestedArray("races");
+    JsonDocument doc;  // 128KB - enough for ~50 races with multi-pilot data
+    JsonArray racesArray = doc["races"].to<JsonArray>();
     
     // Limit output to MAX_RACES to avoid memory issues
     size_t racesToOutput = std::min(races.size(), (size_t)MAX_RACES);
     for (size_t i = 0; i < racesToOutput; i++) {
         const auto& race = races[i];
-        JsonObject raceObj = racesArray.createNestedObject();
+        JsonObject raceObj = racesArray.add<JsonObject>();
         raceObj["timestamp"] = race.timestamp;
         raceObj["fastestLap"] = race.fastestLap;
         raceObj["medianLap"] = race.medianLap;
@@ -400,22 +400,22 @@ String RaceHistory::toJsonString() {
         raceObj["totalDistance"] = race.totalDistance;
         raceObj["syncMode"] = race.syncMode;
         
-        JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+        JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
         for (uint32_t lap : race.lapTimes) {
             lapsArray.add(lap);
         }
         
         // Include pilots array if present
         if (!race.pilots.empty()) {
-            JsonArray pilotsArray = raceObj.createNestedArray("pilots");
+            JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
             for (const auto& pilot : race.pilots) {
-                JsonObject pilotObj = pilotsArray.createNestedObject();
+                JsonObject pilotObj = pilotsArray.add<JsonObject>();
                 pilotObj["name"] = pilot.name;
                 pilotObj["callsign"] = pilot.callsign;
                 pilotObj["color"] = pilot.color;
                 pilotObj["fastestLap"] = pilot.fastestLap;
                 pilotObj["isLocal"] = pilot.isLocal;
-                JsonArray pilotLaps = pilotObj.createNestedArray("lapTimes");
+                JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
                 for (uint32_t lap : pilot.lapTimes) {
                     pilotLaps.add(lap);
                 }
@@ -429,7 +429,7 @@ String RaceHistory::toJsonString() {
 }
 
 bool RaceHistory::fromJsonString(const String& json) {
-    DynamicJsonDocument doc(65536);  // Increased for multi-pilot data
+    JsonDocument doc;  // Increased for multi-pilot data
     DeserializationError error = deserializeJson(doc, json);
     
     if (error) {
@@ -465,7 +465,7 @@ bool RaceHistory::fromJsonString(const String& json) {
         }
         
         // Import pilots array if present
-        if (raceObj.containsKey("pilots")) {
+        if (!raceObj["pilots"].isNull()) {
             JsonArray pilotsArray = raceObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
                 PilotData pilot;

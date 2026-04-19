@@ -5,14 +5,14 @@
 
 // Optional DMA-based ADC reading for RSSI.
 // Enable by adding -DUSE_ADC_DMA=1 to build_flags in your target's .ini file.
-// Requires ESP32-S3 or ESP32-C3 — the ESP-IDF adc_continuous API used here is
-// not compatible with the original ESP32 (DevKit / non-S3/C3 targets).
+// Requires ESP32-S3 — the ESP-IDF adc_continuous API used here is
+// not compatible with the original ESP32 (DevKit / non-S3 targets).
 // NOTE: esp_adc/adc_continuous.h is intentionally NOT included here to avoid
 // polluting the include chain.  It is included only in RX5808.cpp.
 #ifdef USE_ADC_DMA
 #if !defined(ESP32S3) && !defined(ESP32S3_SUPERMINI) && !defined(LILYGO_TENERGY_S3) && \
-    !defined(SEEED_XIAO_ESP32S3) && !defined(WAVESHARE_ESP32S3_LCD2) && !defined(ESP32C3)
-#error "USE_ADC_DMA is only supported on ESP32-S3 and ESP32-C3 board targets"
+    !defined(SEEED_XIAO_ESP32S3) && !defined(WAVESHARE_ESP32S3_LCD2)
+#error "USE_ADC_DMA is only supported on ESP32-S3 board targets"
 #endif
 #endif
 

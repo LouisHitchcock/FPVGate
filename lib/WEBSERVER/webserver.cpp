@@ -160,7 +160,7 @@ void Webserver::sendSlaveLapEvent(uint32_t lapTimeMs, const char* pilotName, con
     if (!servicesStarted) return;
     
     // Build JSON payload for SSE event
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["lapTimeMs"] = lapTimeMs;
     doc["pilotName"] = pilotName;
     doc["pilotPhonetic"] = pilotPhonetic;
@@ -201,7 +201,7 @@ void Webserver::sendLapToMaster(uint32_t lapTimeMs) {
         http.addHeader("Content-Type", "application/json");
         
         // Build JSON payload with pilot info
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["lapTimeMs"] = lapTimeMs;
         doc["pilotName"] = conf->getPilotCallsign();
         doc["pilotPhonetic"] = conf->getPilotPhonetic();
@@ -668,11 +668,13 @@ static void startMDNS() {
 
 void Webserver::startServices() {
     if (servicesStarted) {
-        // Restart mDNS when WiFi mode changes
+        // Restart server and mDNS when WiFi mode changes
+        // server.begin() must be called again after WiFi.mode(WIFI_OFF) kills the TCP socket
+        server.begin();
         MDNS.end();
         delay(100);  // Give mDNS time to shut down
         startMDNS();
-        DEBUG("mDNS restarted for mode change\n");
+        DEBUG("Server and mDNS restarted for mode change\n");
         return;
     }
 
@@ -845,7 +847,7 @@ EEPROM:\n\
     // Manual lap addition - broadcasts lap event to all clients
     AsyncCallbackJsonWebHandler *addLapHandler = new AsyncCallbackJsonWebHandler("/timer/addLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
-        if (jsonObj.containsKey("lapTime")) {
+        if (!jsonObj["lapTime"].isNull()) {
             uint32_t lapTimeMs = jsonObj["lapTime"].as<uint32_t>();
             if (transportMgr) {
                 transportMgr->broadcastLapEvent(lapTimeMs);
@@ -896,7 +898,7 @@ EEPROM:\n\
 
     AsyncCallbackJsonWebHandler *playbackLapHandler = new AsyncCallbackJsonWebHandler("/timer/playbackLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
-        if (jsonObj.containsKey("lapTime")) {
+        if (!jsonObj["lapTime"].isNull()) {
             uint32_t lapTimeMs = jsonObj["lapTime"].as<uint32_t>();
             if (transportMgr) {
                 transportMgr->broadcastLapEvent(lapTimeMs);
@@ -952,7 +954,7 @@ EEPROM:\n\
 
     // Race sync endpoints
     server.on("/timer/syncStatus", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["timerNumber"] = conf->getTimerNumber();
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["hostname"] = wifi_hostname;
@@ -964,7 +966,7 @@ EEPROM:\n\
 
     server.on("/timer/ping", HTTP_GET, [this](AsyncWebServerRequest *request) {
         // Simple ping endpoint for master to verify slave connectivity
-        DynamicJsonDocument doc(128);
+        JsonDocument doc;
         doc["status"] = "OK";
         doc["hostname"] = wifi_hostname;
         doc["raceSyncMode"] = conf->getRaceSyncMode();
@@ -987,7 +989,7 @@ EEPROM:\n\
         uint32_t testLapTime = 12345; // Test lap time in ms
         sendLapToMaster(testLapTime);
         
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["status"] = "OK";
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["masterHostname"] = conf->getMasterHostname();
@@ -1071,13 +1073,13 @@ EEPROM:\n\
         conf->fromJson(jsonObj);
 #if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
         bool reboot_to_enable_elrs_espnow = false;
-        if (jsonObj.containsKey("elrsBackpackEspnow") && prev_elrs_backpack != conf->getElrsBackpackEspnow()) {
+        if (!jsonObj["elrsBackpackEspnow"].isNull() && prev_elrs_backpack != conf->getElrsBackpackEspnow()) {
             if (conf->getElrsBackpackEspnow() == 1 && prev_elrs_backpack == 0) {
                 reboot_to_enable_elrs_espnow = true;
             } else {
                 requestWifiStackReinit();
             }
-        } else if (jsonObj.containsKey("elrsBackpackBindPhrase") &&
+        } else if (!jsonObj["elrsBackpackBindPhrase"].isNull() &&
                    strcmp(prev_elrs_bind, conf->getElrsBackpackBindPhrase()) != 0) {
             requestWifiStackReinit();
         }
@@ -1085,7 +1087,7 @@ EEPROM:\n\
         
         // Update battery monitor voltage divider if it changed
 #ifdef HAS_BATTERY_MONITOR
-        if (jsonObj.containsKey("batteryVoltageDivider") && monitor) {
+        if (!jsonObj["batteryVoltageDivider"].isNull() && monitor) {
             float ratio = conf->getBatteryVoltageDivider();
             monitor->setVoltageDivider(ratio);
             DEBUG("Battery voltage divider updated to %.1f\n", ratio);
@@ -1232,7 +1234,7 @@ EEPROM:\n\
     
     // RotorHazard integration status endpoint
     server.on("/api/rh/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         bool en = rhManager && rhManager->isEnabled();
         bool conn = rhManager && rhManager->isConnected();
         bool synced = rhManager && rhManager->isClockSynced();
@@ -1258,7 +1260,7 @@ EEPROM:\n\
 
     // WiFi status endpoint (register before serveStatic to prevent VFS errors)
     server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(512);
+        JsonDocument doc;
         
         // Get WiFi mode
         wifi_mode_t mode = WiFi.getMode();
@@ -1354,7 +1356,7 @@ EEPROM:\n\
         }
         
         // Parse pilots array if present (multi-pilot races)
-        if (jsonObj.containsKey("pilots")) {
+        if (!jsonObj["pilots"].isNull()) {
             JsonArray pilotsArray = jsonObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
                 PilotData pilot;
@@ -1424,7 +1426,7 @@ EEPROM:\n\
     AsyncCallbackJsonWebHandler *updateLapsHandler = new AsyncCallbackJsonWebHandler("/races/updateLaps", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
         
-        if (!jsonObj.containsKey("timestamp") || !jsonObj.containsKey("lapTimes")) {
+        if (!!jsonObj["timestamp"].isNull() || !!jsonObj["lapTimes"].isNull()) {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
             return;
         }
@@ -1451,9 +1453,9 @@ EEPROM:\n\
             for (const auto& race : races) {
                 if (race.timestamp == timestamp) {
                     // Create JSON for single race
-                    DynamicJsonDocument doc(32768);  // Increased for multi-pilot
-                    JsonArray racesArray = doc.createNestedArray("races");
-                    JsonObject raceObj = racesArray.createNestedObject();
+                    JsonDocument doc;  // Increased for multi-pilot
+                    JsonArray racesArray = doc["races"].to<JsonArray>();
+                    JsonObject raceObj = racesArray.add<JsonObject>();
                     raceObj["timestamp"] = race.timestamp;
                     raceObj["fastestLap"] = race.fastestLap;
                     raceObj["medianLap"] = race.medianLap;
@@ -1466,22 +1468,22 @@ EEPROM:\n\
                     raceObj["band"] = race.band;
                     raceObj["channel"] = race.channel;
                     raceObj["syncMode"] = race.syncMode;
-                    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+                    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {
                         lapsArray.add(lap);
                     }
                     
                     // Include pilots if present
                     if (!race.pilots.empty()) {
-                        JsonArray pilotsArray = raceObj.createNestedArray("pilots");
+                        JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
                         for (const auto& pilot : race.pilots) {
-                            JsonObject pilotObj = pilotsArray.createNestedObject();
+                            JsonObject pilotObj = pilotsArray.add<JsonObject>();
                             pilotObj["name"] = pilot.name;
                             pilotObj["callsign"] = pilot.callsign;
                             pilotObj["color"] = pilot.color;
                             pilotObj["fastestLap"] = pilot.fastestLap;
                             pilotObj["isLocal"] = pilot.isLocal;
-                            JsonArray pilotLaps = pilotObj.createNestedArray("lapTimes");
+                            JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
                             for (uint32_t lap : pilot.lapTimes) {
                                 pilotLaps.add(lap);
                             }
@@ -1537,7 +1539,7 @@ EEPROM:\n\
     AsyncCallbackJsonWebHandler *trackUpdateHandler = new AsyncCallbackJsonWebHandler("/tracks/update", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
         
-        if (!jsonObj.containsKey("trackId")) {
+        if (!!jsonObj["trackId"].isNull()) {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing trackId\"}");
             return;
         }
@@ -1612,7 +1614,7 @@ EEPROM:\n\
     });
 
     server.on("/timer/distance", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(512);
+        JsonDocument doc;
         doc["totalDistance"] = timer->getTotalDistance();
         doc["distanceRemaining"] = timer->getDistanceRemaining();
         
@@ -1646,11 +1648,11 @@ EEPROM:\n\
     // Debug log endpoint for serial monitor
     server.on("/api/debuglog", HTTP_GET, [this](AsyncWebServerRequest *request) {
         const auto& buffer = DebugLogger::getInstance().getBuffer();
-        DynamicJsonDocument doc(8192);
-        JsonArray logs = doc.createNestedArray("logs");
+        JsonDocument doc;
+        JsonArray logs = doc["logs"].to<JsonArray>();
         
         for (const auto& entry : buffer) {
-            JsonObject log = logs.createNestedObject();
+            JsonObject log = logs.add<JsonObject>();
             log["timestamp"] = entry.timestamp;
             log["message"] = entry.message;
         }
@@ -2196,13 +2198,13 @@ EEPROM:\n\
         String targetIP = jsonObj["ip"] | "all";
         
         // Build the payload to forward (everything except the "ip" field)
-        DynamicJsonDocument fwdDoc(512);
-        if (jsonObj.containsKey("effect")) fwdDoc["effect"] = jsonObj["effect"];
-        if (jsonObj.containsKey("brightness")) fwdDoc["brightness"] = jsonObj["brightness"];
-        if (jsonObj.containsKey("speed")) fwdDoc["speed"] = jsonObj["speed"];
-        if (jsonObj.containsKey("color")) {
+        JsonDocument fwdDoc;
+        if (!jsonObj["effect"].isNull()) fwdDoc["effect"] = jsonObj["effect"];
+        if (!jsonObj["brightness"].isNull()) fwdDoc["brightness"] = jsonObj["brightness"];
+        if (!jsonObj["speed"].isNull()) fwdDoc["speed"] = jsonObj["speed"];
+        if (!jsonObj["color"].isNull()) {
             JsonArray srcColor = jsonObj["color"];
-            JsonArray dstColor = fwdDoc.createNestedArray("color");
+            JsonArray dstColor = fwdDoc["color"].to<JsonArray>();
             for (JsonVariant v : srcColor) dstColor.add(v);
         }
         

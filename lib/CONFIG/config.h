@@ -212,7 +212,7 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
