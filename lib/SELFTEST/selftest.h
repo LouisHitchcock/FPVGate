@@ -50,6 +50,7 @@ class SelfTest {
     TestResult testTrackManager();
     TestResult testWebhooks();
     TestResult testTransport();
+    TestResult testSPIMod(RX5808* rx5808);
     
 #ifdef HAS_RGB_LED
     TestResult testRGBLED(RgbLed* rgbLed);

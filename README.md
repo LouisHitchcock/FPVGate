@@ -4,8 +4,9 @@
 
 [![Website](https://img.shields.io/badge/Website-fpvgate.xyz-blue?style=for-the-badge&logo=google-chrome&logoColor=white)](https://fpvgate.xyz)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/D3MgfvsnAw)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/XwammuWCCj)
 [![Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/louishitchcock)
+[![Shop](https://img.shields.io/badge/Shop-Buy%20FPVGate%20AIO-green?style=for-the-badge&logo=shopify&logoColor=white)](https://fpvgate.xyz/shop.html)
 
 
 A compact, self-contained RSSI-based lap timing solution for 5.8GHz FPV drones. Perfect for personal practice sessions, small indoor tracks, and training.
@@ -20,11 +21,15 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 
 | Race Screen | Configuration Menu |
 |:-----------:|:------------------:|
-| ![Race Screen](screenshots/12-12-2025/Race%20-%2012-12-2025.png) | ![Config Menu](screenshots/12-12-2025/Config%20Screen%20-%20Pilot%20Info%2012-12-2025.png) |
+| ![Race Screen](screenshots/02-04-2026/Race%20Screen%20Solo.png) | ![Config Menu](screenshots/02-04-2026/Settings%20Menu.png) |
 
-| Calibration Wizard | Race History |
-|:------------------:|:------------:|
-| ![Calibration Wizard](screenshots/12-12-2025/Calibration%20Wizard%20Recording%20-%2012-12-2025.png) | ![Race History](screenshots/12-12-2025/Race%20History%20-%2012-12-2025.png) |
+| Calibration | Race History |
+|:-----------:|:------------:|
+| ![Calibration](screenshots/02-04-2026/RSSI%20Calibration.png) | ![Race History](screenshots/02-04-2026/Race%20History.png) |
+
+| Multi Pilot | FPVGate AIO |
+|:-----------:|:-----------:|
+| ![Multi Pilot](screenshots/02-04-2026/Multi%20Pilot.png) | ![FPVGate AIO](screenshots/02-04-2026/FPVGate%20AIO%20Shop.png) |
 
 ### Key Features
 
@@ -115,6 +120,10 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 
 ### 1. Hardware You'll Need
 
+> **Want a plug-and-play solution?** The **[FPVGate AIO](https://fpvgate.xyz/shop.html)** is a pre-built, ready-to-use device -- no soldering, wiring, or flashing required. Perfect if you just want to buy a device and start timing laps immediately.
+
+**Building your own? Here's what you'll need:**
+
 | Component | Required | Notes |
 |-----------|----------|-------|
 | **[Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/)** (Recommended) or **[ESP32-S3-DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html)** | Yes | Main controller |
@@ -130,9 +139,10 @@ Detailed wiring diagrams are available for each supported board:
 
 - **[Seeed Studio XIAO ESP32S3](docs/wiring/Seeed-XIAO-ESP32S3.md)** - Recommended, compact, 8MB
 - **[ESP32-S3 DevKitC-1 (8MB Flash)](docs/wiring/ESP32-S3-DevKitC-1.md)** - Alternative
-- **FPVGate AIO V3** - Upcoming official hardware release coming soon
+- **[FPVGate AIO](https://fpvgate.xyz/shop.html)** - Pre-built, ready-to-use device ([buy here](https://fpvgate.xyz/shop.html))
 - **[ESP32-S3 Super Mini (4MB Flash)](docs/wiring/ESP32-S3-SuperMini.md)** - Not recommended (see note below)
 - **[LilyGO T-Energy S3](docs/wiring/LilyGO-T-Energy-S3.md)** - Expert mode, integrated battery
+- **[Waveshare ESP32-S3-LCD-2](docs/wiring/Waveshare-ESP32-S3-LCD-2.md)** - Built-in 2" touchscreen LCD, battery, SD card
 - **XIAO ESP32S3 Plus (16MB Flash)** - Expert mode
 
 > **Note on ESP32-S3 Super Mini:** Through testing, this board has proven unreliable due to inconsistent quality from various suppliers. Some revisions experience frequent brownouts under load. This board is still supported but is not recommended for new builds.
@@ -246,7 +256,7 @@ Exit  ├/──────────\─
 ## Project Status
 
 **Current Version:** v1.7.0
-**Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), FPVGate AIO V3 (coming soon)
+**Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Stable - actively maintained
 
@@ -255,7 +265,7 @@ Exit  ├/──────────\─
 **v1.7.0 (Latest Release - March 20, 2026)**
 - **RotorHazard Integration** - Bidirectional race control, NTP clock sync, lap submission, companion RH plugin
 - **I2S Speaker Audio (MAX98357A)** - Hardware speaker output for race announcements
-- **New Boards** - FPVGate AIO V3, XIAO ESP32S3 Plus
+- **New Boards** - FPVGate AIO V4, XIAO ESP32S3 Plus
 - **Config v16** - New fields for RH integration and speaker settings
 
 **v1.6.2 (February 26, 2026)**

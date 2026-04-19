@@ -14,6 +14,9 @@
         "gate1_table": "1号门口: {s}秒",
         "race_complete": "比赛结束",
         "slave_mode_indicator": "从机模式 - 由主计时器控制",
+        "slave_mode_short": "从机",
+        "master_mode_short": "主机",
+        "personal_mode_short": "个人",
         "connected": "{mode}: 已连接",
         "disconnected": "未连接",
         "status_connected": "已连接",
@@ -35,7 +38,8 @@
             "lap_singular": "1 圈",
             "lap_plural": "{n} 圈",
             "seconds_short": "秒"
-        }
+        },
+        "no_laps": "暂无圈速记录"
     },
     "analysis": {
         "title": "圈速分析",
@@ -100,37 +104,50 @@
         "gate1_start": "1号门 (起点)"
     },
     "calib": {
-        "start_wizard": "开始校准向导",
-        "enter_rssi": "进入 RSSI:",
-        "exit_rssi": "退出 RSSI:",
-        "save_thresholds": "保存 RSSI 阈值",
-        "wizard_title_recording": "校准向导 - 录制中",
-        "wizard_title_marking": "校准向导 - 标记圈数峰值",
-        "wizard_title_results": "校准向导 - 结果",
+        "title": "RSSI 校准",
+        "subtitle": "调整门检测阈值",
+        "channel_selection": "频道选择",
+        "system": "系统",
+        "band": "频段",
+        "channel": "频率",
+        "rssi_graph": "实时 RSSI 信号",
+        "thresholds": "检测阈值",
+        "enter_hint": "信号超过此值时触发",
+        "exit_hint": "信号低于此值时重置",
+        "start_wizard": "向导",
+        "enter_rssi": "进入 RSSI",
+        "exit_rssi": "退出 RSSI",
+        "save_thresholds": "保存阈值",
+        "wizard_title_ambient": "校准向导 - 环境噪声",
+        "wizard_ambient_instructions": "请确保区域内没有无人机。正在录制环境噪声级别...",
+        "wizard_ambient_wait": "秒剩余",
+        "wizard_title_recording": "校准向导 - 现在飞行",
+        "wizard_title_marking": "校准向导 - 标记峰值",
+        "wizard_title_results": "校准结果",
         "wizard_instructions_title": "说明:",
-        "wizard_step1": "穿越机穿过门3次",
+        "wizard_step1": "穿越机穿过门 3+ 次",
         "wizard_step2": "确保每次穿过时都有清晰的信号峰值",
         "wizard_step3": "完成后点击“停止录制”",
         "wizard_recording_rssi": "正在录制 RSSI 数据...",
         "wizard_samples": "样本数: {n}",
         "wizard_stop_recording": "停止录制",
         "wizard_marking_instructions": "点击图表标记每一圈的最高点（峰值）:",
-        "wizard_highest_peak": "最高峰值",
-        "wizard_highest_peak_tip": "在每次过门时点击 <span style='color: #ff5555'>最高峰值</span>",
-        "wizard_mark_peaks_tip": "共标记3个峰值（每圈一个）",
-        "wizard_auto_calc_tip": "进入/退出阈值将自动计算",
         "wizard_mark_peak_n": "标记峰值 {n}",
         "wizard_undo": "撤销上一步",
         "wizard_calculate": "计算阈值",
-        "wizard_enter_rssi": "计算出的进入 RSSI:",
-        "wizard_exit_rssi": "计算出的退出 RSSI:",
+        "wizard_enter_rssi": "进入 RSSI:",
+        "wizard_exit_rssi": "退出 RSSI:",
+        "wizard_min_lap": "最小圈速时间:",
+        "wizard_peaks_detected": "检测到的峰值:",
+        "wizard_noise_ceiling": "噪声上限:",
+        "wizard_avg_peak": "平均峰值:",
         "wizard_note_title": "注意:",
-        "wizard_results_note": "这些数值是根据您的圈数数据和安全边际计算得出的。您现在可以应用它们，如果需要也可以手动微调。",
-        "wizard_apply": "应用阈值",
+        "wizard_results_note": "这些数值已根据您的飞行数据自动计算。应用它们并在需要时手动微调。",
+        "wizard_apply": "全部应用",
         "ignore_hint": "拖动以忽略区域。右键点击区域可删除。",
         "ignore_clear": "清除忽略",
         "ignore_warning_title": "峰值不足!",
-        "ignore_warning_desc": "忽略的区域太多。至少需要3个峰值才能计算阈值。",
+        "ignore_warning_desc": "忽略的区域太多。至少需要 3 个峰值才能计算阈值。",
         "rerecord": "重新录制飞行数据"
     },
     "settings": {
@@ -158,7 +175,8 @@
             "infinite": "无限",
             "infinite_tip": "提示：设置为 0 表示无限圈数",
             "infinite_label": "无限",
-            "min_lap": "最小圈速时间:"
+            "min_lap": "最小圈速时间:",
+            "beep_volume": "提示音音量:"
         },
         "tts": {
             "title": "TTS 设置",
@@ -195,12 +213,14 @@
                 "eleven_rachel": "ElevenLabs (Rachel - 冷静)",
                 "eleven_adam": "ElevenLabs (Adam - 深沉男声)",
                 "eleven_antoni": "ElevenLabs (Antoni - 男声)",
+                "eleven_matilda": "ElevenLabs (Matilda - 温暖女声)",
                 "webspeech": "Web Speech（浏览器TTS）"
             },
             "examples": "示例: \"Louis 第 5 圈, 12.34\" / \"第 5 圈, 12.34\" / \"12.34\""
         },
         "pilot": {
             "title": "飞手信息",
+            "system": "系统:",
             "band": "频段:",
             "channel": "频率:",
             "name": "飞手姓名:",
@@ -292,7 +312,8 @@
             "select_port": "选择端口...",
             "placeholder_ssid": "输入 WiFi 网络名称",
             "placeholder_pwd": "输入 WiFi 密码",
-            "auto_detect": "自动模式检测 USB 连接，失败则回退到 WiFi"
+            "auto_detect": "自动模式检测 USB 连接，失败则回退到 WiFi",
+            "port_option": "选择端口..."
         },
         "sync": {
             "timer_address": "计时器地址:",
@@ -310,9 +331,24 @@
             "add_timer": "添加计时器",
             "add_placeholder": "例如 fpvgate2.local",
             "no_timers": "未配置同步计时器",
+            "test_all": "测试所有连接",
             "master_note": "开始/停止/清除命令将发送到所有同步的计时器。",
             "slave_active": "从机模式已激活",
-            "slave_note": "此计时器由主计时器控制。比赛控制已禁用。"
+            "slave_note": "此计时器由主计时器控制。比赛控制已禁用。",
+            "master_hostname": "主机主机名/IP:",
+            "master_placeholder": "例如 fpvgate.local 或 192.168.1.100",
+            "master_tip": "输入主计时器地址以发送圈速时间",
+            "save_master": "保存主机地址",
+            "test_master": "测试主机连接",
+            "devices_title": "同步设备",
+            "this_device": "本设备",
+            "add_device": "添加设备:",
+            "add_device_placeholder": "例如 192.168.0.100 或 fpvgate2.local",
+            "add_device_btn": "添加设备",
+            "role_personal": "个人",
+            "role_master": "主机",
+            "role_slave": "从机",
+            "info_note": "将一个设备设为主机以控制比赛开始/停止。其他设备设为从机将跟随主机并发送其圈速时间。"
         },
         "webhooks": {
             "title": "Webhooks",
@@ -341,8 +377,16 @@
             "title": "系统设置",
             "battery": "电池监控",
             "enable_battery": "电池监控:",
-            "low_battery": "低电量报警:",
+            "battery_type": "电池类型:",
+            "battery_type_lipo": "LiPo (3.0v - 4.2v)",
+            "battery_type_lipohv": "LiPoHV (3.0v - 4.35v)",
+            "battery_type_liion": "Li-Ion/18650 (2.5v - 4.2v)",
+            "battery_cells": "电芯数量:",
+            "voltage_divider": "分压比:",
+            "voltage_divider_tip": "根据您的分压电路调整（例如 2.0 表示 2:1，5.5 表示 11:2）",
+            "low_battery_per_cell": "低电量报警（每节）:",
             "battery_voltage": "电池电压:",
+            "battery_voltage_tip": "总电压和每节平均电压",
             "receiver_radio": "接收器模块",
             "receiver_label": "接收器模块:",
             "receiver_options": {
@@ -404,6 +448,8 @@
         },
         "diagnostics": {
             "title": "诊断",
+            "debug_mode": "调试模式",
+            "debug_mode_tip": "在比赛屏幕上显示实时 RSSI 图表",
             "hardware_tests": "硬件测试",
             "description": "运行全面的硬件和软件测试，验证所有 FPVGate 组件是否正常运行。",
             "run_test": "运行系统自检",
@@ -422,7 +468,14 @@
             "some_failed": "部分测试失败",
             "error_running": "运行测试出错",
             "run_all": "运行所有测试",
-            "run_again": "重新运行所有测试"
+            "run_again": "重新运行所有测试",
+            "spi_title": "SPI 改装测试",
+            "spi_description": "扫描 RaceBand 频率以验证 RX5808 SPI 改装是否正常工作。已改装的模块将显示不同的 RSSI 值；未改装的模块将保持平坦。",
+            "spi_run": "运行 SPI 改装测试",
+            "spi_running": "正在扫描频率...",
+            "spi_pass": "SPI 改装已验证",
+            "spi_fail": "未检测到 SPI 改装",
+            "spi_run_again": "重新运行 SPI 测试"
         }
     },
     "modals": {
@@ -443,10 +496,14 @@
             "unit_meters": "{n} 米"
         }
     },
+    "battery_alarm": {
+        "dismiss": "关闭"
+    },
     "messages": {
         "confirm_clear_history": "您确定要清除所有比赛历史吗？此操作无法撤销。",
         "config_imported": "配置导入成功！页面将重新加载。",
         "calib_peaks_marked": "所有峰值已标记！请点击“计算阈值”",
+        "calib_auto_few_peaks": "自动检测仅找到 {n} 个峰值。请手动标记峰值。",
         "calib_applied": "校准阈值已应用！如果需要，您可以手动微调。",
         "wifi_apply_confirm": "应用 WiFi 设置？设备将重启。",
         "track_save_error": "保存赛道时出错",
@@ -488,7 +545,10 @@
         "invalid_ip": "IP 地址格式无效（例如 192.168.0.75）",
         "enter_timer_hostname": "请输入计时器主机名",
         "timer_already_added": "此计时器已在列表中",
-        "max_timers_reached": "最多允许 5 个同步计时器"
+        "max_timers_reached": "最多允许 5 个同步计时器",
+        "enter_device_address": "请输入设备地址",
+        "device_already_added": "此设备已在列表中",
+        "max_devices_reached": "最多允许 6 个设备"
     },
     "osd": {
         "lap": "第 {n} 圈",

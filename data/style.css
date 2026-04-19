@@ -665,6 +665,28 @@ button.active {
   justify-content: space-around;
 }
 
+.race-countdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.race-countdown-overlay #raceCountdownNumber {
+  font-size: clamp(72px, 20vw, 160px);
+  font-weight: bold;
+  color: var(--primary-color);
+  text-shadow: 0 0 24px rgba(0, 0, 0, 0.5);
+}
+
+.race-countdown-overlay #raceCountdownNumber.go {
+  color: #00cc66;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

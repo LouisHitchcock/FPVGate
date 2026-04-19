@@ -66,6 +66,9 @@
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
         </div>
+        <div id="raceCountdownOverlay" class="race-countdown-overlay" style="display: none;" aria-hidden="true">
+          <span id="raceCountdownNumber">10</span>
+        </div>
         <!-- Unified Multi-Pilot Race View -->
         <div id="unifiedRaceView">
           <table id="lapTable" class="unified-lap-table">
@@ -455,34 +458,37 @@
             <button class="settings-close-button" onclick="closeSettingsModal()">✕</button>
           </div>
           <div class="settings-nav">
-            <div class="settings-nav-item active" onclick="switchSettingsSection('general')">
+            <div class="settings-nav-item active" data-settings-section="general" onclick="switchSettingsSection(event, 'general')">
               <span data-i18n="settings.tabs.general">Lap & Announcer Settings</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('pilot')">
+            <div class="settings-nav-item" data-settings-section="pilot" onclick="switchSettingsSection(event, 'pilot')">
               <span data-i18n="settings.tabs.pilot">Pilot Info</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('tracks')">
+            <div class="settings-nav-item" data-settings-section="tracks" onclick="switchSettingsSection(event, 'tracks')">
               <span data-i18n="settings.tabs.tracks">Track Data</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('led')">
+            <div class="settings-nav-item" data-settings-section="led" onclick="switchSettingsSection(event, 'led')">
               <span data-i18n="settings.tabs.led">LED Setup</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('wifi')">
+            <div class="settings-nav-item" data-settings-section="wifi" onclick="switchSettingsSection(event, 'wifi')">
               <span data-i18n="settings.tabs.wifi">WiFi & Connection</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('webhooks')">
+            <div class="settings-nav-item" data-settings-section="webhooks" onclick="switchSettingsSection(event, 'webhooks')">
               <span data-i18n="settings.tabs.webhooks">Webhooks</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('splittimes')">
+            <div class="settings-nav-item" data-settings-section="splittimes" onclick="switchSettingsSection(event, 'splittimes')">
               <span>Split Times</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('osd')">
+            <div class="settings-nav-item" id="settingsNavElrs" data-settings-section="elrs" onclick="switchSettingsSection(event, 'elrs')" style="display: none">
+              <span data-i18n="settings.tabs.elrs_backpack">ELRS Backpack</span>
+            </div>
+            <div class="settings-nav-item" data-settings-section="osd" onclick="switchSettingsSection(event, 'osd')">
               <span data-i18n="settings.tabs.osd">On Screen Displays</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('system')">
+            <div class="settings-nav-item" data-settings-section="system" onclick="switchSettingsSection(event, 'system')">
               <span data-i18n="settings.tabs.system">System Settings</span>
             </div>
-            <div class="settings-nav-item" onclick="switchSettingsSection('diagnostics')">
+            <div class="settings-nav-item" data-settings-section="diagnostics" onclick="switchSettingsSection(event, 'diagnostics')">
               <span data-i18n="settings.tabs.diagnostics">Diagnostics</span>
             </div>
           </div>
@@ -1117,6 +1123,82 @@
               </div>
             </div>
 
+            <!-- ELRS Backpack (Waveshare + ENABLE_ELRS_BACKPACK_ESPNOW builds only) -->
+            <div id="settings-elrs" class="settings-section">
+              <h2 data-i18n="settings.elrs_backpack.title">ELRS Backpack</h2>
+              <p id="elrsBackpackWebUnsupported" style="display: none; color: var(--secondary-color)">
+                ELRS backpack ESP-NOW is not available on this firmware build.
+              </p>
+              <div id="elrsBackpackWebPanel" style="display: none">
+                <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                  <p style="margin: 0; color: var(--secondary-color)" data-i18n="settings.elrs_backpack.intro">
+                    Send lap times and playback laps to HDZero-style goggles via ESP-NOW. Swipe past System on the device LCD for the same options.
+                  </p>
+                </div>
+                <div class="config-item">
+                  <label for="elrsBackpackEspnow" data-i18n="settings.elrs_backpack.espnow">ELRS backpack (ESP-NOW + Wi-Fi):</label>
+                  <div style="flex: 1">
+                    <label class="switch">
+                      <input type="checkbox" id="elrsBackpackEspnow" onchange="autoSaveConfig()" />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="config-item">
+                  <label for="elrsBackpackBindPhrase" data-i18n="settings.elrs_backpack.bind_phrase">Bind phrase:</label>
+                  <input
+                    type="text"
+                    id="elrsBackpackBindPhrase"
+                    maxlength="32"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Same as goggles / backpack"
+                    style="flex: 1"
+                    onchange="autoSaveConfig()"
+                  />
+                </div>
+                <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.elrs_backpack.bind_note">
+                  Changing phrase disconnects Wi-Fi briefly.
+                </div>
+                <h3 style="margin-top: 20px" data-i18n="settings.elrs_backpack.osd_title">Goggle OSD (lap line)</h3>
+                <div class="config-item">
+                  <label for="elrsOsdLapRow" data-i18n="settings.elrs_backpack.lap_row">Lap text row (0–18):</label>
+                  <input type="number" id="elrsOsdLapRow" min="0" max="18" value="5" style="width: 80px" onchange="autoSaveConfig()" />
+                </div>
+                <div class="config-item">
+                  <label for="elrsOsdLapColAuto" data-i18n="settings.elrs_backpack.center_col">Center lap text horizontally:</label>
+                  <div style="flex: 1">
+                    <label class="switch">
+                      <input type="checkbox" id="elrsOsdLapColAuto" checked onchange="onElrsOsdColAutoChange()" />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="config-item">
+                  <label for="elrsOsdLapColFixed" data-i18n="settings.elrs_backpack.fixed_col">Fixed column (0–49):</label>
+                  <input type="number" id="elrsOsdLapColFixed" min="0" max="49" value="0" style="width: 80px" disabled onchange="autoSaveConfig()" />
+                </div>
+                <div class="config-item">
+                  <label for="elrsOsdClearOnStop" data-i18n="settings.elrs_backpack.clear_on_stop">Clear goggle OSD when race stops:</label>
+                  <div style="flex: 1">
+                    <label class="switch">
+                      <input type="checkbox" id="elrsOsdClearOnStop" onchange="autoSaveConfig()" />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="config-item">
+                  <label for="elrsOsdPlaybackLaps" data-i18n="settings.elrs_backpack.playback">Send playback laps to OSD:</label>
+                  <div style="flex: 1">
+                    <label class="switch">
+                      <input type="checkbox" id="elrsOsdPlaybackLaps" onchange="autoSaveConfig()" />
+                      <span class="slider"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- System Section -->
             <div id="settings-system" class="settings-section">
               <h2 data-i18n="settings.system.title">System Settings</h2>
@@ -1424,6 +1506,22 @@
 
               <div id="testLoading" style="display: none; text-align: center; padding: 24px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 16px">
                 <p style="margin: 0; font-size: 14px; color: var(--primary-color)" data-i18n="settings.diagnostics.running">Running tests...</p>
+              </div>
+
+              <h3 data-i18n="settings.diagnostics.spi_title">SPI Mod Test</h3>
+              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                <p style="margin: 0" data-i18n="settings.diagnostics.spi_description">Sweeps RaceBand frequencies to verify the RX5808 SPI mod is working. A modded module will show varied RSSI across channels; an unmodded module will be flat.</p>
+              </div>
+
+              <button id="runSPITestButton" onclick="runSPITest()" style="width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--accent-color)" data-i18n="settings.diagnostics.spi_run">Run SPI Mod Test</button>
+
+              <div id="spiTestLoading" style="display: none; text-align: center; padding: 24px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 16px">
+                <p style="margin: 0; font-size: 14px; color: var(--primary-color)" data-i18n="settings.diagnostics.spi_running">Sweeping frequencies...</p>
+              </div>
+
+              <div id="spiTestResults" style="display: none; margin-bottom: 16px">
+                <div id="spiTestVerdict"></div>
+                <div id="spiTestChart" style="padding: 16px; background-color: var(--bg-secondary); border-radius: 8px"></div>
               </div>
 
               <h3 data-i18n="settings.diagnostics.monitor_title">System Monitor</h3>

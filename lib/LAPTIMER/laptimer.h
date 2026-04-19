@@ -1,6 +1,7 @@
 #ifndef LAPTIMER_H
 #define LAPTIMER_H
 
+#include <vector>
 #include "RX5808.h"
 #include "buzzer.h"
 #include "config.h"
@@ -31,6 +32,15 @@ class LapTimer {
     uint8_t getRssi();
     uint32_t getLapTime();
     bool isLapAvailable();
+    void addManualLap(uint32_t lapTimeMs);  // For web/test lap injection
+    
+    // Timing methods for LCD display
+    bool isRaceRunning();
+    uint32_t getRaceTimeMs();
+    uint32_t getCurrentLapTimeMs();
+    uint32_t getFastestLapMs();
+    uint32_t getFastest3ConsecutiveMs();
+    uint8_t getLapCount();
     
     // Effective thresholds (returns configured values)
     uint8_t getEffectiveEnterRssi();
@@ -51,6 +61,8 @@ class LapTimer {
     float getDistanceRemaining();
     Track* getSelectedTrack();
 
+    /** Copy lap times (ms) in order for saving; only laps > 0. Call before stop(). */
+    void getLapTimesForSave(std::vector<uint32_t>& out) const;
     // Returns the race-elapsed time (ms) at the moment of the last gate crossing.
     // Use this to pass an accurate timestamp to RotorHazard.
     uint32_t getLastCrossingRaceTimeMs();

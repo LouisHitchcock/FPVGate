@@ -196,6 +196,12 @@ FPVGate/
 │   ├── USB/
 │   │   ├── usb.h
 │   │   └── usb.cpp               # USB Serial CDC transport
+│   ├── LCD_UI/                    # Optional touchscreen UI (Waveshare LCD board only)
+│   │   ├── fpv_lcd_ui.h
+│   │   ├── fpv_lcd_ui.cpp         # LVGL touchscreen UI (ported from StarForgeOS)
+│   │   ├── lv_conf.h              # LVGL configuration
+│   │   ├── CST820.h/.cpp          # Capacitive touch driver
+│   │   └── spi_mutex.h            # SPI bus sharing (LCD + SD card)
 │   ├── WEBSERVER/
 │   │   ├── webserver.h
 │   │   └── webserver.cpp         # HTTP + WebSocket server

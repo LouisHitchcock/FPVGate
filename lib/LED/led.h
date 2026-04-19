@@ -10,7 +10,7 @@ typedef enum {
 
 class Led {
    public:
-    void init(uint8_t pin, bool inverted);
+    void init(int8_t pin, bool inverted);
     void handleLed(uint32_t currentTimeMs);
     void on(uint32_t timeMs = 0);
     void off();
@@ -18,7 +18,8 @@ class Led {
 
    private:
     led_state_e ledState = LED_IDLE;
-    uint8_t ledPin;
+    int8_t ledPin = -1;
+    bool validPin = false;
     uint8_t initialState = LOW;
     uint8_t currentState = LOW;
     uint32_t onTimeMs;

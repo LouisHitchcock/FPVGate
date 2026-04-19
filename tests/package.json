@@ -1,0 +1,15 @@
+{
+  "name": "fpvgate-tests",
+  "version": "1.0.0",
+  "description": "Unit tests for FPVGate frontend logic",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "jest-environment-jsdom": "^29.0.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom"
+  }
+}

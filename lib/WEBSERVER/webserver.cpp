@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 
 #include "debug.h"
+#include "elrs_backpack_espnow.h"
 
 #ifdef HAS_RGB_LED
 #include "rgbled.h"
@@ -40,6 +41,32 @@ static const char *wifi_ap_ssid_prefix = "FPVGate";
 static const char *wifi_ap_password = "fpvgate1";
 static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
+
+/** When ELRS backpack ESP-NOW is enabled, use AP+STA so ESP-NOW can share the radio with Wi-Fi. */
+static wifi_mode_t effectiveWifiModeForRole(bool primaryAp, Config* cfg) {
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+    if (cfg && cfg->getElrsBackpackEspnow()) {
+        return WIFI_AP_STA;
+    }
+#else
+    (void)cfg;
+#endif
+    return primaryAp ? WIFI_AP : WIFI_STA;
+}
+
+void Webserver::requestWifiStackReinit() {
+    elrsBackpackEspnowStopIfRunning();
+    WiFi.softAPdisconnect(true);
+    WiFi.disconnect(true, true);
+    wifiMode = WIFI_OFF;
+    if (conf->getSsid()[0] == 0) {
+        changeMode = WIFI_AP;
+    } else {
+        changeMode = WIFI_STA;
+    }
+    changeTimeMs = millis() - WIFI_RECONNECT_TIMEOUT_MS - 1;
+    DEBUG("WiFi stack reinit requested (ELRS backpack / mode)\n");
+}
 
 void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr, SplitTimeManager *splitMgr) {
 
@@ -119,7 +146,14 @@ void Webserver::sendRssiEvent(uint8_t rssi) {
 }
 
 void Webserver::sendRaceStateEvent(const char* state) {
-    if (!servicesStarted) return;
+    if (!servicesStarted) {
+        DEBUG("[SSE] sendRaceStateEvent SKIPPED (services not started)\n");
+        return;
+    }
+    const int n = events.count();
+    if (n > 0) {
+        DEBUG("[SSE] sendRaceStateEvent: '%s' to %d client(s)\n", state, n);
+    }
     events.send(state, "raceState");
 }
 
@@ -127,7 +161,7 @@ void Webserver::sendSlaveLapEvent(uint32_t lapTimeMs, const char* pilotName, con
     if (!servicesStarted) return;
     
     // Build JSON payload for SSE event
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["lapTimeMs"] = lapTimeMs;
     doc["pilotName"] = pilotName;
     doc["pilotPhonetic"] = pilotPhonetic;
@@ -324,7 +358,7 @@ void Webserver::sendLapToMaster(uint32_t lapTimeMs) {
         http.addHeader("Content-Type", "application/json");
         
         // Build JSON payload with pilot info
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["lapTimeMs"] = lapTimeMs;
         doc["pilotName"] = conf->getPilotCallsign();
         doc["pilotPhonetic"] = conf->getPilotPhonetic();
@@ -382,6 +416,60 @@ static void sendSyncCommand(Config* config, const char* endpoint) {
     }
 }
 
+// Public triggers - called from main loop (core 1)
+// Timer actions happen immediately; SSE broadcast is deferred to core 0
+// via pendingRaceState, which handleWebUpdate() picks up.
+void Webserver::triggerStart() {
+    sendSyncCommand(conf, "/timer/start");
+    timer->start();
+    pendingRaceState = "started";
+}
+
+void Webserver::triggerStop() {
+    sendSyncCommand(conf, "/timer/stop");
+    timer->stop();
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+    elrsBackpackEspnowOnRaceStop(conf);
+#endif
+    pendingRaceState = "stopped";
+}
+
+void Webserver::triggerClearLaps() {
+    sendSyncCommand(conf, "/timer/clearLaps");
+    pendingRaceState = "cleared";
+}
+
+void Webserver::triggerConfigUpdated() {
+    pendingConfigUpdate = true;
+}
+
+bool Webserver::consumePendingLap(uint32_t& lapMs) {
+    if (_hasLcdLap) {
+        lapMs = _pendingLcdLap;
+        _hasLcdLap = false;
+        return true;
+    }
+    return false;
+}
+
+bool Webserver::consumePendingClear() {
+    if (_pendingLcdClear) {
+        _pendingLcdClear = false;
+        return true;
+    }
+    return false;
+}
+
+void Webserver::setPendingLcdEvent(PendingLcdEvent ev) {
+    _pendingLcdEvent = ev;
+}
+
+Webserver::PendingLcdEvent Webserver::consumePendingLcdEvent() {
+    PendingLcdEvent ev = _pendingLcdEvent;
+    _pendingLcdEvent = PendingLcdEvent::None;
+    return ev;
+}
+
 bool Webserver::isConnected() {
     // WiFi transport is always "connected" if services are started
     // Individual clients connect/disconnect via SSE but that's transparent
@@ -393,8 +481,27 @@ void Webserver::update(uint32_t currentTimeMs) {
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
-    // Note: Lap events are now broadcast via TransportManager in main.cpp
-    // This method only handles WiFi-specific logic
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+    elrsBackpackEspnowPoll(conf, currentTimeMs);
+#endif
+    // Process deferred race state events from LCD triggers (must run on core 0)
+    if (pendingRaceState) {
+        const char* state = (const char*)pendingRaceState;
+        pendingRaceState = nullptr;
+        DEBUG("[LCD->SSE] Deferred race state: '%s'\n", state);
+        if (transportMgr) {
+            transportMgr->broadcastRaceStateEvent(state);
+        }
+    }
+    
+    // Process deferred config update notification from LCD (must run on core 0)
+    if (pendingConfigUpdate) {
+        pendingConfigUpdate = false;
+        if (servicesStarted) {
+            DEBUG("[LCD->SSE] Config updated, notifying web clients\n");
+            events.send("updated", "configUpdated");
+        }
+    }
 
     if (sendRssi && ((currentTimeMs - rssiSentMs) > WEB_RSSI_SEND_TIMEOUT_MS)) {
         sendRssiEvent(timer->getRssi());
@@ -422,7 +529,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 changeTimeMs = currentTimeMs;
                 break;
             case WL_CONNECTED:
-                buz->beep(200);
+                buz->playCue(BUZZER_CUE_WEB_CHIRP);
                 led->off();
                 wifiConnected = true;
                 DEBUG("WiFi connected successfully!\n");
@@ -451,7 +558,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             DEBUG("WiFi Connection failed, reconnecting\n");
             WiFi.reconnect();
             startServices();
-            buz->beep(100);
+            buz->playCue(BUZZER_CUE_WEB_CHIRP);
             led->blink(200);
         }
     }
@@ -460,12 +567,22 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             case WIFI_AP:
                 DEBUG("Changing to WiFi AP mode\n");
 
-                WiFi.disconnect();
+                elrsBackpackEspnowStopIfRunning();
+                WiFi.softAPdisconnect(true);
+                WiFi.disconnect(true);
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+                /* Sets MACs inside: WiFi.mode(WIFI_AP_STA) + disconnect — not after WIFI_OFF (0x3001 NOT_INIT). */
+                elrsBackpackEspnowPrepareWifiMacForElrs(conf);
+#else
+                WiFi.mode(WIFI_OFF);
+                delay(30);
+#endif
+
                 wifiMode = WIFI_AP;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
-                WiFi.mode(wifiMode);
+                WiFi.mode(effectiveWifiModeForRole(true, conf));
                 changeTimeMs = currentTimeMs;
-                
+
                 // Power-saving settings for AP mode to prevent boot-looping
                 // Reduce TX power specifically for AP mode (already set globally but ensure it's applied)
                 WiFi.setTxPower(WIFI_POWER_11dBm);
@@ -473,10 +590,23 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 WiFi.softAPConfig(ipAddress, ipAddress, netMsk);
                 DEBUG("Starting WiFi AP: %s with password: %s\n", wifi_ap_ssid.c_str(), wifi_ap_password);
                 
-                // Start AP with max 4 connections to limit power draw
-                // Channel 6 is typically less crowded, beacon interval 200ms (higher = less power)
-                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, 6, 0, 4);
-                
+                // Start AP with max 4 connections to limit power draw.
+                // When ELRS backpack ESP-NOW is on, use ch 1 — same as ExpressLRS SetSoftMACAddress() so
+                // goggles ACK; otherwise ch 6 is a reasonable default for AP-only.
+                {
+                    uint8_t ap_ch = 6;
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+                    if (conf && conf->getElrsBackpackEspnow()) {
+                        ap_ch = kElrsBackpackEspnowWifiChannel;
+                    }
+#endif
+                    WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, ap_ch, 0, 4);
+                }
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+                /* softAP() / driver can revert custom MACs set in prepare; VRx accepts only source MAC == bind UID. */
+                elrsBackpackEspnowReassertCustomMacsForElrs(conf);
+#endif
+
 #ifdef SEEED_XIAO_ESP32S3
                 // Disable WiFi power saving for faster responsiveness on XIAO
                 // The XIAO's chip antenna and power delivery can cause connection delays with PS enabled
@@ -489,17 +619,31 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 esp_wifi_set_max_tx_power(44); // 11dBm in 0.25dBm units (44 * 0.25 = 11dBm)
                 
                 DEBUG("WiFi AP started. SSID: %s, Power: 11dBm, Max clients: 4\n", WiFi.softAPSSID().c_str());
+                elrsBackpackEspnowStartIfEnabled(conf);
                 startServices();
                 buz->beep(1000);
                 led->on(1000);
                 break;
             case WIFI_STA:
                 DEBUG("Connecting to WiFi network\n");
+                elrsBackpackEspnowStopIfRunning();
+                WiFi.softAPdisconnect(true);
+                WiFi.disconnect(true);
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+                elrsBackpackEspnowPrepareWifiMacForElrs(conf);
+#else
+                WiFi.mode(WIFI_OFF);
+                delay(30);
+#endif
                 wifiMode = WIFI_STA;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
-                WiFi.mode(wifiMode);
+                WiFi.mode(effectiveWifiModeForRole(false, conf));
                 changeTimeMs = currentTimeMs;
                 WiFi.begin(conf->getSsid(), conf->getPassword());
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+                elrsBackpackEspnowReassertCustomMacsForElrs(conf);
+#endif
+                elrsBackpackEspnowStartIfEnabled(conf);
                 startServices();
                 led->blink(200);
             default:
@@ -681,11 +825,13 @@ static void startMDNS() {
 
 void Webserver::startServices() {
     if (servicesStarted) {
-        // Restart mDNS when WiFi mode changes
+        // Restart server and mDNS when WiFi mode changes
+        // server.begin() must be called again after WiFi.mode(WIFI_OFF) kills the TCP socket
+        server.begin();
         MDNS.end();
         delay(100);  // Give mDNS time to shut down
         startMDNS();
-        DEBUG("mDNS restarted for mode change\n");
+        DEBUG("Server and mDNS restarted for mode change\n");
         return;
     }
 
@@ -699,11 +845,11 @@ void Webserver::startServices() {
 
     startLittleFS();
     
-    // Initialize storage (SD card or LittleFS fallback)
-    storage->init();
+    // Note: storage is already initialized in main.cpp before webserver starts
+    // Do NOT call storage->init() here as it would reset the sdAvailable flag!
     
-    // Initialize race history after storage is ready
-    history->init(storage);
+    // Note: race history is already initialized in main.cpp
+    // Do NOT re-initialize it here
 
     server.on("/", handleRoot);
     server.on("/generate_204", handleRoot);  // handle Andriod phones doing shit to detect if there is 'real' internet and possibly dropping conn.
@@ -714,6 +860,11 @@ void Webserver::startServices() {
     server.on("/check_network_status.txt", handleRoot);
     server.on("/ncsi.txt", handleRoot);
     server.on("/fwlink", handleRoot);
+    // Android captive portal probe paths – handle before serveStatic to avoid LittleFS open() errors
+    server.on("/connecttest.txt", handleRoot);
+    server.on("/connecttest.txt.gz", handleRoot);
+    server.on("/connecttest.txt/index.htm", handleRoot);
+    server.on("/connecttest.txt/index.htm.gz", handleRoot);
 
     server.on("/status", [this](AsyncWebServerRequest *request) {
         char buf[1536];
@@ -782,12 +933,9 @@ EEPROM:\n\
         request->send(response);
     });
     
+    // Countdown: only set pending LCD event; audio starts when LCD countdown actually starts (keeps them in sync)
     server.on("/timer/countdown", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
-#ifdef HAS_I2S_AUDIO
-        if (g_audioAnnouncer) {
-            g_audioAnnouncer->announceCountdown();
-        }
-#endif
+        setPendingLcdEvent(PendingLcdEvent::Countdown);
         sendCorsResponse(request, "{\"status\": \"OK\"}");
     });
     
@@ -872,6 +1020,10 @@ EEPROM:\n\
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("stopped");
         }
+        setPendingLcdEvent(PendingLcdEvent::ShowFinish);
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+        elrsBackpackEspnowOnRaceStop(conf);
+#endif
 #ifdef HAS_I2S_AUDIO
         if (g_audioAnnouncer) {
             g_audioAnnouncer->announceRaceStop();
@@ -892,11 +1044,14 @@ EEPROM:\n\
     // Manual lap addition - broadcasts lap event to all clients
     AsyncCallbackJsonWebHandler *addLapHandler = new AsyncCallbackJsonWebHandler("/timer/addLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
-        if (jsonObj.containsKey("lapTime")) {
+        if (!jsonObj["lapTime"].isNull()) {
             uint32_t lapTimeMs = jsonObj["lapTime"].as<uint32_t>();
             if (transportMgr) {
                 transportMgr->broadcastLapEvent(lapTimeMs);
             }
+            // Forward to LCD
+            _pendingLcdLap = lapTimeMs;
+            _hasLcdLap = true;
 #ifdef HAS_RGB_LED
             if (g_rgbLed) {
                 g_rgbLed->flashLap();
@@ -940,11 +1095,14 @@ EEPROM:\n\
 
     AsyncCallbackJsonWebHandler *playbackLapHandler = new AsyncCallbackJsonWebHandler("/timer/playbackLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
-        if (jsonObj.containsKey("lapTime")) {
+        if (!jsonObj["lapTime"].isNull()) {
             uint32_t lapTimeMs = jsonObj["lapTime"].as<uint32_t>();
             if (transportMgr) {
                 transportMgr->broadcastLapEvent(lapTimeMs);
             }
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+            elrsBackpackEspnowOnPlaybackLap(conf, lapTimeMs);
+#endif
 #ifdef HAS_RGB_LED
             if (g_rgbLed) {
                 g_rgbLed->flashLap();
@@ -986,12 +1144,14 @@ EEPROM:\n\
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("cleared");
         }
+        // Forward to LCD
+        _pendingLcdClear = true;
         sendCorsResponse(request, "{\"status\": \"OK\"}");
     });
 
     // Race sync endpoints
     server.on("/timer/syncStatus", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["timerNumber"] = conf->getTimerNumber();
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["hostname"] = wifi_hostname;
@@ -1003,7 +1163,7 @@ EEPROM:\n\
 
     server.on("/timer/ping", HTTP_GET, [this](AsyncWebServerRequest *request) {
         // Simple ping endpoint for master to verify slave connectivity
-        DynamicJsonDocument doc(128);
+        JsonDocument doc;
         doc["status"] = "OK";
         doc["hostname"] = wifi_hostname;
         doc["raceSyncMode"] = conf->getRaceSyncMode();
@@ -1026,7 +1186,7 @@ EEPROM:\n\
         uint32_t testLapTime = 12345; // Test lap time in ms
         sendLapToMaster(testLapTime);
         
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["status"] = "OK";
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["masterHostname"] = conf->getMasterHostname();
@@ -1294,14 +1454,43 @@ EEPROM:\n\
         serializeJsonPretty(jsonObj, DEBUG_OUT);
         DEBUG("\n");
 #endif
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+        uint8_t prev_elrs_backpack = conf->getElrsBackpackEspnow();
+        char prev_elrs_bind[33];
+        strlcpy(prev_elrs_bind, conf->getElrsBackpackBindPhrase(), sizeof(prev_elrs_bind));
+#endif
         conf->fromJson(jsonObj);
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+        bool reboot_to_enable_elrs_espnow = false;
+        if (!jsonObj["elrsBackpackEspnow"].isNull() && prev_elrs_backpack != conf->getElrsBackpackEspnow()) {
+            if (conf->getElrsBackpackEspnow() == 1 && prev_elrs_backpack == 0) {
+                reboot_to_enable_elrs_espnow = true;
+            } else {
+                requestWifiStackReinit();
+            }
+        } else if (!jsonObj["elrsBackpackBindPhrase"].isNull() &&
+                   strcmp(prev_elrs_bind, conf->getElrsBackpackBindPhrase()) != 0) {
+            requestWifiStackReinit();
+        }
+#endif
         
         // Update battery monitor voltage divider if it changed
 #ifdef HAS_BATTERY_MONITOR
-        if (jsonObj.containsKey("batteryVoltageDivider") && monitor) {
-            float ratio = jsonObj["batteryVoltageDivider"].as<float>();
+        if (!jsonObj["batteryVoltageDivider"].isNull() && monitor) {
+            float ratio = conf->getBatteryVoltageDivider();
             monitor->setVoltageDivider(ratio);
             DEBUG("Battery voltage divider updated to %.1f\n", ratio);
+        }
+#endif
+
+#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
+        if (reboot_to_enable_elrs_espnow) {
+            conf->write();
+            request->send(200, "application/json", "{\"status\":\"OK\",\"reboot\":true}");
+            led->on(200);
+            delay(200);
+            ESP.restart();
+            return;
         }
 #endif
         
@@ -1434,7 +1623,7 @@ EEPROM:\n\
     
     // RotorHazard integration status endpoint
     server.on("/api/rh/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         bool en = rhManager && rhManager->isEnabled();
         bool conn = rhManager && rhManager->isConnected();
         bool synced = rhManager && rhManager->isClockSynced();
@@ -1460,7 +1649,7 @@ EEPROM:\n\
 
     // WiFi status endpoint (register before serveStatic to prevent VFS errors)
     server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(512);
+        JsonDocument doc;
         
         // Get WiFi mode
         wifi_mode_t mode = WiFi.getMode();
@@ -1556,7 +1745,7 @@ EEPROM:\n\
         }
         
         // Parse pilots array if present (multi-pilot races)
-        if (jsonObj.containsKey("pilots")) {
+        if (!jsonObj["pilots"].isNull()) {
             JsonArray pilotsArray = jsonObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
                 PilotData pilot;
@@ -1626,7 +1815,7 @@ EEPROM:\n\
     AsyncCallbackJsonWebHandler *updateLapsHandler = new AsyncCallbackJsonWebHandler("/races/updateLaps", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
         
-        if (!jsonObj.containsKey("timestamp") || !jsonObj.containsKey("lapTimes")) {
+        if (!!jsonObj["timestamp"].isNull() || !!jsonObj["lapTimes"].isNull()) {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
             return;
         }
@@ -1653,9 +1842,9 @@ EEPROM:\n\
             for (const auto& race : races) {
                 if (race.timestamp == timestamp) {
                     // Create JSON for single race
-                    DynamicJsonDocument doc(32768);  // Increased for multi-pilot
-                    JsonArray racesArray = doc.createNestedArray("races");
-                    JsonObject raceObj = racesArray.createNestedObject();
+                    JsonDocument doc;  // Increased for multi-pilot
+                    JsonArray racesArray = doc["races"].to<JsonArray>();
+                    JsonObject raceObj = racesArray.add<JsonObject>();
                     raceObj["timestamp"] = race.timestamp;
                     raceObj["fastestLap"] = race.fastestLap;
                     raceObj["medianLap"] = race.medianLap;
@@ -1668,22 +1857,22 @@ EEPROM:\n\
                     raceObj["band"] = race.band;
                     raceObj["channel"] = race.channel;
                     raceObj["syncMode"] = race.syncMode;
-                    JsonArray lapsArray = raceObj.createNestedArray("lapTimes");
+                    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {
                         lapsArray.add(lap);
                     }
                     
                     // Include pilots if present
                     if (!race.pilots.empty()) {
-                        JsonArray pilotsArray = raceObj.createNestedArray("pilots");
+                        JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
                         for (const auto& pilot : race.pilots) {
-                            JsonObject pilotObj = pilotsArray.createNestedObject();
+                            JsonObject pilotObj = pilotsArray.add<JsonObject>();
                             pilotObj["name"] = pilot.name;
                             pilotObj["callsign"] = pilot.callsign;
                             pilotObj["color"] = pilot.color;
                             pilotObj["fastestLap"] = pilot.fastestLap;
                             pilotObj["isLocal"] = pilot.isLocal;
-                            JsonArray pilotLaps = pilotObj.createNestedArray("lapTimes");
+                            JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
                             for (uint32_t lap : pilot.lapTimes) {
                                 pilotLaps.add(lap);
                             }
@@ -1739,7 +1928,7 @@ EEPROM:\n\
     AsyncCallbackJsonWebHandler *trackUpdateHandler = new AsyncCallbackJsonWebHandler("/tracks/update", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
         
-        if (!jsonObj.containsKey("trackId")) {
+        if (!!jsonObj["trackId"].isNull()) {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing trackId\"}");
             return;
         }
@@ -1814,7 +2003,7 @@ EEPROM:\n\
     });
 
     server.on("/timer/distance", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(512);
+        JsonDocument doc;
         doc["totalDistance"] = timer->getTotalDistance();
         doc["distanceRemaining"] = timer->getDistanceRemaining();
         
@@ -1848,11 +2037,11 @@ EEPROM:\n\
     // Debug log endpoint for serial monitor
     server.on("/api/debuglog", HTTP_GET, [this](AsyncWebServerRequest *request) {
         const auto& buffer = DebugLogger::getInstance().getBuffer();
-        DynamicJsonDocument doc(8192);
-        JsonArray logs = doc.createNestedArray("logs");
+        JsonDocument doc;
+        JsonArray logs = doc["logs"].to<JsonArray>();
         
         for (const auto& entry : buffer) {
-            JsonObject log = logs.createNestedObject();
+            JsonObject log = logs.add<JsonObject>();
             log["timestamp"] = entry.timestamp;
             log["message"] = entry.message;
         }
@@ -2258,6 +2447,63 @@ EEPROM:\n\
         led->on(200);
     });
 
+    // SPI mod test endpoint
+    server.on("/api/spitest", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!rx) {
+            request->send(500, "application/json", "{\"error\":\"RX5808 not initialized\"}");
+            return;
+        }
+
+        static const uint16_t testFreqs[] = {5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917};
+        static const char* chanLabels[] = {"R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"};
+        static const uint8_t numFreqs = 8;
+        static const uint8_t samplesPerFreq = 10;
+        static const uint8_t settleMs = 50;
+
+        uint8_t rssiValues[numFreqs];
+        uint8_t maxRssi = 0;
+        uint8_t minRssi = 255;
+
+        for (uint8_t i = 0; i < numFreqs; i++) {
+            rx->setFrequency(testFreqs[i]);
+            delay(settleMs);
+            rx->handleFrequencyChange(millis(), testFreqs[i]);
+
+            uint16_t sum = 0;
+            for (uint8_t s = 0; s < samplesPerFreq; s++) {
+                sum += rx->readRssi();
+                delay(2);
+            }
+            rssiValues[i] = sum / samplesPerFreq;
+            if (rssiValues[i] > maxRssi) maxRssi = rssiValues[i];
+            if (rssiValues[i] < minRssi) minRssi = rssiValues[i];
+        }
+
+        // Restore configured frequency
+        rx->setFrequency(conf->getFrequency());
+        delay(settleMs);
+        rx->handleFrequencyChange(millis(), conf->getFrequency());
+
+        uint8_t spread = maxRssi - minRssi;
+        bool passed = (spread >= 10);
+
+        String json = "{\"passed\":" + String(passed ? "true" : "false") +
+                     ",\"spread\":" + String(spread) +
+                     ",\"min\":" + String(minRssi) +
+                     ",\"max\":" + String(maxRssi) +
+                     ",\"channels\":[";
+        for (uint8_t i = 0; i < numFreqs; i++) {
+            if (i > 0) json += ",";
+            json += "{\"label\":\"" + String(chanLabels[i]) +
+                   "\",\"freq\":" + String(testFreqs[i]) +
+                   ",\"rssi\":" + String(rssiValues[i]) + "}";
+        }
+        json += "]}";
+
+        request->send(200, "application/json", json);
+        led->on(200);
+    });
+
     // Webhook management endpoints
     server.on("/webhooks", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = "{\"enabled\":" + String(webhooks ? (webhooks->isEnabled() ? "true" : "false") : "false") + ",\"webhooks\":[";
@@ -2341,13 +2587,13 @@ EEPROM:\n\
         String targetIP = jsonObj["ip"] | "all";
         
         // Build the payload to forward (everything except the "ip" field)
-        DynamicJsonDocument fwdDoc(512);
-        if (jsonObj.containsKey("effect")) fwdDoc["effect"] = jsonObj["effect"];
-        if (jsonObj.containsKey("brightness")) fwdDoc["brightness"] = jsonObj["brightness"];
-        if (jsonObj.containsKey("speed")) fwdDoc["speed"] = jsonObj["speed"];
-        if (jsonObj.containsKey("color")) {
+        JsonDocument fwdDoc;
+        if (!jsonObj["effect"].isNull()) fwdDoc["effect"] = jsonObj["effect"];
+        if (!jsonObj["brightness"].isNull()) fwdDoc["brightness"] = jsonObj["brightness"];
+        if (!jsonObj["speed"].isNull()) fwdDoc["speed"] = jsonObj["speed"];
+        if (!jsonObj["color"].isNull()) {
             JsonArray srcColor = jsonObj["color"];
-            JsonArray dstColor = fwdDoc.createNestedArray("color");
+            JsonArray dstColor = fwdDoc["color"].to<JsonArray>();
             for (JsonVariant v : srcColor) dstColor.add(v);
         }
         

@@ -10,7 +10,7 @@ D4 (GPIO5)  ─── CH1 (DATA)       D8 (GPIO7) ─── SCK
 D5 (GPIO6)  ─── CH2 (SELECT)     D9 (GPIO8) ─── MOSI   
 D3 (GPIO4)  ─── CH3 (CLOCK)      D10 (GPIO9) ── MISO   
 D0 (GPIO1)  ───────────────── Mode Switch               
-D4 (GPIO5)  ───────────────── Buzzer (+)               
+D6 (GPIO43) ───────────────── Buzzer (+)               
 D7 (GPIO44) ───────────────── NeoPixel DIN             
 GND         ─── GND              GND       ─── GND     
 5V (VUSB)   ─── +5V              3V3/5V    ─── VCC     

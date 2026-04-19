@@ -14,6 +14,9 @@
         "gate1_table": "Porte 1: {s}s",
         "race_complete": "Course terminée",
         "slave_mode_indicator": "Mode Esclave - Contrôlé par le Minuteur Maître",
+        "slave_mode_short": "ESCLAVE",
+        "master_mode_short": "MAÎTRE",
+        "personal_mode_short": "PERSONNEL",
         "connected": "{mode}: Connecté",
         "disconnected": "Déconnecté",
         "status_connected": "Connecté",
@@ -35,7 +38,8 @@
             "lap_singular": "1 tour",
             "lap_plural": "{n} tours",
             "seconds_short": "s"
-        }
+        },
+        "no_laps": "Aucun tour enregistré"
     },
     "analysis": {
         "title": "Analyse des Tours",
@@ -100,38 +104,51 @@
         "gate1_start": "Porte 1 (Départ)"
     },
     "calib": {
-        "start_wizard": "Démarrer l'Assistant de Calibration",
-        "enter_rssi": "RSSI Entrée:",
-        "exit_rssi": "RSSI Sortie:",
-        "save_thresholds": "Enregistrer Seuils RSSI",
-        "wizard_title_recording": "Assistant Calibration - Enregistrement",
-        "wizard_title_marking": "Assistant Calibration - Marquer Pics",
-        "wizard_title_results": "Assistant Calibration - Résultats",
+        "title": "Calibration RSSI",
+        "subtitle": "Ajustez vos seuils de détection de porte",
+        "channel_selection": "Sélection du Canal",
+        "system": "Système",
+        "band": "Bande",
+        "channel": "Canal",
+        "rssi_graph": "Signal RSSI en Direct",
+        "thresholds": "Seuils de Détection",
+        "enter_hint": "Déclencher lorsque le signal dépasse ce seuil",
+        "exit_hint": "Réinitialiser lorsque le signal descend en dessous",
+        "start_wizard": "Assistant",
+        "enter_rssi": "RSSI Entrée",
+        "exit_rssi": "RSSI Sortie",
+        "save_thresholds": "Enregistrer Seuils",
+        "wizard_title_ambient": "Assistant Calibration - Bruit Ambiant",
+        "wizard_ambient_instructions": "Éloignez les drones de la zone. Enregistrement du niveau de bruit ambiant...",
+        "wizard_ambient_wait": "secondes restantes",
+        "wizard_title_recording": "Assistant Calibration - Volez Maintenant",
+        "wizard_title_marking": "Assistant Calibration - Marquer les Pics",
+        "wizard_title_results": "Résultats de Calibration",
         "wizard_instructions_title": "Instructions:",
-        "wizard_step1": "Volez à travers la porte 3 fois",
+        "wizard_step1": "Volez à travers la porte 3+ fois",
         "wizard_step2": "Assurez-vous d'obtenir des pics de signal clairs à chaque passage",
         "wizard_step3": "Cliquez \"Arrêter Enregistrement\" quand terminé",
         "wizard_recording_rssi": "Enregistrement Données RSSI...",
         "wizard_samples": "Échantillons: {n}",
         "wizard_stop_recording": "Arrêter Enregistrement",
         "wizard_marking_instructions": "Cliquez sur le graphique pour marquer le point le plus haut (pic) pour chaque tour:",
-        "wizard_highest_peak": "pic le plus haut",
-        "wizard_highest_peak_tip": "Cliquez au <span style='color: #ff5555'>pic le plus haut</span> pour chaque passage de porte",
-        "wizard_mark_peaks_tip": "Marquez 3 pics au total (un pour chaque tour)",
-        "wizard_auto_calc_tip": "Les seuils d'entrée/sortie seront calculés automatiquement",
         "wizard_mark_peak_n": "Marquer Pic {n}",
         "wizard_undo": "Annuler Dernier",
         "wizard_calculate": "Calculer Seuils",
-        "wizard_enter_rssi": "RSSI Entrée Calculé:",
-        "wizard_exit_rssi": "RSSI Sortie Calculé:",
+        "wizard_enter_rssi": "RSSI Entrée:",
+        "wizard_exit_rssi": "RSSI Sortie:",
+        "wizard_min_lap": "Temps Tour Minimum:",
+        "wizard_peaks_detected": "Pics Détectés:",
+        "wizard_noise_ceiling": "Plafond de Bruit:",
+        "wizard_avg_peak": "Pic Moyen:",
         "wizard_note_title": "Note:",
-        "wizard_results_note": "Ces valeurs ont été calculées à partir de vos données de tour avec marges de sécurité. Vous pouvez les appliquer maintenant et les affiner manuellement si nécessaire.",
-        "wizard_apply": "Appliquer Seuils",
-        "ignore_hint": "Glissez pour ignorer une region. Clic droit pour la supprimer.",
-        "ignore_clear": "Effacer Ignores",
+        "wizard_results_note": "Ces valeurs ont été calculées automatiquement à partir de vos données de vol. Appliquez-les et affinez manuellement si nécessaire.",
+        "wizard_apply": "Appliquer Tout",
+        "ignore_hint": "Glissez pour ignorer une région. Clic droit pour la supprimer.",
+        "ignore_clear": "Effacer Ignorées",
         "ignore_warning_title": "Pas assez de pics!",
-        "ignore_warning_desc": "Trop de regions ignorees. Au moins 3 pics sont necessaires pour calculer les seuils.",
-        "rerecord": "Re-enregistrer les Donnees de Vol"
+        "ignore_warning_desc": "Trop de régions ignorées. Au moins 3 pics sont nécessaires pour calculer les seuils.",
+        "rerecord": "Re-enregistrer les Données de Vol"
     },
     "settings": {
         "title": "Paramètres",
@@ -158,7 +175,8 @@
             "infinite": "Infini",
             "infinite_tip": "Conseil: Mettre 0 pour tours infinis",
             "infinite_label": "Infini",
-            "min_lap": "Temps Tour Minimum:"
+            "min_lap": "Temps Tour Minimum:",
+            "beep_volume": "Volume du Bip:"
         },
         "tts": {
             "title": "Paramètres TTS",
@@ -195,12 +213,14 @@
                 "eleven_rachel": "ElevenLabs (Rachel - Calme)",
                 "eleven_adam": "ElevenLabs (Adam - Voix Grave)",
                 "eleven_antoni": "ElevenLabs (Antoni - Masculin)",
+                "eleven_matilda": "ElevenLabs (Matilda - Féminine Chaleureuse)",
                 "webspeech": "Web Speech (TTS du Navigateur)"
             },
             "examples": "Exemples: \"Louis Tour 5, 12.34\" / \"Tour 5, 12.34\" / \"12.34\""
         },
         "pilot": {
             "title": "Info Pilote",
+            "system": "Système:",
             "band": "Bande:",
             "channel": "Canal:",
             "name": "Nom Pilote:",
@@ -311,9 +331,24 @@
             "add_timer": "Ajouter Minuteur",
             "add_placeholder": "ex. fpvgate2.local",
             "no_timers": "Aucun minuteur synchronisé configuré",
+            "test_all": "Tester Toutes les Connexions",
             "master_note": "Les commandes Démarrer/Arrêter/Effacer seront envoyées à tous les minuteurs synchronisés.",
             "slave_active": "Mode Esclave Actif",
-            "slave_note": "Ce minuteur est contrôlé par un minuteur maître. Les contrôles de course sont désactivés."
+            "slave_note": "Ce minuteur est contrôlé par un minuteur maître. Les contrôles de course sont désactivés.",
+            "master_hostname": "Nom d'hôte/IP du Maître:",
+            "master_placeholder": "ex. fpvgate.local ou 192.168.1.100",
+            "master_tip": "Entrez l'adresse du minuteur maître pour envoyer les temps de tour",
+            "save_master": "Enregistrer Adresse Maître",
+            "test_master": "Tester Connexion Maître",
+            "devices_title": "Appareils Synchronisés",
+            "this_device": "Cet Appareil",
+            "add_device": "Ajouter Appareil:",
+            "add_device_placeholder": "ex. 192.168.0.100 ou fpvgate2.local",
+            "add_device_btn": "Ajouter Appareil",
+            "role_personal": "Personnel",
+            "role_master": "Maître",
+            "role_slave": "Esclave",
+            "info_note": "Définissez un appareil comme Maître pour contrôler le départ/arrêt des courses. Les autres appareils en Esclave suivront le Maître et lui enverront leurs temps de tour."
         },
         "webhooks": {
             "title": "Webhooks",
@@ -342,8 +377,16 @@
             "title": "Paramètres Système",
             "battery": "Surveillance Batterie",
             "enable_battery": "Surveillance Batterie:",
-            "low_battery": "Alarme Batterie Faible:",
+            "battery_type": "Type de Batterie:",
+            "battery_type_lipo": "LiPo (3.0v - 4.2v)",
+            "battery_type_lipohv": "LiPoHV (3.0v - 4.35v)",
+            "battery_type_liion": "Li-Ion/18650 (2.5v - 4.2v)",
+            "battery_cells": "Nombre de Cellules:",
+            "voltage_divider": "Ratio Diviseur de Tension:",
+            "voltage_divider_tip": "Ajustez selon votre circuit diviseur de tension (ex. 2.0 pour 2:1, 5.5 pour 11:2)",
+            "low_battery_per_cell": "Alarme Batterie Faible (par cellule):",
             "battery_voltage": "Tension Batterie:",
+            "battery_voltage_tip": "Tension totale et moyenne par cellule",
             "receiver_radio": "Radio Récepteur",
             "receiver_label": "Module Récepteur:",
             "receiver_options": {
@@ -405,6 +448,8 @@
         },
         "diagnostics": {
             "title": "Diagnostics",
+            "debug_mode": "Mode Débogage",
+            "debug_mode_tip": "Afficher le graphique RSSI en direct sur l'écran de course",
             "hardware_tests": "Tests Matériel",
             "description": "Exécuter tests matériels et logiciels complets pour vérifier tous les composants FPVGate.",
             "run_test": "Lancer Auto-Test Système",
@@ -423,7 +468,14 @@
             "some_failed": "Certains Tests Échoués",
             "error_running": "Erreur Exécution Tests",
             "run_all": "Lancer Tous Tests",
-            "run_again": "Relancer Tous Tests"
+            "run_again": "Relancer Tous Tests",
+            "spi_title": "Test Mod SPI",
+            "spi_description": "Balaye les frequences RaceBand pour verifier que le mod SPI du RX5808 fonctionne. Un module modifie montrera des RSSI varies; un module non modifie sera plat.",
+            "spi_run": "Lancer Test Mod SPI",
+            "spi_running": "Balayage des frequences...",
+            "spi_pass": "Mod SPI Verifie",
+            "spi_fail": "Mod SPI Non Detecte",
+            "spi_run_again": "Relancer Test SPI"
         }
     },
     "modals": {
@@ -444,10 +496,14 @@
             "unit_meters": "{n} mètres"
         }
     },
+    "battery_alarm": {
+        "dismiss": "Fermer"
+    },
     "messages": {
         "confirm_clear_history": "Êtes-vous sûr de vouloir effacer tout l'historique? Ceci ne peut être annulé.",
         "config_imported": "Configuration importée avec succès! La page va se recharger.",
         "calib_peaks_marked": "Tous les pics marqués! Cliquez \"Calculer Seuils\"",
+        "calib_auto_few_peaks": "La détection automatique n'a trouvé que {n} pic(s). Veuillez marquer les pics manuellement.",
         "calib_applied": "Seuils de calibration appliqués! Vous pouvez maintenant les affiner manuellement.",
         "wifi_apply_confirm": "Appliquer paramètres WiFi? L'appareil va redémarrer.",
         "track_save_error": "Erreur enregistrement piste",
@@ -489,7 +545,10 @@
         "invalid_ip": "Format adresse IP invalide (ex. 192.168.0.75)",
         "enter_timer_hostname": "Veuillez entrer un nom d'hôte de minuteur",
         "timer_already_added": "Ce minuteur est déjà dans la liste",
-        "max_timers_reached": "Maximum de 5 minuteurs synchronisés autorisés"
+        "max_timers_reached": "Maximum de 5 minuteurs synchronisés autorisés",
+        "enter_device_address": "Veuillez entrer une adresse d'appareil",
+        "device_already_added": "Cet appareil est déjà dans la liste",
+        "max_devices_reached": "Maximum de 6 appareils autorisés"
     },
     "osd": {
         "lap": "Tour {n}",

@@ -2,6 +2,21 @@
 
 All notable changes to FPVGate will be documented in this file.
 
+## [1.7.1] - 2026-04-09
+
+### Upgrade Notes
+- **No config reset required** - Config version unchanged (v16)
+- **Web interface fix only** - Only `littlefs.bin` needs updating
+
+### Fixed
+- **Band select empty after opening Pilot Info** - `setBandChannelIndex` used the raw `freqLookup` array index as `selectedIndex` in a filtered dropdown, and had no early return so the last duplicate-frequency match (often a digital band at index 13-18) always won. For R5 (5843 MHz), this resolved to WalkSnail-R at index 18, out of range for the 6-option analog dropdown, causing an empty selection.
+- **Band resets to A when opening Settings after a Calibration screen change** - `openSettingsModal` re-fetched `/config` from the device on every open. With `autoSaveConfig`'s 1-second debounce, the device config was stale and overwrote the user's pending calib change. Removed band/channel restoration from `openSettingsModal` - the DOM state is always authoritative after page load.
+- **`setBandChannelIndex` frequency fallback in settings modal** - Modal was calling the broken frequency-lookup path instead of using stored `bandIndex`/`channelIndex`. Superseded by the above fix.
+
+### Added
+- Unit test suite (`tests/band-select.test.js`) with 20 Jest/jsdom tests covering all four bug scenarios and their fixes
+- **Calibration shows wrong band after power cycle** - `saveConfig()` now falls back to `calibBandSelect` if `bandSelect` is empty, preventing wrong `bandIndex` being written to EEPROM when `openSettingsModal`'s async fetch completed late and corrupted `bandSelect`
+
 ## [1.7.0] - 2026-03-20
 
 ### Upgrade Notes

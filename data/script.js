@@ -123,6 +123,9 @@ var rhEnabled = 0;   // 1=RotorHazard mode enabled
 var syncedTimers = []; // Array of synced timer hostnames (for master mode)
 var masterHostname = ""; // Master hostname for slave mode
 var configLoaded = false; // Flag to prevent saving before initial config load
+var _refreshingFromDevice = false; // Flag to suppress auto-save during device-initiated refresh
+/** Set from device GET /config elrsBackpackEspnowBuild; only POST elrsBackpackEspnow when 1. */
+var elrsBackpackEspnowBuild = 0;
 
 // Split time state
 var splitGates = []; // Array of {hostname, gateNumber, distance} from config
@@ -495,6 +498,15 @@ function setupWiFiEvents() {
       },
       false
     );
+    eventSource.addEventListener(
+      "configUpdated",
+      function (e) {
+        window.lastSSEEvent = Date.now();
+        console.log("[SSE] configUpdated event - refreshing config from device");
+        refreshConfigFromDevice();
+      },
+      false
+    );
   }
 }
 
@@ -511,9 +523,14 @@ function handleRaceStateEvent(state) {
     clearRaceLeader();
     console.log("[Sync] Race started via SSE");
   } else if (state === "stopped") {
-    // Race stopped
+    // Race stopped (e.g. from LCD) – stop timer and reset displays like stopRace()
     raceRunning = false;
     stopRaceTimer();
+    timer.innerHTML = i18n.t("race.timer_default");
+    currentLapStartMs = 0;
+    var currentLapTimerEl = document.getElementById("currentLapTimer");
+    if (currentLapTimerEl) currentLapTimerEl.textContent = "00:00:00s";
+    stopDistancePolling();
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race stopped via SSE");
@@ -1379,21 +1396,21 @@ onload = async function (e) {
         populateBandsBySystem(currentSystem, bandSelect);
         populateBandsBySystem(currentSystem, calibBandSelect);
         
-        // Find and select the matching band by value
-        const targetBandValue = bandDef.value;
-        const bandOption = Array.from(bandSelect.options).find(opt => opt.value === targetBandValue);
-        const calibBandOption = Array.from(calibBandSelect.options).find(opt => opt.value === targetBandValue);
-        
-        if (bandOption) bandSelect.value = targetBandValue;
-        if (calibBandOption) calibBandSelect.value = targetBandValue;
-        
-        // Set channel
-        channelSelect.selectedIndex = configData.channelIndex;
-        if (calibChannelSelect) calibChannelSelect.selectedIndex = configData.channelIndex;
+        // Set band by finding the correct option index within the filtered system bands
+        const filteredBands = bandDefinitions.filter(b => b.system === currentSystem);
+        const localBandIdx = filteredBands.findIndex(b => b.index === configData.bandIndex);
+        if (localBandIdx >= 0) {
+          if (bandSelect) bandSelect.selectedIndex = localBandIdx;
+          if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
+        }
         
         // Update channel availability
         updateChannelAvailability(bandSelect);
         updateChannelAvailability(calibBandSelect);
+        
+        // Set channel
+        channelSelect.selectedIndex = configData.channelIndex;
+        if (calibChannelSelect) calibChannelSelect.selectedIndex = configData.channelIndex;
       }
     } else if (configData.freq !== undefined) {
       // Fallback: find by frequency
@@ -1492,6 +1509,56 @@ onload = async function (e) {
       // No I2S support - hide the toggle
       if (speakerSection) speakerSection.style.display = "none";
       if (speakerNote) speakerNote.style.display = "none";
+    }
+
+    const elrsNav = document.getElementById("settingsNavElrs");
+    const elrsPanel = document.getElementById("elrsBackpackWebPanel");
+    const elrsUnsupported = document.getElementById("elrsBackpackWebUnsupported");
+    const elrsToggle = document.getElementById("elrsBackpackEspnow");
+    elrsBackpackEspnowBuild = configData.elrsBackpackEspnowBuild === 1 ? 1 : 0;
+    const elrsBindInput = document.getElementById("elrsBackpackBindPhrase");
+    if (elrsBackpackEspnowBuild === 1) {
+      if (elrsNav) elrsNav.style.display = "";
+      if (elrsPanel) elrsPanel.style.display = "";
+      if (elrsUnsupported) elrsUnsupported.style.display = "none";
+      if (elrsToggle && configData.elrsBackpackEspnow !== undefined) {
+        elrsToggle.checked = configData.elrsBackpackEspnow === 1;
+      }
+      if (elrsBindInput && configData.elrsBackpackBindPhrase !== undefined) {
+        elrsBindInput.value = configData.elrsBackpackBindPhrase || "";
+      }
+      const rowIn = document.getElementById("elrsOsdLapRow");
+      if (rowIn && configData.elrsOsdLapRow !== undefined) {
+        rowIn.value = String(Math.min(18, Math.max(0, configData.elrsOsdLapRow)));
+      }
+      const autoCol = document.getElementById("elrsOsdLapColAuto");
+      const colFixed = document.getElementById("elrsOsdLapColFixed");
+      const colVal = configData.elrsOsdLapCol;
+      if (colVal === 255) {
+        if (autoCol) autoCol.checked = true;
+        if (colFixed) {
+          colFixed.disabled = true;
+          colFixed.value = "0";
+        }
+      } else {
+        if (autoCol) autoCol.checked = false;
+        if (colFixed) {
+          colFixed.disabled = false;
+          colFixed.value = String(Math.min(49, Math.max(0, colVal)));
+        }
+      }
+      const clrStop = document.getElementById("elrsOsdClearOnStop");
+      if (clrStop && configData.elrsOsdClearOnStop !== undefined) {
+        clrStop.checked = configData.elrsOsdClearOnStop === 1;
+      }
+      const pb = document.getElementById("elrsOsdPlaybackLaps");
+      if (pb && configData.elrsOsdPlaybackLaps !== undefined) {
+        pb.checked = configData.elrsOsdPlaybackLaps === 1;
+      }
+    } else {
+      if (elrsNav) elrsNav.style.display = "none";
+      if (elrsPanel) elrsPanel.style.display = "none";
+      if (elrsUnsupported) elrsUnsupported.style.display = "";
     }
 
     // Load and apply theme from device config
@@ -2181,6 +2248,12 @@ function openTab(evt, tabName) {
   document.getElementById(tabName).style.display = "block";
   evt.currentTarget.className += " active";
 
+  // Refresh config from device when opening config or calib tabs
+  // This ensures touchscreen-set values are always reflected in the web UI
+  if (tabName === "config" || tabName === "calib") {
+    refreshConfigFromDevice();
+  }
+
   // Start/stop RSSI streaming based on tab and debug mode
   if (tabName === "calib" || (tabName === "race" && debugMode)) {
     startRssiStreaming();
@@ -2228,6 +2301,7 @@ function updateExitRssi(obj, value) {
 // Debounced auto-save to prevent excessive API calls
 let saveTimeout = null;
 function autoSaveConfig() {
+  if (_refreshingFromDevice) return; // Suppress saves during device-initiated refresh
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     saveConfig();
@@ -2259,15 +2333,38 @@ async function saveConfig() {
   const receiverRadioSelect = document.getElementById("receiverRadio");
   
   // Save band and channel indices along with frequency for accurate restoration
-  // Get the actual band index from the dataset, falling back to last loaded value
-  let selectedBandIndex = loadedBandIndex >= 0 ? loadedBandIndex : 0;
+  // Get the actual band index from the dataset
+  let selectedBandIndex = 0;
+  let selectedChannelIndex = 0;
   if (bandSelect && bandSelect.selectedIndex !== -1) {
     const selectedOption = bandSelect.options[bandSelect.selectedIndex];
     if (selectedOption && selectedOption.dataset.bandIndex !== undefined) {
       selectedBandIndex = parseInt(selectedOption.dataset.bandIndex);
     }
+    selectedChannelIndex = channelSelect ? channelSelect.selectedIndex : 0;
+  } else if (calibBandSelect && calibBandSelect.selectedIndex !== -1) {
+    // Fallback: bandSelect is in an invalid state (e.g. was corrupted by a stale
+    // openSettingsModal fetch). Use calibBandSelect which is always reliable.
+    const calibOption = calibBandSelect.options[calibBandSelect.selectedIndex];
+    if (calibOption && calibOption.dataset.bandIndex) {
+      selectedBandIndex = parseInt(calibOption.dataset.bandIndex);
+    }
+    selectedChannelIndex = calibChannelSelect ? calibChannelSelect.selectedIndex : 0;
+    console.warn('[Config] bandSelect was empty during save - used calibBandSelect as fallback');
+  } else {
+    // Last resort: fetch current values from device (e.g. touch UI / empty selectors)
+    console.log("[Config] Band selector blank, fetching current freq from device");
+    try {
+      const resp = await fetch("/config");
+      const devCfg = await resp.json();
+      if (devCfg.bandIndex !== undefined) selectedBandIndex = devCfg.bandIndex;
+      if (devCfg.channelIndex !== undefined) selectedChannelIndex = devCfg.channelIndex;
+      if (devCfg.freq !== undefined) frequency = devCfg.freq;
+    } catch (e) {
+      console.error("[Config] Failed to fetch device config, skipping save");
+      return;
+    }
   }
-  const selectedChannelIndex = channelSelect.selectedIndex >= 0 ? channelSelect.selectedIndex : (loadedChannelIndex >= 0 ? loadedChannelIndex : 0);
   
   // Get battery settings
   const batteryTypeSelect = document.getElementById("batteryType");
@@ -2332,6 +2429,40 @@ async function saveConfig() {
     rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
     splitGates: splitGates.map(g => ({ hostname: g.hostname, gateNumber: g.gateNumber, distance: g.distance || 0 })),
   };
+
+  if (elrsBackpackEspnowBuild === 1) {
+    const elrsT = document.getElementById("elrsBackpackEspnow");
+    if (elrsT) {
+      configData.elrsBackpackEspnow = elrsT.checked ? 1 : 0;
+    }
+    const elrsBind = document.getElementById("elrsBackpackBindPhrase");
+    if (elrsBind) {
+      configData.elrsBackpackBindPhrase = elrsBind.value || "";
+    }
+    const rowIn = document.getElementById("elrsOsdLapRow");
+    if (rowIn) {
+      let r = parseInt(rowIn.value, 10);
+      if (Number.isNaN(r)) r = 5;
+      configData.elrsOsdLapRow = Math.min(18, Math.max(0, r));
+    }
+    const autoCol = document.getElementById("elrsOsdLapColAuto");
+    const colFixed = document.getElementById("elrsOsdLapColFixed");
+    if (autoCol && autoCol.checked) {
+      configData.elrsOsdLapCol = 255;
+    } else if (colFixed) {
+      let c = parseInt(colFixed.value, 10);
+      if (Number.isNaN(c)) c = 0;
+      configData.elrsOsdLapCol = Math.min(49, Math.max(0, c));
+    }
+    const clrStop = document.getElementById("elrsOsdClearOnStop");
+    if (clrStop) {
+      configData.elrsOsdClearOnStop = clrStop.checked ? 1 : 0;
+    }
+    const pb = document.getElementById("elrsOsdPlaybackLaps");
+    if (pb) {
+      configData.elrsOsdPlaybackLaps = pb.checked ? 1 : 0;
+    }
+  }
 
   if (usbConnected && transportManager) {
     const response = await transportManager.sendCommand("config", "POST", configData);
@@ -2493,24 +2624,16 @@ function populateCalibFreqOutput() {
   
   // Sync to settings (without triggering another update)
   if (systemSelect && bandSelect && channelSelect) {
-    systemSelect.value = currentSystem;
-    
-    // Only repopulate if systems don't match
+    // Ensure settings system matches calib system
     if (systemSelect.value !== currentSystem) {
+      systemSelect.value = currentSystem;
       populateBandsBySystem(currentSystem, bandSelect);
     }
     
-    // Match band by value
-    const calibBandValue = calibBandSelect.options[calibBandSelect.selectedIndex]?.value;
-    if (calibBandValue) {
-      const matchingOption = Array.from(bandSelect.options).find(opt => opt.value === calibBandValue);
-      if (matchingOption) {
-        bandSelect.value = calibBandValue;
-      }
-    }
-    
-    // Sync channel
+    // Sync band and channel by index (both selects have the same options in the same order)
+    bandSelect.selectedIndex = calibBandSelect.selectedIndex;
     channelSelect.selectedIndex = calibChannelSelect.selectedIndex;
+    updateChannelAvailability(bandSelect);
     populateFreqOutput();
   }
 }
@@ -2524,14 +2647,9 @@ function syncSettingsToCalib() {
     calibSystemSelect.value = systemSelect.value;
   }
   
-  // Find matching band value and set it
-  const settingsBandValue = bandSelect.options[bandSelect.selectedIndex]?.value;
-  if (settingsBandValue) {
-    const matchingOption = Array.from(calibBandSelect.options).find(opt => opt.value === settingsBandValue);
-    if (matchingOption) {
-      calibBandSelect.value = settingsBandValue;
-    }
-  }
+  // Sync band and channel by index (both selects have the same options in the same order)
+  calibBandSelect.selectedIndex = bandSelect.selectedIndex;
+  updateChannelAvailability(calibBandSelect);
   
   // Sync channel
   if (calibChannelSelect && channelSelect) {
@@ -2575,6 +2693,100 @@ function initializeBandSelectors() {
 
 // Call initialization when script loads
 initializeBandSelectors();
+
+// Refresh band/channel/frequency from device config (called on SSE configUpdated and tab switch)
+async function refreshConfigFromDevice() {
+  _refreshingFromDevice = true;
+  // Cancel any pending save so stale values never overwrite the device
+  clearTimeout(saveTimeout);
+  try {
+    let configData;
+    if (usbConnected && transportManager) {
+      configData = await transportManager.sendCommand("config", "GET");
+    } else {
+      const response = await fetch("/config");
+      configData = await response.json();
+    }
+    
+    // Always set frequency directly from device (authoritative source)
+    if (configData.freq !== undefined) {
+      frequency = configData.freq;
+    }
+    
+    if (configData.bandIndex !== undefined && configData.channelIndex !== undefined) {
+      const bandDef = bandDefinitions[configData.bandIndex];
+      if (bandDef) {
+        currentSystem = bandDef.system;
+        const targetChannelIdx = configData.channelIndex;
+        
+        // Update system selectors
+        if (systemSelect) systemSelect.value = currentSystem;
+        if (calibSystemSelect) calibSystemSelect.value = currentSystem;
+        
+        // Repopulate band lists for the correct system
+        populateBandsBySystem(currentSystem, bandSelect);
+        populateBandsBySystem(currentSystem, calibBandSelect);
+        
+        // Set band by finding the correct option index (more reliable than value matching)
+        const filteredBands = bandDefinitions.filter(b => b.system === currentSystem);
+        const localBandIdx = filteredBands.findIndex(b => b.index === configData.bandIndex);
+        if (localBandIdx >= 0) {
+          if (bandSelect) bandSelect.selectedIndex = localBandIdx;
+          if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
+        }
+        
+        // Update channel availability based on selected band
+        updateChannelAvailability(bandSelect);
+        updateChannelAvailability(calibBandSelect);
+        
+        // Set channel selection
+        if (channelSelect) channelSelect.selectedIndex = targetChannelIdx;
+        if (calibChannelSelect) calibChannelSelect.selectedIndex = targetChannelIdx;
+        
+        // Update frequency display text
+        populateFreqOutput();
+        if (calibBandSelect && calibChannelSelect && calibFreqOutput) {
+          if (calibBandSelect.selectedIndex !== -1) {
+            const selOpt = calibBandSelect.options[calibBandSelect.selectedIndex];
+            if (selOpt) {
+              const bv = selOpt.value;
+              const cv = calibChannelSelect.options[calibChannelSelect.selectedIndex]?.value || "1";
+              calibFreqOutput.textContent = bv + cv + " " + frequency + "MHz";
+            }
+          }
+        }
+        
+        // Update settings freq display in case populateFreqOutput bailed
+        if (freqOutput && bandSelect && bandSelect.selectedIndex !== -1) {
+          const opt = bandSelect.options[bandSelect.selectedIndex];
+          if (opt) {
+            const chan = channelSelect.options[channelSelect.selectedIndex]?.value || "1";
+            freqOutput.textContent = opt.value + chan + " " + frequency;
+          }
+        }
+      }
+    } else if (configData.freq !== undefined) {
+      setBandChannelIndex(configData.freq);
+      populateFreqOutput();
+    }
+    
+    // Update threshold values if changed
+    if (configData.enterRssi !== undefined) {
+      enterRssiInput.value = configData.enterRssi;
+      updateEnterRssi(enterRssiInput, enterRssiInput.value);
+    }
+    if (configData.exitRssi !== undefined) {
+      exitRssiInput.value = configData.exitRssi;
+      updateExitRssi(exitRssiInput, exitRssiInput.value);
+    }
+    
+    console.log("[Config] Refreshed from device: band=" + configData.bandIndex + " ch=" + configData.channelIndex + " freq=" + configData.freq);
+  } catch (err) {
+    console.error("[Config] Failed to refresh from device:", err);
+  } finally {
+    _refreshingFromDevice = false;
+  }
+}
 
 // Add auto-save listeners for other inputs
 if (announcerSelect) {
@@ -2872,6 +3084,11 @@ function queueSpeak(obj) {
 
 function toggleSpeaker(enabled) {
   console.log("Speaker output:", enabled ? "enabled" : "disabled");
+  autoSaveConfig();
+}
+
+function toggleElrsBackpackEspnow(enabled) {
+  console.log("ELRS backpack ESP-NOW:", enabled ? "enabled" : "disabled");
   autoSaveConfig();
 }
 
@@ -3320,47 +3537,48 @@ async function startRace() {
     return;
   }
   
+  const RACE_COUNTDOWN_SECONDS = 10;  // Must match device LCD countdown (10.6s total: 10..1 + GO!)
+  const raceCountdownEl = document.getElementById("raceCountdownOverlay");
+  const raceCountdownNumberEl = document.getElementById("raceCountdownNumber");
+
   updateLapCounter();
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
 
-  // iOS/Safari: unlock AudioContext for beeps during user interaction
-  if (beepAudioContext && beepAudioContext.state === "suspended") {
-    try {
-      await beepAudioContext.resume();
-      console.log("[Race] AudioContext resumed for beeps");
-    } catch (err) {
-      console.warn("[Race] AudioContext resume failed:", err);
-    }
-  }
-
-  // Ensure audio announcer is unlocked for mobile (user gesture opportunity)
-  // Only unlock if not already unlocked AND not currently playing
-  if (audioEnabled && audioAnnouncer && !audioAnnouncer.audioUnlocked && !audioAnnouncer.isPlaying) {
-    console.log("[Race] Unlocking audio announcer during race start gesture");
-    await audioAnnouncer.unlockAudioContextMobile();
-  }
-
-  // Trigger I2S speaker countdown (runs in parallel with browser audio)
+  // Fire countdown immediately so device LCD + I2S start right away
   fetch("/timer/countdown", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   }).catch((err) => console.log("[Race] Countdown endpoint not available:", err));
 
-  // Queue both announcements
-  queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
-  queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
-
-  // Wait for announcements to finish playing
-  while (audioAnnouncer.isSpeaking() || audioAnnouncer.audioQueue.length > 0) {
-    await new Promise((r) => setTimeout(r, 100));
+  if (beepAudioContext && beepAudioContext.state === "suspended") {
+    beepAudioContext.resume().catch((err) => console.warn("[Race] AudioContext resume failed:", err));
+  }
+  if (audioEnabled && audioAnnouncer && !audioAnnouncer.audioUnlocked && !audioAnnouncer.isPlaying) {
+    audioAnnouncer.unlockAudioContextMobile().catch(() => {});
   }
 
-  // Add random delay between 1-5 seconds after announcements complete
-  let delayTime = Math.random() * (5000 - 1000) + 1000;
-  await new Promise((r) => setTimeout(r, delayTime));
+  queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
 
-  // Play start beep and begin race
+  // Visible 10-second countdown (matches device LCD); total 10.5s so beep aligns with device "GO!"
+  if (raceCountdownEl && raceCountdownNumberEl) {
+    raceCountdownEl.style.display = "flex";
+    raceCountdownNumberEl.classList.remove("go");
+    for (let s = RACE_COUNTDOWN_SECONDS; s >= 1; s--) {
+      raceCountdownNumberEl.textContent = String(s);
+      // "Starting in less than 5" only when we actually show 5 (not at start)
+      if (s === 5) queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    raceCountdownNumberEl.textContent = "GO!";
+    raceCountdownNumberEl.classList.add("go");
+    await new Promise((r) => setTimeout(r, 500));
+    raceCountdownEl.style.display = "none";
+  } else {
+    await new Promise((r) => setTimeout(r, RACE_COUNTDOWN_SECONDS * 1000 + 500));
+  }
+
+  // Play start beep and begin race (synced with device)
   beep(1, 1, "square"); // needed for some reason to make sure we fire the first beep
   beep(500, 880, "square");
 
@@ -4208,8 +4426,23 @@ function setBandChannelIndex(freq) {
   for (var i = 0; i < freqLookup.length; i++) {
     for (var j = 0; j < freqLookup[i].length; j++) {
       if (freqLookup[i][j] == freq) {
-        bandSelect.selectedIndex = i;
-        channelSelect.selectedIndex = j;
+        const bandDef = bandDefinitions[i];
+        if (bandDef) {
+          // Switch system if this band belongs to a different one
+          if (currentSystem !== bandDef.system) {
+            currentSystem = bandDef.system;
+            if (systemSelect) systemSelect.value = currentSystem;
+            if (calibSystemSelect) calibSystemSelect.value = currentSystem;
+            populateBandsBySystem(currentSystem, bandSelect);
+            populateBandsBySystem(currentSystem, calibBandSelect);
+          }
+          // Find the option by value in the filtered dropdown (not by raw freqLookup index)
+          const bandOption = Array.from(bandSelect.options).find(opt => opt.value === bandDef.value);
+          if (bandOption) bandSelect.value = bandDef.value;
+          channelSelect.selectedIndex = j;
+          updateChannelAvailability(bandSelect);
+        }
+        return; // Stop at first match - prevents overwriting with digital band duplicates
       }
     }
   }
@@ -7342,7 +7575,7 @@ document.addEventListener("click", function (event) {
   }
 });
 
-function switchSettingsSection(sectionName) {
+function switchSettingsSection(ev, sectionName) {
   // Hide all sections
   const sections = document.querySelectorAll(".settings-section");
   sections.forEach((section) => section.classList.remove("active"));
@@ -7359,8 +7592,25 @@ function switchSettingsSection(sectionName) {
     item.classList.remove("active");
   });
 
-  // Add active class to clicked nav item
-  event?.target?.closest(".settings-nav-item")?.classList.add("active");
+  const clicked = ev && ev.target ? ev.target.closest(".settings-nav-item") : null;
+  if (clicked) {
+    clicked.classList.add("active");
+  } else {
+    navItems.forEach((item) => {
+      if (item.dataset.settingsSection === sectionName) {
+        item.classList.add("active");
+      }
+    });
+  }
+}
+
+function onElrsOsdColAutoChange() {
+  const autoCb = document.getElementById("elrsOsdLapColAuto");
+  const fixed = document.getElementById("elrsOsdLapColFixed");
+  if (fixed) {
+    fixed.disabled = !!(autoCb && autoCb.checked);
+  }
+  autoSaveConfig();
 }
 
 // Keyboard shortcut for closing modal (ESC key)
@@ -7455,6 +7705,84 @@ function runSelfTest() {
       resultsDiv.style.display = "block";
       button.disabled = false;
       button.textContent = i18n.t("settings.diagnostics.run_all");
+    });
+}
+
+// SPI Mod Test
+function runSPITest() {
+  const button = document.getElementById("runSPITestButton");
+  const loadingDiv = document.getElementById("spiTestLoading");
+  const resultsDiv = document.getElementById("spiTestResults");
+  const verdictDiv = document.getElementById("spiTestVerdict");
+  const chartDiv = document.getElementById("spiTestChart");
+
+  button.disabled = true;
+  button.textContent = i18n.t("settings.diagnostics.spi_running");
+  loadingDiv.style.display = "block";
+  resultsDiv.style.display = "none";
+
+  fetch("/api/spitest")
+    .then((response) => response.json())
+    .then((data) => {
+      loadingDiv.style.display = "none";
+
+      const passed = data.passed;
+      const verdictColor = passed ? "#4ade80" : "#ff5555";
+      const verdictBg = passed ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 85, 85, 0.1)";
+      const verdictIcon = passed ? "\u2713" : "\u2717";
+      const verdictText = passed
+        ? i18n.t("settings.diagnostics.spi_pass")
+        : i18n.t("settings.diagnostics.spi_fail");
+
+      verdictDiv.innerHTML = `
+        <div style="margin-bottom: 16px; padding: 16px; background-color: ${verdictBg}; border-left: 4px solid ${verdictColor}; border-radius: 4px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <span style="font-size: 20px; color: ${verdictColor};">${verdictIcon}</span>
+            <span style="font-weight: bold; font-size: 16px;">${verdictText}</span>
+          </div>
+          <div style="font-size: 14px; color: var(--secondary-color);">
+            Spread: ${data.spread} | Min: ${data.min} | Max: ${data.max}
+          </div>
+        </div>
+      `;
+
+      // Render bar chart
+      const maxRssi = Math.max(...data.channels.map((c) => c.rssi), 1);
+      let barsHtml = '<div style="display: flex; align-items: flex-end; gap: 6px; height: 120px;">';
+      data.channels.forEach((ch) => {
+        const pct = (ch.rssi / maxRssi) * 100;
+        const barColor = passed ? "var(--primary-color)" : "var(--secondary-color)";
+        barsHtml += `
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%;">
+            <span style="font-size: 11px; color: var(--text-color); margin-bottom: 4px;">${ch.rssi}</span>
+            <div style="width: 100%; flex: 1; display: flex; align-items: flex-end;">
+              <div style="width: 100%; height: ${pct}%; background-color: ${barColor}; border-radius: 3px 3px 0 0; min-height: 2px;"></div>
+            </div>
+            <span style="font-size: 11px; color: var(--secondary-color); margin-top: 4px;">${ch.label}</span>
+            <span style="font-size: 10px; color: var(--secondary-color);">${ch.freq}</span>
+          </div>
+        `;
+      });
+      barsHtml += "</div>";
+      chartDiv.innerHTML = barsHtml;
+
+      resultsDiv.style.display = "block";
+      button.disabled = false;
+      button.textContent = i18n.t("settings.diagnostics.spi_run_again");
+    })
+    .catch((error) => {
+      console.error("Error running SPI test:", error);
+      loadingDiv.style.display = "none";
+      verdictDiv.innerHTML = `
+        <div style="padding: 16px; background-color: rgba(255, 85, 85, 0.1); border-left: 4px solid #ff5555; border-radius: 4px;">
+          <div style="font-weight: bold; color: #ff5555; margin-bottom: 6px;">${i18n.t("settings.diagnostics.error_running")}</div>
+          <div style="font-size: 14px; color: var(--secondary-color);">${error.message}</div>
+        </div>
+      `;
+      chartDiv.innerHTML = "";
+      resultsDiv.style.display = "block";
+      button.disabled = false;
+      button.textContent = i18n.t("settings.diagnostics.spi_run");
     });
 }
 
@@ -8346,13 +8674,21 @@ function openSettingsModal() {
     modal.classList.add("active");
 
     // Load full config to populate all settings
+    _refreshingFromDevice = true;
+    clearTimeout(saveTimeout);
     fetch("/config")
       .then((response) => response.json())
       .then((config) => {
-        // Populate all device config fields - restore band/channel from indices if available
-        if (config.bandIndex !== undefined && config.channelIndex !== undefined) {
-          loadedBandIndex = config.bandIndex;
-          loadedChannelIndex = config.channelIndex;
+        // When band selectors look invalid, sync band/channel from device (touch / stale DOM).
+        const bandOpt =
+          bandSelect && bandSelect.selectedIndex >= 0
+            ? bandSelect.options[bandSelect.selectedIndex]
+            : null;
+        const needBandFromDevice =
+          !bandSelect ||
+          bandSelect.selectedIndex < 0 ||
+          !(bandOpt && bandOpt.dataset && bandOpt.dataset.bandIndex);
+        if (needBandFromDevice && config.bandIndex !== undefined && config.channelIndex !== undefined) {
           const bandDef = bandDefinitions[config.bandIndex];
           if (bandDef) {
             currentSystem = bandDef.system;
@@ -8360,12 +8696,27 @@ function openSettingsModal() {
             if (calibSystemSelect) calibSystemSelect.value = currentSystem;
             populateBandsBySystem(currentSystem, bandSelect);
             populateBandsBySystem(currentSystem, calibBandSelect);
-            const bandOption = Array.from(bandSelect.options).find(opt => opt.value === bandDef.value);
-            if (bandOption) bandSelect.value = bandDef.value;
-            channelSelect.selectedIndex = config.channelIndex;
+            const filteredBands = bandDefinitions.filter(b => b.system === currentSystem);
+            const localBandIdx = filteredBands.findIndex(b => b.index === config.bandIndex);
+            if (localBandIdx >= 0) {
+              if (bandSelect) bandSelect.selectedIndex = localBandIdx;
+              if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
+            }
             updateChannelAvailability(bandSelect);
+            updateChannelAvailability(calibBandSelect);
+            if (channelSelect) channelSelect.selectedIndex = config.channelIndex;
+            if (calibChannelSelect) calibChannelSelect.selectedIndex = config.channelIndex;
+            if (config.freq !== undefined) frequency = config.freq;
+            populateFreqOutput();
+            if (calibBandSelect && calibChannelSelect && calibFreqOutput && calibBandSelect.selectedIndex !== -1) {
+              const selOpt = calibBandSelect.options[calibBandSelect.selectedIndex];
+              if (selOpt) {
+                const cv = calibChannelSelect.options[calibChannelSelect.selectedIndex]?.value || "1";
+                calibFreqOutput.textContent = selOpt.value + cv + " " + frequency + "MHz";
+              }
+            }
           }
-        } else if (config.freq !== undefined) {
+        } else if (needBandFromDevice && config.freq !== undefined) {
           setBandChannelIndex(config.freq);
         }
         if (config.minLap !== undefined) {
@@ -8544,11 +8895,15 @@ function openSettingsModal() {
         
         // Mark config as loaded - now saves are allowed
         configLoaded = true;
+        _refreshingFromDevice = false;
         console.log("[Config] Initial config loaded from device");
       })
-      .catch((error) => console.error("Error loading config:", error));
+      .catch((error) => {
+        _refreshingFromDevice = false;
+        console.error("Error loading config:", error);
+      });
 
     // Switch to general section by default
-    switchSettingsSection("general");
+    switchSettingsSection(null, "general");
   }
 }

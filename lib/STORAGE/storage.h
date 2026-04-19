@@ -36,6 +36,9 @@ class Storage {
     // Migration helpers
     bool migrateSoundsToSD();
     bool copyDirectory(const String& srcPath, const String& dstPath, bool deleteSource = false);
+
+    // Unmount SD cleanly before deep sleep / power-off (flush FAT). Safe to call if SD not mounted.
+    void shutdownForPowerOff();
     
    private:
     bool sdAvailable;

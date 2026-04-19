@@ -69,46 +69,71 @@
 // Waveshare ESP32-S3-LCD-2 (16MB Flash, 8MB PSRAM, built-in TF card)
 #elif defined(WAVESHARE_ESP32S3_LCD2)
 
-#define PIN_LED 2              // External status LED (on header)
-#define PIN_RGB_LED 15         // WS2812 RGB LED (on header, optional external)
-#define NUM_LEDS 2
+#define PIN_LED -1             // External status LED on header (avoid USB GPIO20)
+// NOTE: Do not use GPIO19/20 for RGB on S3; those are native USB D-/D+.
+#define PIN_RGB_LED -1         // Optional external WS2812 DIN on header (safe for USB)
+#define NUM_LEDS 0
 #define PIN_VBAT 5             // Battery voltage sense
-#define VBAT_SCALE 3           // 3:1 voltage divider (200K/100K)
+#define VBAT_SCALE 3.3f        // Waveshare demo uses ~3x factor; calibrated closer for 1S full-scale
 #define VBAT_ADD 0             // Calibration offset
-#define PIN_RX5808_RSSI 4      // RSSI on GPIO4
-#define PIN_RX5808_DATA 17     // CH1 on GPIO17
-#define PIN_RX5808_SELECT 21   // CH2 on GPIO21
-#define PIN_RX5808_CLOCK 18    // CH3 on GPIO18
-#define PIN_BUZZER 6           // Buzzer on GPIO6 (on header)
+#define PIN_RX5808_RSSI 8       // RSSI on GPIO8 (ADC1, breakout)
+// PNP high-side (E=3V3, C=RX VCC, B=GPIO): LOW = on / RX powered; driven LOW at boot.
+#define PIN_RX5808_POWER_CTRL 21
+#define PIN_RX5808_DATA 2     // CH1 on GPIO2 (Data)
+#define PIN_RX5808_SELECT 4   // CH2 on GPIO4 (LE)
+#define PIN_RX5808_CLOCK 6    // CH3 on GPIO6 (Clk)
+#define PIN_BUZZER 15           // Buzzer on GPIO15 (on header)
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 9      // Mode selection (on header)
+// 1 = passive piezo (PWM tone on PIN_BUZZER). 0 = active buzzer (steady GPIO while beeping).
+#ifndef BUZZER_PASSIVE
+#define BUZZER_PASSIVE 1
+#endif
+// MLT-8530 passive: resonant ~2.7 kHz (loudest / spec SPL usually at square wave ~2700 Hz). Override if you use another part.
+#ifndef BUZZER_PWM_FREQ_HZ
+#define BUZZER_PWM_FREQ_HZ 2700
+#endif
+#define PIN_POWER_SWITCH 16     // Board: 4.7k to 3.3V on schematic; switch other pole to GND. Hold ~2s = off / wake
 // SD Card SPI pins (built-in TF card slot, shared SPI bus with LCD)
 #define PIN_SD_CS 41
 #define PIN_SD_SCK 39
 #define PIN_SD_MOSI 38
 #define PIN_SD_MISO 40
+// Touch I2C pins (CST816D / CST820 family)
+#define LCD_I2C_SDA 48
+#define LCD_I2C_SCL 47
+// GPIO0: shared LCD + touch reset (schematic). ST7789 tftInit pulses this; keep -1 for CST820 to avoid double-reset after LVGL.
+#define LCD_PANEL_RST 0
+#define LCD_TOUCH_RST -1
+#define LCD_TOUCH_INT 46   // TP_INT (touch IRQ, open-drain); MCU must use INPUT_PULLUP, not drive as output
+// QMI8658 IMU (same I2C bus as touch: SDA 48 / SCL 47)
+#define PIN_QMI8658_INT1 3   // IMU INT1 (input); optional for future motion wake
+// If portrait auto-rotate (0°/180°) feels inverted vs physical, set to 1
+#ifndef QMI8658_PORTRAIT_INVERT
+#define QMI8658_PORTRAIT_INVERT 0
+#endif
+// LCD backlight (for power management)
+#define LCD_BACKLIGHT 1
 
-// FPVGate AIO V4 (XIAO ESP32S3-based, custom pinout)
-#elif defined(FPVGATE_AIO_V4)
+// FPVGate AIO (based on XIAO ESP32S3)
+#elif defined(FPVGATE_AIO)
 
-#define PIN_LED 21             // Onboard user LED
-#define PIN_RGB_LED 44         // NeoPixel chain on D7 (GPIO44)
-#define NUM_LEDS 3
-#define PIN_VBAT 0             // External divider required if used
+#define PIN_LED 44             // D7 - Status LED
+#define PIN_RGB_LED 44         // D7 - NeoPixel signal
+#define PIN_VBAT 1             // D0 - BATSENSE
 #define VBAT_SCALE 2
 #define VBAT_ADD 2
-#define PIN_RX5808_RSSI 3      // D2 (GPIO3)
-#define PIN_RX5808_DATA 5      // D4 (GPIO5)
-#define PIN_RX5808_SELECT 6    // D5 (GPIO6) - LE
-#define PIN_RX5808_CLOCK 4     // D3 (GPIO4)
-#define PIN_BUZZER 43          // D6 (GPIO43)
+#define PIN_RX5808_RSSI 3      // D2
+#define PIN_RX5808_DATA 5      // D4
+#define PIN_RX5808_SELECT 6    // D5 (LE)
+#define PIN_RX5808_CLOCK 4     // D3
+#define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 1      // D0 (GPIO1)
+#define PIN_MODE_SWITCH 1      // D0
 // SD Card SPI pins
-#define PIN_SD_CS 2            // D1 (GPIO2)
-#define PIN_SD_SCK 7           // D8 (GPIO7)
-#define PIN_SD_MOSI 8          // D9 (GPIO8)
-#define PIN_SD_MISO 9          // D10 (GPIO9)
+#define PIN_SD_CS 2            // D1
+#define PIN_SD_SCK 7           // D8
+#define PIN_SD_MOSI 9          // D10
+#define PIN_SD_MISO 8          // D9
 
 // XIAO ESP32S3 Plus (16MB Flash)
 #elif defined(XIAO_ESP32S3_PLUS)
@@ -128,8 +153,8 @@
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1 (GPIO2)
 #define PIN_SD_SCK 7           // D8 (GPIO7)
-#define PIN_SD_MOSI 9          // D10 (GPIO9)
-#define PIN_SD_MISO 8          // D9 (GPIO8)
+#define PIN_SD_MOSI 8          // D9 (GPIO8)
+#define PIN_SD_MISO 9          // D10 (GPIO9)
 
 // Seeed Studio XIAO ESP32S3
 #elif defined(SEEED_XIAO_ESP32S3)
@@ -144,7 +169,7 @@
 #define PIN_RX5808_DATA 5      // D4
 #define PIN_RX5808_SELECT 6    // D5
 #define PIN_RX5808_CLOCK 4     // D3
-#define PIN_BUZZER 5           // D4
+#define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
 #define PIN_MODE_SWITCH 1      // D0
 // SD Card SPI pins (XIAO S3 per user wiring)
@@ -187,18 +212,18 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32C3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V4) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
 
-// Boards with RGB LED support
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO_V4) || defined(XIAO_ESP32S3_PLUS) || defined(PIN_RGB_LED)
+// Boards with RGB LED support (capability-based: boards with no physical NeoPixel use PIN_RGB_LED=-1 / NUM_LEDS=0)
+#if defined(PIN_RGB_LED) && defined(NUM_LEDS) && (PIN_RGB_LED >= 0) && (NUM_LEDS > 0)
     #define HAS_RGB_LED 1
 #endif
 
 // Boards with built-in battery monitoring
-#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(XIAO_ESP32S3_PLUS) || defined(ENABLE_BATTERY_TEST)
+#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(SEEED_XIAO_ESP32S3) || defined(XIAO_ESP32S3_PLUS) || defined(ENABLE_BATTERY_TEST)
     #define HAS_BATTERY_MONITOR 1
 #endif
 
@@ -214,7 +239,10 @@
 #define EEPROM_RESERVED_SIZE 1024
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 17U
+#define CONFIG_VERSION 20U
+
+/** Lap OSD column: use auto centering in firmware (HDZero-width heuristic). */
+#define ELRS_OSD_LAP_COL_AUTO 255U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -304,6 +332,13 @@ typedef struct {
     uint8_t splitGateCount;          // Number of configured split gates
     uint8_t splitGateNumbers[MAX_SPLIT_GATES]; // Gate order (1-8) for each split gate device
     float splitGateDistances[MAX_SPLIT_GATES]; // Distance in meters from previous gate to this gate
+    // ELRS backpack
+    uint8_t elrsBackpackEspnow;      // ELRS backpack via ESP-NOW (0=off, 1=on); AP+STA + ESP-NOW when enabled
+    char elrsBackpackBindPhrase[33]; // NUL-terminated, max 32 chars
+    uint8_t elrsOsdLapRow;           // MSP lap text row (e.g. HDZero 0-14)
+    uint8_t elrsOsdLapCol;           // 0-49 fixed column, or ELRS_OSD_LAP_COL_AUTO for centered text
+    uint8_t elrsOsdClearOnStop;      // 1 = send clear OSD MSP when race stops
+    uint8_t elrsOsdPlaybackLaps;     // 1 = send lap-line MSP for /timer/playbackLap
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -354,6 +389,7 @@ class Config {
     char* getSsid();
     char* getPassword();
     uint8_t getOperationMode();
+    char* getPilotName();
     char* getPilotCallsign();
     char* getPilotPhonetic();
     uint32_t getPilotColor();
@@ -365,6 +401,13 @@ class Config {
     float getLowBatteryAlarmPerCell();
     uint8_t getBatteryAlarmEnabled();
     float getBatteryVoltageDivider();
+    
+    // Band/channel access
+    uint8_t getBandIndex();
+    uint8_t getChannelIndex();
+    void setBandIndex(uint8_t idx);
+    void setChannelIndex(uint8_t idx);
+    static uint16_t getFrequencyForBandChannel(uint8_t bandIdx, uint8_t channelIdx);
     
     // Setters for RotorHazard node mode
     void setFrequency(uint16_t freq);
@@ -435,6 +478,19 @@ class Config {
     void setRhHostIP(const char* ip);
     uint8_t getRhNodeIndex();
     void setRhNodeIndex(uint8_t index);
+    
+    uint8_t getElrsBackpackEspnow();
+    void setElrsBackpackEspnow(uint8_t enabled);
+    char* getElrsBackpackBindPhrase();
+    void setElrsBackpackBindPhrase(const char* phrase);
+    uint8_t getElrsOsdLapRow();
+    void setElrsOsdLapRow(uint8_t row);
+    uint8_t getElrsOsdLapCol();
+    void setElrsOsdLapCol(uint8_t col);
+    uint8_t getElrsOsdClearOnStop();
+    void setElrsOsdClearOnStop(uint8_t v);
+    uint8_t getElrsOsdPlaybackLaps();
+    void setElrsOsdPlaybackLaps(uint8_t v);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();

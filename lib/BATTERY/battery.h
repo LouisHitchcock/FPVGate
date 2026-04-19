@@ -34,6 +34,7 @@ class BatteryMonitor {
     uint8_t add;
     bool enableDebug;
     uint8_t lastAlarmThreshold;  // Track last alarm threshold for debug control
+    bool dmaAverageSeeded = false;
     Buzzer *buz;
     Led *led;
 };

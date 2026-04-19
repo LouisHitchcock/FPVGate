@@ -213,7 +213,7 @@ TestResult SelfTest::testEEPROM() {
     
     // Write test pattern
     uint8_t testValue = 0xAA;
-    uint8_t testAddr = EEPROM_RESERVED_SIZE - 1; // Use last byte
+    uint16_t testAddr = EEPROM_RESERVED_SIZE - 1; // Use last byte
     uint8_t originalValue = EEPROM.read(testAddr);
     
     EEPROM.write(testAddr, testValue);
@@ -613,14 +613,67 @@ TestResult SelfTest::testTransport() {
     return result;
 }
 
+TestResult SelfTest::testSPIMod(RX5808* rx5808) {
+    TestResult result;
+    result.name = "SPI Mod";
+    uint32_t start = millis();
+
+    if (!rx5808) {
+        result.passed = false;
+        result.details = "RX5808 not initialized";
+        result.duration_ms = millis() - start;
+        return result;
+    }
+
+    // Sweep 8 RaceBand frequencies
+    static const uint16_t testFreqs[] = {5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917};
+    static const uint8_t numFreqs = 8;
+    static const uint8_t samplesPerFreq = 10;
+    static const uint8_t settleMs = 50;
+
+    uint8_t rssiValues[numFreqs];
+    uint8_t maxRssi = 0;
+    uint8_t minRssi = 255;
+
+    for (uint8_t i = 0; i < numFreqs; i++) {
+        rx5808->setFrequency(testFreqs[i]);
+        delay(settleMs);
+        // Clear recentSetFreqFlag so readRssi() returns real values
+        rx5808->handleFrequencyChange(millis(), testFreqs[i]);
+
+        uint16_t sum = 0;
+        for (uint8_t s = 0; s < samplesPerFreq; s++) {
+            sum += rx5808->readRssi();
+            delay(2);
+        }
+        rssiValues[i] = sum / samplesPerFreq;
+
+        if (rssiValues[i] > maxRssi) maxRssi = rssiValues[i];
+        if (rssiValues[i] < minRssi) minRssi = rssiValues[i];
+    }
+
+    uint8_t spread = maxRssi - minRssi;
+    // A working SPI mod should show meaningful variation across frequencies
+    // Non-modded: flat RSSI (spread < 10), modded: distinct peaks (spread >= 10)
+    bool spiWorking = (spread >= 10);
+
+    result.passed = spiWorking;
+    result.details = String("Spread: ") + String(spread) +
+                    ", Min: " + String(minRssi) +
+                    ", Max: " + String(maxRssi) +
+                    (spiWorking ? " (SPI tuning verified)" : " (flat response, SPI mod likely missing)");
+    result.duration_ms = millis() - start;
+    return result;
+}
+
 String SelfTest::getResultsJSON() {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     doc["allPassed"] = allPassed;
     doc["totalTests"] = results.size();
     
-    JsonArray testsArray = doc.createNestedArray("tests");
+    JsonArray testsArray = doc["tests"].to<JsonArray>();
     for (const auto& result : results) {
-        JsonObject test = testsArray.createNestedObject();
+        JsonObject test = testsArray.add<JsonObject>();
         test["name"] = result.name;
         test["passed"] = result.passed;
         test["details"] = result.details;

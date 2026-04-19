@@ -21,6 +21,12 @@ Technical specifications, wiring diagrams, and hardware troubleshooting.
 
 ---
 
+## Pre-Built Option: FPVGate AIO
+
+Don't want to source and wire components yourself? The **[FPVGate AIO](https://fpvgate.xyz/shop.html)** is a pre-built, ready-to-use FPVGate device. Everything is assembled and flashed -- just plug in and go. This guide covers the DIY build process; if you have an AIO, see the [Getting Started guide](GETTING_STARTED.md#initial-configuration) for setup.
+
+---
+
 ## Hardware Requirements
 
 ### Required Components

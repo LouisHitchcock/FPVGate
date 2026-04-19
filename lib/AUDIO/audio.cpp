@@ -201,9 +201,16 @@ void AudioAnnouncer::announceCountdown() {
     clearQueue();  // Clear any pending announcements
     countdownPlayed = true;
 
+    // Only "arm your quad" at start; "starting in less than 5" plays at 5s via announceStartingInFive()
     char path[AUDIO_PATH_MAX];
     buildPath(path, sizeof(path), "arm_your_quad.mp3");
     enqueue(path);
+}
+
+void AudioAnnouncer::announceStartingInFive() {
+    if (!isEnabled()) return;
+
+    char path[AUDIO_PATH_MAX];
     buildPath(path, sizeof(path), "starting_tone.mp3");
     enqueue(path);
 }

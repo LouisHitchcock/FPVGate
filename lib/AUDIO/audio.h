@@ -21,8 +21,9 @@ class AudioAnnouncer {
     void handleAudio();  // Call from main loop - drives non-blocking playback
 
     // Race event announcements
-    void announceCountdown();   // Pre-race: arm_your_quad + starting_tone
-    void announceRaceStart();   // Actual race start: resets lap counter
+    void announceCountdown();       // Pre-race: arm_your_quad only (call at countdown start)
+    void announceStartingInFive();  // "Starting on the tone in less than five" (call when countdown shows 5)
+    void announceRaceStart();       // Actual race start: resets lap counter
     void announceRaceStop();
     void announceRaceComplete();
 

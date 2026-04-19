@@ -1,0 +1,11 @@
+FPVGate v1.7.1 - Supported Boards
+
+Recommended:
+  - ESP32-S3 DevKitC-1 (8MB Flash)
+  - Seeed Studio XIAO ESP32S3 (8MB)
+  - FPVGate AIO V3 (XIAO ESP32S3, 8MB) - Upcoming official hardware release coming soon
+
+Expert Mode:
+  - ESP32-S3 Super Mini (4MB Flash)
+  - LilyGO T-Energy S3
+  - XIAO ESP32S3 Plus (16MB Flash)

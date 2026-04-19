@@ -20,7 +20,7 @@ GND             -- GND              (onboard GND)
 ## Built-in Features (no wiring needed)
 - **TF Card Slot**: Directly on the board (GPIO38/39/40/41). Insert a FAT32-formatted SD card.
 - **Battery Monitor**: GPIO5 via onboard 200K/100K voltage divider (3:1 ratio). Connect a 3.7V LiPo to the MX1.25 battery header.
-- **2" LCD**: ST7789T3 on SPI (GPIO38 MOSI, GPIO39 SCLK, GPIO42 DC) - currently unused by FPVGate firmware.
+- **2" LCD**: ST7789T3 on SPI (GPIO38 MOSI, GPIO39 SCLK, GPIO42 DC) with CST820 capacitive touch. Used by the optional LCD UI (build target `WaveshareESP32S3LCD2` with `ENABLE_LCD_UI=1`).
 
 ## Notes
 - The RX5808 pins use GPIOs that are shared with the camera connector (J1). Do NOT use the camera and RX5808 at the same time.

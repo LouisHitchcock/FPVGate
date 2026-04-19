@@ -34,7 +34,7 @@ bool TrackManager::createTrack(const Track& track) {
     String filepath = generateFilename(track.trackId);
     
     // Create JSON for single track
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     JsonObject trackObj = doc.to<JsonObject>();
     trackObj["trackId"] = track.trackId;
     trackObj["name"] = track.name;
@@ -90,7 +90,7 @@ bool TrackManager::loadTracks() {
             continue;
         }
         
-        DynamicJsonDocument doc(2048);
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, json);
         if (error) {
             DEBUG("Failed to parse %s: %s\n", filepath.c_str(), error.c_str());
@@ -163,7 +163,7 @@ bool TrackManager::updateTrack(uint32_t trackId, const Track& updatedTrack) {
     // Write updated track to file
     String filepath = generateFilename(trackId);
     
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     JsonObject trackObj = doc.to<JsonObject>();
     trackObj["trackId"] = targetTrack->trackId;
     trackObj["name"] = targetTrack->name;
@@ -204,11 +204,11 @@ bool TrackManager::clearAll() {
 }
 
 String TrackManager::toJsonString() {
-    DynamicJsonDocument doc(16384);
-    JsonArray tracksArray = doc.createNestedArray("tracks");
+    JsonDocument doc;
+    JsonArray tracksArray = doc["tracks"].to<JsonArray>();
     
     for (const auto& track : tracks) {
-        JsonObject trackObj = tracksArray.createNestedObject();
+        JsonObject trackObj = tracksArray.add<JsonObject>();
         trackObj["trackId"] = track.trackId;
         trackObj["name"] = track.name;
         trackObj["tags"] = track.tags;

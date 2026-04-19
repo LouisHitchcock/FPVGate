@@ -14,6 +14,9 @@
         "gate1_table": "Tor 1: {s}s",
         "race_complete": "Rennen abgeschlossen",
         "slave_mode_indicator": "Slave-Modus - Gesteuert vom Master-Timer",
+        "slave_mode_short": "SLAVE",
+        "master_mode_short": "MASTER",
+        "personal_mode_short": "PERSÖNLICH",
         "connected": "{mode}: Verbunden",
         "disconnected": "Getrennt",
         "status_connected": "Verbunden",
@@ -35,7 +38,8 @@
             "lap_singular": "1 Runde",
             "lap_plural": "{n} Runden",
             "seconds_short": "s"
-        }
+        },
+        "no_laps": "Noch keine Runden aufgezeichnet"
     },
     "analysis": {
         "title": "Rundenanalyse",
@@ -100,37 +104,50 @@
         "gate1_start": "Tor 1 (Start)"
     },
     "calib": {
-        "start_wizard": "Kalibrierungs-Assistent Starten",
-        "enter_rssi": "Eingang RSSI:",
-        "exit_rssi": "Ausgang RSSI:",
-        "save_thresholds": "RSSI-Schwellwerte Speichern",
-        "wizard_title_recording": "Kalibrierungs-Assistent - Aufzeichnung",
+        "title": "RSSI-Kalibrierung",
+        "subtitle": "Tor-Erkennungsschwellwerte einstellen",
+        "channel_selection": "Kanalauswahl",
+        "system": "System",
+        "band": "Band",
+        "channel": "Kanal",
+        "rssi_graph": "Live RSSI-Signal",
+        "thresholds": "Erkennungsschwellwerte",
+        "enter_hint": "Auslösen wenn Signal über diesen Wert steigt",
+        "exit_hint": "Zurücksetzen wenn Signal unter diesen Wert fällt",
+        "start_wizard": "Assistent",
+        "enter_rssi": "Eingang RSSI",
+        "exit_rssi": "Ausgang RSSI",
+        "save_thresholds": "Schwellwerte Speichern",
+        "wizard_title_ambient": "Kalibrierungs-Assistent - Umgebungsgeräusch",
+        "wizard_ambient_instructions": "Halte den Bereich frei von Drohnen. Umgebungsgeräuschpegel wird aufgezeichnet...",
+        "wizard_ambient_wait": "Sekunden verbleibend",
+        "wizard_title_recording": "Kalibrierungs-Assistent - Jetzt Fliegen",
         "wizard_title_marking": "Kalibrierungs-Assistent - Spitzen Markieren",
-        "wizard_title_results": "Kalibrierungs-Assistent - Ergebnisse",
+        "wizard_title_results": "Kalibrierungsergebnisse",
         "wizard_instructions_title": "Anweisungen:",
-        "wizard_step1": "Fliege 3 Mal durch das Tor",
+        "wizard_step1": "Fliege 3+ Mal durch das Tor",
         "wizard_step2": "Stelle sicher, dass du bei jedem Durchgang klare Signalspitzen erhältst",
         "wizard_step3": "Klicke \"Aufzeichnung Stoppen\" wenn fertig",
         "wizard_recording_rssi": "RSSI-Daten Aufzeichnen...",
         "wizard_samples": "Proben: {n}",
         "wizard_stop_recording": "Aufzeichnung Stoppen",
         "wizard_marking_instructions": "Klicke auf das Diagramm, um den höchsten Punkt (Spitze) für jede Runde zu markieren:",
-        "wizard_highest_peak": "höchste Spitze",
-        "wizard_highest_peak_tip": "Klicke auf die <span style='color: #ff5555'>höchste Spitze</span> für jeden Tordurchgang",
-        "wizard_mark_peaks_tip": "Markiere insgesamt 3 Spitzen (eine pro Runde)",
-        "wizard_auto_calc_tip": "Ein-/Ausgangs-Schwellwerte werden automatisch berechnet",
         "wizard_mark_peak_n": "Spitze {n} Markieren",
         "wizard_undo": "Letztes Rückgängig",
         "wizard_calculate": "Schwellwerte Berechnen",
-        "wizard_enter_rssi": "Berechneter Eingang RSSI:",
-        "wizard_exit_rssi": "Berechneter Ausgang RSSI:",
+        "wizard_enter_rssi": "Eingang RSSI:",
+        "wizard_exit_rssi": "Ausgang RSSI:",
+        "wizard_min_lap": "Min. Rundenzeit:",
+        "wizard_peaks_detected": "Spitzen Erkannt:",
+        "wizard_noise_ceiling": "Rauschgrenze:",
+        "wizard_avg_peak": "Durchschn. Spitze:",
         "wizard_note_title": "Hinweis:",
-        "wizard_results_note": "Diese Werte wurden basierend auf deinen Rundendaten mit Sicherheitsreserven berechnet. Du kannst sie jetzt anwenden und bei Bedarf manuell feinabstimmen.",
-        "wizard_apply": "Schwellwerte Anwenden",
+        "wizard_results_note": "Diese Werte wurden automatisch aus deinen Flugdaten berechnet. Wende sie an und passe sie bei Bedarf manuell an.",
+        "wizard_apply": "Alle Anwenden",
         "ignore_hint": "Ziehen um einen Bereich zu ignorieren. Rechtsklick zum Entfernen.",
-        "ignore_clear": "Ignorierte Loschen",
+        "ignore_clear": "Ignorierte Löschen",
         "ignore_warning_title": "Nicht genug Spitzen!",
-        "ignore_warning_desc": "Zu viele Bereiche ignoriert. Mindestens 3 Spitzen werden benotigt.",
+        "ignore_warning_desc": "Zu viele Bereiche ignoriert. Mindestens 3 Spitzen werden benötigt.",
         "rerecord": "Flugdaten Neu Aufzeichnen"
     },
     "settings": {
@@ -158,7 +175,8 @@
             "infinite": "Unendlich",
             "infinite_tip": "Tipp: Setze 0 für unendliche Runden",
             "infinite_label": "Unendlich",
-            "min_lap": "Minimale Rundenzeit:"
+            "min_lap": "Minimale Rundenzeit:",
+            "beep_volume": "Piep-Lautstärke:"
         },
         "tts": {
             "title": "TTS-Einstellungen",
@@ -195,12 +213,14 @@
                 "eleven_rachel": "ElevenLabs (Rachel - Ruhig)",
                 "eleven_adam": "ElevenLabs (Adam - Tiefe Männerstimme)",
                 "eleven_antoni": "ElevenLabs (Antoni - Männlich)",
+                "eleven_matilda": "ElevenLabs (Matilda - Warme Frauenstimme)",
                 "webspeech": "Web Speech (Browser TTS)"
             },
             "examples": "Beispiele: \"Louis Runde 5, 12.34\" / \"Runde 5, 12.34\" / \"12.34\""
         },
         "pilot": {
             "title": "Pilot Info",
+            "system": "System:",
             "band": "Band:",
             "channel": "Kanal:",
             "name": "Pilotenname:",
@@ -311,9 +331,24 @@
             "add_timer": "Timer Hinzufügen",
             "add_placeholder": "z.B. fpvgate2.local",
             "no_timers": "Keine synchronisierten Timer konfiguriert",
+            "test_all": "Alle Verbindungen Testen",
             "master_note": "Start/Stop/Löschen-Befehle werden an alle synchronisierten Timer gesendet.",
             "slave_active": "Slave-Modus Aktiv",
-            "slave_note": "Dieser Timer wird von einem Master-Timer gesteuert. Rennsteuerungen sind deaktiviert."
+            "slave_note": "Dieser Timer wird von einem Master-Timer gesteuert. Rennsteuerungen sind deaktiviert.",
+            "master_hostname": "Master-Hostname/IP:",
+            "master_placeholder": "z.B. fpvgate.local oder 192.168.1.100",
+            "master_tip": "Master-Timer-Adresse eingeben um Rundenzeiten zu senden",
+            "save_master": "Master-Adresse Speichern",
+            "test_master": "Master-Verbindung Testen",
+            "devices_title": "Sync-Geräte",
+            "this_device": "Dieses Gerät",
+            "add_device": "Gerät Hinzufügen:",
+            "add_device_placeholder": "z.B. 192.168.0.100 oder fpvgate2.local",
+            "add_device_btn": "Gerät Hinzufügen",
+            "role_personal": "Persönlich",
+            "role_master": "Master",
+            "role_slave": "Slave",
+            "info_note": "Setze ein Gerät als Master um Rennstart/-stopp zu steuern. Andere Geräte als Slave folgen dem Master und senden ihre Rundenzeiten."
         },
         "webhooks": {
             "title": "Webhooks",
@@ -342,8 +377,16 @@
             "title": "Systemeinstellungen",
             "battery": "Batterieüberwachung",
             "enable_battery": "Batterieüberwachung:",
-            "low_battery": "Schwache Batterie Alarm:",
+            "battery_type": "Batterietyp:",
+            "battery_type_lipo": "LiPo (3.0v - 4.2v)",
+            "battery_type_lipohv": "LiPoHV (3.0v - 4.35v)",
+            "battery_type_liion": "Li-Ion/18650 (2.5v - 4.2v)",
+            "battery_cells": "Zellenanzahl:",
+            "voltage_divider": "Spannungsteiler-Verhältnis:",
+            "voltage_divider_tip": "Basierend auf deiner Spannungsteiler-Schaltung anpassen (z.B. 2.0 für 2:1, 5.5 für 11:2)",
+            "low_battery_per_cell": "Niedrige Batterie Alarm (pro Zelle):",
             "battery_voltage": "Batteriespannung:",
+            "battery_voltage_tip": "Gesamtspannung und Durchschnitt pro Zelle",
             "receiver_radio": "Empfänger-Radio",
             "receiver_label": "Empfängermodul:",
             "receiver_options": {
@@ -405,6 +448,8 @@
         },
         "diagnostics": {
             "title": "Diagnostik",
+            "debug_mode": "Debug-Modus",
+            "debug_mode_tip": "Live RSSI-Diagramm auf dem Rennbildschirm anzeigen",
             "hardware_tests": "Hardware-Tests",
             "description": "Umfassende Hardware- und Software-Tests ausführen um alle FPVGate-Komponenten zu verifizieren.",
             "run_test": "System-Selbsttest Ausführen",
@@ -423,7 +468,14 @@
             "some_failed": "Einige Tests Fehlgeschlagen",
             "error_running": "Fehler Beim Ausführen der Tests",
             "run_all": "Alle Tests Ausführen",
-            "run_again": "Alle Tests Erneut Ausführen"
+            "run_again": "Alle Tests Erneut Ausführen",
+            "spi_title": "SPI-Mod Test",
+            "spi_description": "Durchsucht RaceBand-Frequenzen um die RX5808 SPI-Modifikation zu prüfen. Ein modifiziertes Modul zeigt unterschiedliche RSSI-Werte; ein unmodifiziertes bleibt flach.",
+            "spi_run": "SPI-Mod Test Starten",
+            "spi_running": "Frequenzen werden durchsucht...",
+            "spi_pass": "SPI-Mod Bestätigt",
+            "spi_fail": "SPI-Mod Nicht Erkannt",
+            "spi_run_again": "SPI-Test Wiederholen"
         }
     },
     "modals": {
@@ -444,10 +496,14 @@
             "unit_meters": "{n} Meter"
         }
     },
+    "battery_alarm": {
+        "dismiss": "Verwerfen"
+    },
     "messages": {
         "confirm_clear_history": "Bist du sicher, dass du den gesamten Verlauf löschen möchtest? Dies kann nicht rückgängig gemacht werden.",
         "config_imported": "Konfiguration erfolgreich importiert! Seite wird neu geladen.",
         "calib_peaks_marked": "Alle Spitzen markiert! Klicke \"Schwellwerte Berechnen\"",
+        "calib_auto_few_peaks": "Auto-Erkennung fand nur {n} Spitze(n). Bitte markiere die Spitzen manuell.",
         "calib_applied": "Kalibrierungsschwellwerte angewendet! Du kannst sie jetzt manuell feinabstimmen.",
         "wifi_apply_confirm": "WiFi-Einstellungen anwenden? Das Gerät wird neu gestartet.",
         "track_save_error": "Fehler beim Speichern der Strecke",
@@ -489,7 +545,10 @@
         "invalid_ip": "Ungültiges IP-Adressformat (z.B. 192.168.0.75)",
         "enter_timer_hostname": "Bitte Timer-Hostnamen eingeben",
         "timer_already_added": "Dieser Timer ist bereits in der Liste",
-        "max_timers_reached": "Maximal 5 synchronisierte Timer erlaubt"
+        "max_timers_reached": "Maximal 5 synchronisierte Timer erlaubt",
+        "enter_device_address": "Bitte Geräteadresse eingeben",
+        "device_already_added": "Dieses Gerät ist bereits in der Liste",
+        "max_devices_reached": "Maximal 6 Geräte erlaubt"
     },
     "osd": {
         "lap": "Runde {n}",

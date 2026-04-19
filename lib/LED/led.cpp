@@ -1,15 +1,21 @@
 #include "led.h"
 
-void Led::init(uint8_t pin, bool inverted) {
+void Led::init(int8_t pin, bool inverted) {
+    ledPin = pin;
+    validPin = (ledPin >= 0);
+    if (!validPin) {
+        ledState = LED_IDLE;
+        return;
+    }
     pinMode(pin, OUTPUT);
     initialState = inverted ? HIGH : LOW;
     currentState = initialState;
-    ledPin = pin;
     ledState = LED_IDLE;
     digitalWrite(ledPin, initialState);
 }
 
 void Led::on(uint32_t timeMs) {
+    if (!validPin) return;
     if (timeMs > 0) {
         ledState = LED_ON;
         onTimeMs = timeMs;
@@ -21,11 +27,13 @@ void Led::on(uint32_t timeMs) {
 }
 
 void Led::off() {
+    if (!validPin) return;
     ledState = LED_IDLE;
     digitalWrite(ledPin, initialState);
 }
 
 void Led::blink(uint32_t onMs, uint32_t offMs) {
+    if (!validPin) return;
     onTimeMs = onMs;
     if (offMs > 0) {
         offTimeMs = offMs;
@@ -39,6 +47,7 @@ void Led::blink(uint32_t onMs, uint32_t offMs) {
 }
 
 void Led::handleLed(uint32_t currentTimeMs) {
+    if (!validPin) return;
     switch (ledState) {
         case LED_IDLE:
             break;

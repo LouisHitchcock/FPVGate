@@ -128,7 +128,7 @@ A real-time status indicator at the top of the Configuration page shows your cur
 
 The web interface has four main tabs:
 
-![Race Screen](../screenshots/12-12-2025/Race%20-%2012-12-2025.png)
+![Race Screen](../screenshots/02-04-2026/Race%20Screen%20Solo.png)
 
 ### Race Tab
 
@@ -148,7 +148,7 @@ The web interface has four main tabs:
 
 ### Configuration Tab
 
-![Configuration Menu](../screenshots/12-12-2025/Config%20Screen%20-%20Pilot%20Info%2012-12-2025.png)
+![Configuration Menu](../screenshots/02-04-2026/Settings%20Menu.png)
 
 **All settings and diagnostics** - Organized into sections:
 
@@ -161,7 +161,7 @@ The web interface has four main tabs:
 
 ### Calibration Tab
 
-![Calibration Screen](../screenshots/12-12-2025/Calibration%20Screen%2012-12-2025.png)
+![Calibration Screen](../screenshots/02-04-2026/RSSI%20Calibration.png)
 
 **RSSI threshold setup** - Critical for accurate timing.
 
@@ -221,7 +221,7 @@ Below the charts, a legend shows:
 ---
 ## Race History Tab
 
-![Race History](../screenshots/12-12-2025/Race%20History%20-%2012-12-2025.png)
+![Race History](../screenshots/02-04-2026/Race%20History.png)
 
 **Saved races archive** - View, edit, export past races.
 

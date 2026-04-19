@@ -54,7 +54,7 @@ class RaceHistory {
     bool clearAll();
     String toJsonString();
     bool fromJsonString(const String& json);
-    const std::vector<RaceSession>& getRaces() const { return races; }
+    const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
 
    private:

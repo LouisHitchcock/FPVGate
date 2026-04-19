@@ -34,7 +34,7 @@ void USBTransport::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batM
 void USBTransport::sendLapEvent(uint32_t lapTimeMs) {
     if (!isConnected()) return;
     
-    DynamicJsonDocument doc(128);
+    JsonDocument doc;
     doc["event"] = "lap";
     doc["data"] = lapTimeMs;
     
@@ -45,7 +45,7 @@ void USBTransport::sendLapEvent(uint32_t lapTimeMs) {
 void USBTransport::sendRssiEvent(uint8_t rssi) {
     if (!isConnected() || !rssiStreamingEnabled) return;
     
-    DynamicJsonDocument doc(128);
+    JsonDocument doc;
     doc["event"] = "rssi";
     doc["data"] = rssi;
     
@@ -56,7 +56,7 @@ void USBTransport::sendRssiEvent(uint8_t rssi) {
 void USBTransport::sendRaceStateEvent(const char* state) {
     if (!isConnected()) return;
     
-    DynamicJsonDocument doc(128);
+    JsonDocument doc;
     doc["event"] = "raceState";
     doc["data"] = state;
     
@@ -67,9 +67,9 @@ void USBTransport::sendRaceStateEvent(const char* state) {
 void USBTransport::sendSlaveLapEvent(uint32_t lapTimeMs, const char* pilotName, const char* pilotPhonetic, uint32_t pilotColor, const char* slaveHostname) {
     if (!isConnected()) return;
     
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["event"] = "slaveLap";
-    JsonObject data = doc.createNestedObject("data");
+    JsonObject data = doc["data"].to<JsonObject>();
     data["lapTimeMs"] = lapTimeMs;
     data["pilotName"] = pilotName;
     data["pilotPhonetic"] = pilotPhonetic;
@@ -116,7 +116,7 @@ void USBTransport::enableRssiStreaming(bool enable) {
 }
 
 void USBTransport::processCommand(const char* cmdLine) {
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, cmdLine);
     
     if (error) {
@@ -124,7 +124,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         return;
     }
     
-    if (!doc.containsKey("cmd")) {
+    if (!!doc["cmd"].isNull()) {
         DEBUG("USB: Missing 'cmd' field\n");
         return;
     }
@@ -148,7 +148,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         sendResponse(id, "OK");
         
     } else if (strcmp(cmd, "timer/addLap") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("lapTime")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("lapTime")) {
             uint32_t lapTimeMs = doc["data"]["lapTime"];
             sendLapEvent(lapTimeMs);
 #ifdef ESP32S3
@@ -171,7 +171,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         sendConfigResponse(id);
         
     } else if (strcmp(cmd, "config/set") == 0) {
-        if (doc.containsKey("data")) {
+        if (!doc["data"].isNull()) {
             JsonObject data = doc["data"];
             conf->fromJson(data);
             sendResponse(id, "OK");
@@ -183,12 +183,12 @@ void USBTransport::processCommand(const char* cmdLine) {
         sendStatusResponse(id);
         
     } else if (strcmp(cmd, "races/get") == 0) {
-        DynamicJsonDocument respDoc(4096);
+        JsonDocument respDoc;
         respDoc["id"] = id;
         respDoc["status"] = "OK";
         
         String racesJson = history->toJsonString();
-        DynamicJsonDocument racesDoc(4096);
+        JsonDocument racesDoc;
         deserializeJson(racesDoc, racesJson);
         respDoc["data"] = racesDoc;
         
@@ -196,7 +196,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         Serial.println();
         
     } else if (strcmp(cmd, "races/save") == 0) {
-        if (doc.containsKey("data")) {
+        if (!doc["data"].isNull()) {
             JsonObject data = doc["data"];
             RaceSession race;
             race.timestamp = data["timestamp"];
@@ -227,12 +227,12 @@ void USBTransport::processCommand(const char* cmdLine) {
     } else if (strcmp(cmd, "selftest") == 0) {
         selftest->runAllTests();
         
-        DynamicJsonDocument respDoc(4096);
+        JsonDocument respDoc;
         respDoc["id"] = id;
         respDoc["status"] = "OK";
         
         String testJson = selftest->getResultsJSON();
-        DynamicJsonDocument testDoc(4096);
+        JsonDocument testDoc;
         deserializeJson(testDoc, testJson);
         respDoc["data"] = testDoc;
         
@@ -241,7 +241,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         
     // LED commands
     } else if (strcmp(cmd, "led/preset") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("preset")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("preset")) {
             uint8_t presetNum = doc["data"]["preset"];
 #ifdef ESP32S3
             if (g_rgbLed) {
@@ -258,7 +258,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/color") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("color")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("color")) {
             const char* colorHex = doc["data"]["color"];
             uint32_t color = (uint32_t)strtoul(colorHex, NULL, 16);
 #ifdef ESP32S3
@@ -276,7 +276,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/brightness") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("brightness")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("brightness")) {
             uint8_t brightness = doc["data"]["brightness"];
 #ifdef ESP32S3
             if (g_rgbLed) {
@@ -293,7 +293,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/speed") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("speed")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("speed")) {
             uint8_t speed = doc["data"]["speed"];
 #ifdef ESP32S3
             if (g_rgbLed) {
@@ -310,7 +310,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/override") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("enable")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("enable")) {
             bool enable = doc["data"]["enable"];
 #ifdef ESP32S3
             if (g_rgbLed) {
@@ -327,7 +327,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/fadecolor") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("color")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("color")) {
             const char* colorHex = doc["data"]["color"];
             uint32_t color = (uint32_t)strtoul(colorHex, NULL, 16);
 #ifdef ESP32S3
@@ -345,7 +345,7 @@ void USBTransport::processCommand(const char* cmdLine) {
         }
         
     } else if (strcmp(cmd, "led/strobecolor") == 0) {
-        if (doc.containsKey("data") && doc["data"].containsKey("color")) {
+        if (!doc["data"].isNull() && doc["data"].containsKey("color")) {
             const char* colorHex = doc["data"]["color"];
             uint32_t color = (uint32_t)strtoul(colorHex, NULL, 16);
 #ifdef ESP32S3
@@ -368,7 +368,7 @@ void USBTransport::processCommand(const char* cmdLine) {
 }
 
 void USBTransport::sendResponse(uint32_t id, const char* status) {
-    DynamicJsonDocument doc(128);
+    JsonDocument doc;
     doc["id"] = id;
     doc["status"] = status;
     
@@ -377,7 +377,7 @@ void USBTransport::sendResponse(uint32_t id, const char* status) {
 }
 
 void USBTransport::sendResponse(uint32_t id, const char* status, const char* message) {
-    DynamicJsonDocument doc(256);
+    JsonDocument doc;
     doc["id"] = id;
     doc["status"] = status;
     doc["message"] = message;
@@ -387,11 +387,11 @@ void USBTransport::sendResponse(uint32_t id, const char* status, const char* mes
 }
 
 void USBTransport::sendConfigResponse(uint32_t id) {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     doc["id"] = id;
     doc["status"] = "OK";
     
-    JsonObject data = doc.createNestedObject("data");
+    JsonObject data = doc["data"].to<JsonObject>();
     
     // Build config JSON manually (Config::toJson uses AsyncResponseStream)
     data["freq"] = conf->getFrequency();
@@ -412,28 +412,28 @@ void USBTransport::sendConfigResponse(uint32_t id) {
 }
 
 void USBTransport::sendStatusResponse(uint32_t id) {
-    DynamicJsonDocument doc(2048);
+    JsonDocument doc;
     doc["id"] = id;
     doc["status"] = "OK";
     
-    JsonObject data = doc.createNestedObject("data");
+    JsonObject data = doc["data"].to<JsonObject>();
     
     // Heap info
-    JsonObject heap = data.createNestedObject("heap");
+    JsonObject heap = data["heap"].to<JsonObject>();
     heap["free"] = ESP.getFreeHeap();
     heap["min"] = ESP.getMinFreeHeap();
     heap["size"] = ESP.getHeapSize();
     heap["maxAlloc"] = ESP.getMaxAllocHeap();
     
     // Storage info
-    JsonObject stor = data.createNestedObject("storage");
+    JsonObject stor = data["storage"].to<JsonObject>();
     stor["type"] = storage->getStorageType();
     stor["used"] = storage->getUsedBytes();
     stor["total"] = storage->getTotalBytes();
     stor["free"] = storage->getFreeBytes();
     
     // Chip info
-    JsonObject chip = data.createNestedObject("chip");
+    JsonObject chip = data["chip"].to<JsonObject>();
     chip["model"] = ESP.getChipModel();
     chip["revision"] = ESP.getChipRevision();
     chip["cores"] = ESP.getChipCores();
@@ -443,7 +443,7 @@ void USBTransport::sendStatusResponse(uint32_t id) {
     chip["cpuSpeed"] = getCpuFrequencyMhz();
     
     // Network info
-    JsonObject network = data.createNestedObject("network");
+    JsonObject network = data["network"].to<JsonObject>();
     network["ip"] = WiFi.localIP().toString();
     network["mac"] = WiFi.macAddress();
     

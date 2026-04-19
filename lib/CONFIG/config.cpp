@@ -4,6 +4,13 @@
 #include <LittleFS.h>
 
 #include "debug.h"
+
+static float sanitizeBatteryDivider(float ratio) {
+#if defined(WAVESHARE_ESP32S3_LCD2)
+    if (ratio < 3.2f) return 3.3f;
+#endif
+    return ratio;
+}
 #include "storage.h"
 #include "battery.h"
 
@@ -14,7 +21,7 @@
 #define CONFIG_BACKUP_PATH "/config_backup.bin"
 
 // Frequency lookup table (same as frontend script.js)
-static const uint16_t freqLookup[][8] = {
+const uint16_t freqLookup[][8] = {
   {5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725}, // A
   {5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866}, // B
   {5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945}, // E
@@ -86,9 +93,9 @@ void Config::load(void) {
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
         
-        // Migration from version 16 to 17: add split time gate fields
-        if (version == 16) {
-            DEBUG("Migrating config from v16 to v17 (adding split time gate fields)\n");
+        // Migration from version 19 to 20: add split time gate fields
+        if (version == 19) {
+            DEBUG("Migrating config from v19 to v20 (adding split gate fields)\n");
             conf.splitGateNumber = 0;
             memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
             memset(conf.splitGates, 0, sizeof(conf.splitGates));
@@ -100,12 +107,75 @@ void Config::load(void) {
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 15 to 17
+        // Migration from version 18 to 20
+        else if (version == 18) {
+            DEBUG("Migrating config from v18 to v20 (elrsOsd + split gates)\n");
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
+            conf.splitGateNumber = 0;
+            memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+            memset(conf.splitGates, 0, sizeof(conf.splitGates));
+            conf.splitGateCount = 0;
+            memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+            memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 17 to 20
+        else if (version == 17) {
+            DEBUG("Migrating config from v17 to v20 (ELRS bind + OSD + split gates)\n");
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
+            conf.splitGateNumber = 0;
+            memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+            memset(conf.splitGates, 0, sizeof(conf.splitGates));
+            conf.splitGateCount = 0;
+            memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+            memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 16 to 20
+        else if (version == 16) {
+            DEBUG("Migrating config from v16 to v20 (ELRS ESP-NOW + bind + OSD + split gates)\n");
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
+            conf.splitGateNumber = 0;
+            memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
+            memset(conf.splitGates, 0, sizeof(conf.splitGates));
+            conf.splitGateCount = 0;
+            memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
+            memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 15 to 20
         else if (version == 15) {
-            DEBUG("Migrating config from v15 to v17 (adding RH + split gate fields)\n");
+            DEBUG("Migrating config from v15 to v20 (RH + ELRS + split gates)\n");
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.splitGateNumber = 0;
             memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
             memset(conf.splitGates, 0, sizeof(conf.splitGates));
@@ -124,6 +194,12 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -144,6 +220,12 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -165,6 +247,12 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -188,6 +276,12 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -212,6 +306,12 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.elrsBackpackEspnow = 0;
+            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+            conf.elrsOsdLapRow = 5;
+            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+            conf.elrsOsdClearOnStop = 0;
+            conf.elrsOsdPlaybackLaps = 0;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -259,8 +359,7 @@ void Config::write(void) {
 }
 
 void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor) {
-    // Use https://arduinojson.org/v6/assistant to estimate memory
-    DynamicJsonDocument config(2048);
+    JsonDocument config;
     config["freq"] = conf.frequency;
     
     // Use stored band/channel indices if valid, otherwise compute from frequency
@@ -298,7 +397,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["selectedTrackId"] = conf.selectedTrackId;
     config["webhooksEnabled"] = conf.webhooksEnabled;
     config["webhookCount"] = conf.webhookCount;
-    JsonArray webhooks = config.createNestedArray("webhookIPs");
+    JsonArray webhooks = config["webhookIPs"].to<JsonArray>();
     for (uint8_t i = 0; i < conf.webhookCount; i++) {
         webhooks.add(conf.webhookIPs[i]);
     }
@@ -329,7 +428,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["timerNumber"] = conf.timerNumber;
     config["raceSyncMode"] = conf.raceSyncMode;
     config["syncedTimerCount"] = conf.syncedTimerCount;
-    JsonArray syncTimers = config.createNestedArray("syncedTimers");
+    JsonArray syncTimers = config["syncedTimers"].to<JsonArray>();
     for (uint8_t i = 0; i < conf.syncedTimerCount; i++) {
         syncTimers.add(conf.syncedTimers[i]);
     }
@@ -369,13 +468,24 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["splitGateNumber"] = conf.splitGateNumber;
     config["splitMasterHostname"] = conf.splitMasterHostname;
     config["splitGateCount"] = conf.splitGateCount;
-    JsonArray splitGatesArr = config.createNestedArray("splitGates");
+    JsonArray splitGatesArr = config["splitGates"].to<JsonArray>();
     for (uint8_t i = 0; i < conf.splitGateCount; i++) {
-        JsonObject gate = splitGatesArr.createNestedObject();
+        JsonObject gate = splitGatesArr.add<JsonObject>();
         gate["hostname"] = conf.splitGates[i];
         gate["gateNumber"] = conf.splitGateNumbers[i];
         gate["distance"] = conf.splitGateDistances[i];
     }
+    config["elrsBackpackEspnow"] = conf.elrsBackpackEspnow;
+    config["elrsBackpackBindPhrase"] = conf.elrsBackpackBindPhrase;
+    config["elrsOsdLapRow"] = conf.elrsOsdLapRow;
+    config["elrsOsdLapCol"] = conf.elrsOsdLapCol;
+    config["elrsOsdClearOnStop"] = conf.elrsOsdClearOnStop;
+    config["elrsOsdPlaybackLaps"] = conf.elrsOsdPlaybackLaps;
+#ifdef ENABLE_ELRS_BACKPACK_ESPNOW
+    config["elrsBackpackEspnowBuild"] = 1;
+#else
+    config["elrsBackpackEspnowBuild"] = 0;
+#endif
     
     // Add battery voltage if monitor exists
     if (batteryMonitor) {
@@ -388,7 +498,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
 }
 
 void Config::toJsonString(char* buf) {
-    DynamicJsonDocument config(512);
+    JsonDocument config;
     config["freq"] = conf.frequency;
     config["minLap"] = conf.minLap;
     config["alarm"] = conf.alarm;
@@ -425,11 +535,11 @@ void Config::fromJson(JsonObject source) {
         modified = true;
     }
     // Store band and channel indices if provided
-    if (source.containsKey("bandIndex") && source["bandIndex"] != conf.bandIndex) {
+    if (!source["bandIndex"].isNull() && source["bandIndex"] != conf.bandIndex) {
         conf.bandIndex = source["bandIndex"];
         modified = true;
     }
-    if (source.containsKey("channelIndex") && source["channelIndex"] != conf.channelIndex) {
+    if (!source["channelIndex"].isNull() && source["channelIndex"] != conf.channelIndex) {
         conf.channelIndex = source["channelIndex"];
         modified = true;
     }
@@ -445,7 +555,7 @@ void Config::fromJson(JsonObject source) {
         conf.announcerType = source["anType"];
         modified = true;
     }
-    if (source.containsKey("anRate")) {
+    if (!source["anRate"].isNull()) {
         int r = source["anRate"].as<int>();
 
         // UI range is 0.1–2.0, stored as x10 => 1–20
@@ -469,72 +579,72 @@ void Config::fromJson(JsonObject source) {
         conf.maxLaps = source["maxLaps"];
         modified = true;
     }
-    if (source.containsKey("ledMode") && source["ledMode"] != conf.ledMode) {
+    if (!source["ledMode"].isNull() && source["ledMode"] != conf.ledMode) {
         conf.ledMode = source["ledMode"];
         modified = true;
     }
-    if (source.containsKey("ledBrightness") && source["ledBrightness"] != conf.ledBrightness) {
+    if (!source["ledBrightness"].isNull() && source["ledBrightness"] != conf.ledBrightness) {
         conf.ledBrightness = source["ledBrightness"];
         modified = true;
     }
-    if (source.containsKey("ledColor") && source["ledColor"] != conf.ledColor) {
+    if (!source["ledColor"].isNull() && source["ledColor"] != conf.ledColor) {
         conf.ledColor = source["ledColor"];
         modified = true;
     }
-    if (source.containsKey("ledPreset") && source["ledPreset"] != conf.ledPreset) {
+    if (!source["ledPreset"].isNull() && source["ledPreset"] != conf.ledPreset) {
         conf.ledPreset = source["ledPreset"];
         modified = true;
     }
-    if (source.containsKey("ledSpeed") && source["ledSpeed"] != conf.ledSpeed) {
+    if (!source["ledSpeed"].isNull() && source["ledSpeed"] != conf.ledSpeed) {
         conf.ledSpeed = source["ledSpeed"];
         modified = true;
     }
-    if (source.containsKey("ledFadeColor") && source["ledFadeColor"] != conf.ledFadeColor) {
+    if (!source["ledFadeColor"].isNull() && source["ledFadeColor"] != conf.ledFadeColor) {
         conf.ledFadeColor = source["ledFadeColor"];
         modified = true;
     }
-    if (source.containsKey("ledStrobeColor") && source["ledStrobeColor"] != conf.ledStrobeColor) {
+    if (!source["ledStrobeColor"].isNull() && source["ledStrobeColor"] != conf.ledStrobeColor) {
         conf.ledStrobeColor = source["ledStrobeColor"];
         modified = true;
     }
-    if (source.containsKey("ledManualOverride") && source["ledManualOverride"] != conf.ledManualOverride) {
+    if (!source["ledManualOverride"].isNull() && source["ledManualOverride"] != conf.ledManualOverride) {
         conf.ledManualOverride = source["ledManualOverride"];
         modified = true;
     }
-    if (source.containsKey("opMode") && source["opMode"] != conf.operationMode) {
+    if (!source["opMode"].isNull() && source["opMode"] != conf.operationMode) {
         conf.operationMode = source["opMode"];
         modified = true;
     }
-    if (source.containsKey("tracksEnabled") && source["tracksEnabled"] != conf.tracksEnabled) {
+    if (!source["tracksEnabled"].isNull() && source["tracksEnabled"] != conf.tracksEnabled) {
         conf.tracksEnabled = source["tracksEnabled"];
         modified = true;
     }
-    if (source.containsKey("selectedTrackId") && source["selectedTrackId"] != conf.selectedTrackId) {
+    if (!source["selectedTrackId"].isNull() && source["selectedTrackId"] != conf.selectedTrackId) {
         conf.selectedTrackId = source["selectedTrackId"];
         modified = true;
     }
-    if (source.containsKey("gateLEDsEnabled") && source["gateLEDsEnabled"] != conf.gateLEDsEnabled) {
+    if (!source["gateLEDsEnabled"].isNull() && source["gateLEDsEnabled"] != conf.gateLEDsEnabled) {
         conf.gateLEDsEnabled = source["gateLEDsEnabled"];
         modified = true;
     }
-    if (source.containsKey("webhookRaceStart") && source["webhookRaceStart"] != conf.webhookRaceStart) {
+    if (!source["webhookRaceStart"].isNull() && source["webhookRaceStart"] != conf.webhookRaceStart) {
         conf.webhookRaceStart = source["webhookRaceStart"];
         modified = true;
     }
-    if (source.containsKey("webhookRaceStop") && source["webhookRaceStop"] != conf.webhookRaceStop) {
+    if (!source["webhookRaceStop"].isNull() && source["webhookRaceStop"] != conf.webhookRaceStop) {
         conf.webhookRaceStop = source["webhookRaceStop"];
         modified = true;
     }
-    if (source.containsKey("webhookLap") && source["webhookLap"] != conf.webhookLap) {
+    if (!source["webhookLap"].isNull() && source["webhookLap"] != conf.webhookLap) {
         conf.webhookLap = source["webhookLap"];
         modified = true;
     }
     // Webhook IPs and enabled state
-    if (source.containsKey("webhooksEnabled") && source["webhooksEnabled"] != conf.webhooksEnabled) {
+    if (!source["webhooksEnabled"].isNull() && source["webhooksEnabled"] != conf.webhooksEnabled) {
         conf.webhooksEnabled = source["webhooksEnabled"];
         modified = true;
     }
-    if (source.containsKey("webhookIPs")) {
+    if (!source["webhookIPs"].isNull()) {
         JsonArray webhookArray = source["webhookIPs"].as<JsonArray>();
 
         bool changed = false;
@@ -570,72 +680,72 @@ void Config::fromJson(JsonObject source) {
         }
     }
 
-    if (source.containsKey("name")) {
+    if (!source["name"].isNull()) {
         const char* v = source["name"] | "";
         if (strcmp(v, conf.pilotName) != 0) {
             strlcpy(conf.pilotName, v, sizeof(conf.pilotName));
             modified = true;
         }
     }
-    if (source.containsKey("pilotCallsign") && source["pilotCallsign"] != conf.pilotCallsign) {
+    if (!source["pilotCallsign"].isNull() && source["pilotCallsign"] != conf.pilotCallsign) {
         strlcpy(conf.pilotCallsign, source["pilotCallsign"] | "", sizeof(conf.pilotCallsign));
         modified = true;
     }
-    if (source.containsKey("pilotPhonetic") && source["pilotPhonetic"] != conf.pilotPhonetic) {
+    if (!source["pilotPhonetic"].isNull() && source["pilotPhonetic"] != conf.pilotPhonetic) {
         strlcpy(conf.pilotPhonetic, source["pilotPhonetic"] | "", sizeof(conf.pilotPhonetic));
         modified = true;
     }
-    if (source.containsKey("pilotColor") && source["pilotColor"] != conf.pilotColor) {
+    if (!source["pilotColor"].isNull() && source["pilotColor"] != conf.pilotColor) {
         conf.pilotColor = source["pilotColor"];
         modified = true;
     }
-    if (source.containsKey("theme") && source["theme"] != conf.theme) {
+    if (!source["theme"].isNull() && source["theme"] != conf.theme) {
         strlcpy(conf.theme, source["theme"] | "oceanic", sizeof(conf.theme));
         modified = true;
     }
-    if (source.containsKey("selectedVoice") && source["selectedVoice"] != conf.selectedVoice) {
+    if (!source["selectedVoice"].isNull() && source["selectedVoice"] != conf.selectedVoice) {
         strlcpy(conf.selectedVoice, source["selectedVoice"] | "default", sizeof(conf.selectedVoice));
         modified = true;
     }
-    if (source.containsKey("lapFormat") && source["lapFormat"] != conf.lapFormat) {
+    if (!source["lapFormat"].isNull() && source["lapFormat"] != conf.lapFormat) {
         strlcpy(conf.lapFormat, source["lapFormat"] | "full", sizeof(conf.lapFormat));
         modified = true;
     }
-    if (source.containsKey("ssid")) {
+    if (!source["ssid"].isNull()) {
         const char* v = source["ssid"] | "";
         if (strcmp(v, conf.ssid) != 0) {
             strlcpy(conf.ssid, v, sizeof(conf.ssid));
             modified = true;
         }
     }
-    if (source.containsKey("pwd")) {
+    if (!source["pwd"].isNull()) {
         const char* v = source["pwd"] | "";
         if (strcmp(v, conf.password) != 0) {
             strlcpy(conf.password, v, sizeof(conf.password));
             modified = true;
         }
     }
-    if (source.containsKey("batteryType") && source["batteryType"] != conf.batteryType) {
+    if (!source["batteryType"].isNull() && source["batteryType"] != conf.batteryType) {
         conf.batteryType = source["batteryType"];
         modified = true;
     }
-    if (source.containsKey("batteryCells") && source["batteryCells"] != conf.batteryCells) {
+    if (!source["batteryCells"].isNull() && source["batteryCells"] != conf.batteryCells) {
         conf.batteryCells = source["batteryCells"];
         modified = true;
     }
-    if (source.containsKey("lowBatteryAlarmPerCell")) {
+    if (!source["lowBatteryAlarmPerCell"].isNull()) {
         float v = source["lowBatteryAlarmPerCell"].as<float>();
         if (conf.lowBatteryAlarmPerCell != v) {
             conf.lowBatteryAlarmPerCell = v;
             modified = true;
         }
     }
-    if (source.containsKey("batteryAlarmEnabled") && source["batteryAlarmEnabled"] != conf.batteryAlarmEnabled) {
+    if (!source["batteryAlarmEnabled"].isNull() && source["batteryAlarmEnabled"] != conf.batteryAlarmEnabled) {
         conf.batteryAlarmEnabled = source["batteryAlarmEnabled"];
         modified = true;
     }
-    if (source.containsKey("batteryVoltageDivider")) {
-        float v = source["batteryVoltageDivider"].as<float>();
+    if (!source["batteryVoltageDivider"].isNull()) {
+        float v = sanitizeBatteryDivider(source["batteryVoltageDivider"].as<float>());
         if (conf.batteryVoltageDivider != v) {
             conf.batteryVoltageDivider = v;
             modified = true;
@@ -643,7 +753,7 @@ void Config::fromJson(JsonObject source) {
     }
     
     // Beep volume
-    if (source.containsKey("beepVolume") && source["beepVolume"] != conf.beepVolume) {
+    if (!source["beepVolume"].isNull() && source["beepVolume"] != conf.beepVolume) {
         uint8_t vol = source["beepVolume"].as<uint8_t>();
         if (vol <= 100) {
             conf.beepVolume = vol;
@@ -652,7 +762,7 @@ void Config::fromJson(JsonObject source) {
     }
     
     // Race sync settings
-    if (source.containsKey("timerNumber") && source["timerNumber"] != conf.timerNumber) {
+    if (!source["timerNumber"].isNull() && source["timerNumber"] != conf.timerNumber) {
         uint8_t num = source["timerNumber"].as<uint8_t>();
         DEBUG("fromJson: timerNumber changing from %d to %d\n", conf.timerNumber, num);
         if (num <= 8) {
@@ -660,14 +770,14 @@ void Config::fromJson(JsonObject source) {
             modified = true;
         }
     }
-    if (source.containsKey("raceSyncMode") && source["raceSyncMode"] != conf.raceSyncMode) {
+    if (!source["raceSyncMode"].isNull() && source["raceSyncMode"] != conf.raceSyncMode) {
         uint8_t mode = source["raceSyncMode"].as<uint8_t>();
         if (mode <= 2) {
             conf.raceSyncMode = mode;
             modified = true;
         }
     }
-    if (source.containsKey("syncedTimers")) {
+    if (!source["syncedTimers"].isNull()) {
         JsonArray syncArray = source["syncedTimers"].as<JsonArray>();
         
         bool changed = false;
@@ -702,7 +812,7 @@ void Config::fromJson(JsonObject source) {
             modified = true;
         }
     }
-    if (source.containsKey("masterHostname")) {
+    if (!source["masterHostname"].isNull()) {
         const char* hostname = source["masterHostname"] | "";
         if (strcmp(hostname, conf.masterHostname) != 0) {
             strlcpy(conf.masterHostname, hostname, sizeof(conf.masterHostname));
@@ -710,19 +820,19 @@ void Config::fromJson(JsonObject source) {
         }
     }
     // Auto threshold settings
-    if (source.containsKey("autoThresholdEnabled") && source["autoThresholdEnabled"] != conf.autoThresholdEnabled) {
+    if (!source["autoThresholdEnabled"].isNull() && source["autoThresholdEnabled"] != conf.autoThresholdEnabled) {
         uint8_t val = source["autoThresholdEnabled"].as<uint8_t>();
         if (val <= 1) {
             conf.autoThresholdEnabled = val;
             modified = true;
         }
     }
-    if (source.containsKey("autoThresholdOffset") && source["autoThresholdOffset"] != conf.autoThresholdOffset) {
+    if (!source["autoThresholdOffset"].isNull() && source["autoThresholdOffset"] != conf.autoThresholdOffset) {
         conf.autoThresholdOffset = source["autoThresholdOffset"].as<uint8_t>();
         modified = true;
     }
     // Receiver radio
-    if (source.containsKey("receiverRadio") && source["receiverRadio"] != conf.receiverRadio) {
+    if (!source["receiverRadio"].isNull() && source["receiverRadio"] != conf.receiverRadio) {
         uint8_t val = source["receiverRadio"].as<uint8_t>();
         if (val <= 1) {
             conf.receiverRadio = val;
@@ -730,41 +840,41 @@ void Config::fromJson(JsonObject source) {
         }
     }
     // Novacore filter config
-    if (source.containsKey("novaFilterKalman") && source["novaFilterKalman"] != conf.novaFilterKalman) {
+    if (!source["novaFilterKalman"].isNull() && source["novaFilterKalman"] != conf.novaFilterKalman) {
         conf.novaFilterKalman = source["novaFilterKalman"].as<uint8_t>() ? 1 : 0;
         modified = true;
     }
-    if (source.containsKey("novaFilterMedian") && source["novaFilterMedian"] != conf.novaFilterMedian) {
+    if (!source["novaFilterMedian"].isNull() && source["novaFilterMedian"] != conf.novaFilterMedian) {
         conf.novaFilterMedian = source["novaFilterMedian"].as<uint8_t>() ? 1 : 0;
         modified = true;
     }
-    if (source.containsKey("novaFilterMA") && source["novaFilterMA"] != conf.novaFilterMA) {
+    if (!source["novaFilterMA"].isNull() && source["novaFilterMA"] != conf.novaFilterMA) {
         conf.novaFilterMA = source["novaFilterMA"].as<uint8_t>() ? 1 : 0;
         modified = true;
     }
-    if (source.containsKey("novaFilterEMA") && source["novaFilterEMA"] != conf.novaFilterEMA) {
+    if (!source["novaFilterEMA"].isNull() && source["novaFilterEMA"] != conf.novaFilterEMA) {
         conf.novaFilterEMA = source["novaFilterEMA"].as<uint8_t>() ? 1 : 0;
         modified = true;
     }
-    if (source.containsKey("novaFilterStepLimiter") && source["novaFilterStepLimiter"] != conf.novaFilterStepLimiter) {
+    if (!source["novaFilterStepLimiter"].isNull() && source["novaFilterStepLimiter"] != conf.novaFilterStepLimiter) {
         conf.novaFilterStepLimiter = source["novaFilterStepLimiter"].as<uint8_t>() ? 1 : 0;
         modified = true;
     }
-    if (source.containsKey("novaKalmanQ") && source["novaKalmanQ"] != conf.novaKalmanQ) {
+    if (!source["novaKalmanQ"].isNull() && source["novaKalmanQ"] != conf.novaKalmanQ) {
         uint16_t val = source["novaKalmanQ"].as<uint16_t>();
         if (val >= 100 && val <= 1500) {
             conf.novaKalmanQ = val;
             modified = true;
         }
     }
-    if (source.containsKey("novaEmaAlpha") && source["novaEmaAlpha"] != conf.novaEmaAlpha) {
+    if (!source["novaEmaAlpha"].isNull() && source["novaEmaAlpha"] != conf.novaEmaAlpha) {
         uint8_t val = source["novaEmaAlpha"].as<uint8_t>();
         if (val >= 5 && val <= 80) {
             conf.novaEmaAlpha = val;
             modified = true;
         }
     }
-    if (source.containsKey("novaStepMax") && source["novaStepMax"] != conf.novaStepMax) {
+    if (!source["novaStepMax"].isNull() && source["novaStepMax"] != conf.novaStepMax) {
         uint8_t val = source["novaStepMax"].as<uint8_t>();
         if (val >= 5 && val <= 50) {
             conf.novaStepMax = val;
@@ -772,7 +882,7 @@ void Config::fromJson(JsonObject source) {
         }
     }
     // Speaker output
-    if (source.containsKey("speakerEnabled") && source["speakerEnabled"] != conf.speakerEnabled) {
+    if (!source["speakerEnabled"].isNull() && source["speakerEnabled"] != conf.speakerEnabled) {
         uint8_t val = source["speakerEnabled"].as<uint8_t>();
         if (val <= 1) {
             conf.speakerEnabled = val;
@@ -780,21 +890,21 @@ void Config::fromJson(JsonObject source) {
         }
     }
     // RotorHazard integration
-    if (source.containsKey("rhEnabled") && source["rhEnabled"] != conf.rhEnabled) {
+    if (!source["rhEnabled"].isNull() && source["rhEnabled"] != conf.rhEnabled) {
         uint8_t val = source["rhEnabled"].as<uint8_t>();
         if (val <= 1) {
             conf.rhEnabled = val;
             modified = true;
         }
     }
-    if (source.containsKey("rhHostIP")) {
+    if (!source["rhHostIP"].isNull()) {
         const char* v = source["rhHostIP"] | "";
         if (strcmp(v, conf.rhHostIP) != 0) {
             strlcpy(conf.rhHostIP, v, sizeof(conf.rhHostIP));
             modified = true;
         }
     }
-    if (source.containsKey("rhNodeIndex") && source["rhNodeIndex"] != conf.rhNodeIndex) {
+    if (!source["rhNodeIndex"].isNull() && source["rhNodeIndex"] != conf.rhNodeIndex) {
         uint8_t val = source["rhNodeIndex"].as<uint8_t>();
         if (val <= 7) {
             conf.rhNodeIndex = val;
@@ -802,21 +912,21 @@ void Config::fromJson(JsonObject source) {
         }
     }
     // Split time gate config
-    if (source.containsKey("splitGateNumber") && source["splitGateNumber"] != conf.splitGateNumber) {
+    if (!source["splitGateNumber"].isNull() && source["splitGateNumber"] != conf.splitGateNumber) {
         uint8_t val = source["splitGateNumber"].as<uint8_t>();
         if (val <= MAX_SPLIT_GATES) {
             conf.splitGateNumber = val;
             modified = true;
         }
     }
-    if (source.containsKey("splitMasterHostname")) {
+    if (!source["splitMasterHostname"].isNull()) {
         const char* v = source["splitMasterHostname"] | "";
         if (strcmp(v, conf.splitMasterHostname) != 0) {
             strlcpy(conf.splitMasterHostname, v, sizeof(conf.splitMasterHostname));
             modified = true;
         }
     }
-    if (source.containsKey("splitGates")) {
+    if (!source["splitGates"].isNull()) {
         JsonArray gateArray = source["splitGates"].as<JsonArray>();
         memset(conf.splitGates, 0, sizeof(conf.splitGates));
         memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
@@ -832,6 +942,58 @@ void Config::fromJson(JsonObject source) {
             conf.splitGateCount++;
         }
         modified = true;
+    }
+    if (!source["elrsBackpackEspnow"].isNull() && source["elrsBackpackEspnow"] != conf.elrsBackpackEspnow) {
+        uint8_t val = source["elrsBackpackEspnow"].as<uint8_t>();
+        if (val <= 1) {
+            conf.elrsBackpackEspnow = val;
+            modified = true;
+        }
+    }
+    if (!source["elrsBackpackBindPhrase"].isNull()) {
+        const char* v = source["elrsBackpackBindPhrase"] | "";
+        char sanitized[33];
+        size_t j = 0;
+        for (size_t i = 0; v[i] != '\0' && j < 32; i++) {
+            if (v[i] != '\r' && v[i] != '\n') {
+                sanitized[j++] = v[i];
+            }
+        }
+        sanitized[j] = '\0';
+        if (strcmp(sanitized, conf.elrsBackpackBindPhrase) != 0) {
+            strlcpy(conf.elrsBackpackBindPhrase, sanitized, sizeof(conf.elrsBackpackBindPhrase));
+            modified = true;
+        }
+    }
+    if (!source["elrsOsdLapRow"].isNull()) {
+        uint8_t val = source["elrsOsdLapRow"].as<uint8_t>();
+        if (val <= 18 && val != conf.elrsOsdLapRow) {
+            conf.elrsOsdLapRow = val;
+            modified = true;
+        }
+    }
+    if (!source["elrsOsdLapCol"].isNull()) {
+        uint8_t val = source["elrsOsdLapCol"].as<uint8_t>();
+        if (val <= 49 || val == ELRS_OSD_LAP_COL_AUTO) {
+            if (val != conf.elrsOsdLapCol) {
+                conf.elrsOsdLapCol = val;
+                modified = true;
+            }
+        }
+    }
+    if (!source["elrsOsdClearOnStop"].isNull() && source["elrsOsdClearOnStop"] != conf.elrsOsdClearOnStop) {
+        uint8_t v = source["elrsOsdClearOnStop"].as<uint8_t>();
+        if (v <= 1) {
+            conf.elrsOsdClearOnStop = v;
+            modified = true;
+        }
+    }
+    if (!source["elrsOsdPlaybackLaps"].isNull() && source["elrsOsdPlaybackLaps"] != conf.elrsOsdPlaybackLaps) {
+        uint8_t v = source["elrsOsdPlaybackLaps"].as<uint8_t>();
+        if (v <= 1) {
+            conf.elrsOsdPlaybackLaps = v;
+            modified = true;
+        }
     }
 }
 
@@ -947,6 +1109,10 @@ uint8_t Config::getWebhookLap() {
     return conf.webhookLap;
 }
 
+char* Config::getPilotName() {
+    return conf.pilotName;
+}
+
 char* Config::getPilotCallsign() {
     return conf.pilotCallsign;
 }
@@ -969,6 +1135,38 @@ char* Config::getSelectedVoice() {
 
 char* Config::getLapFormat() {
     return conf.lapFormat;
+}
+
+// Band/channel getters and setters
+uint8_t Config::getBandIndex() {
+    return conf.bandIndex;
+}
+
+uint8_t Config::getChannelIndex() {
+    return conf.channelIndex;
+}
+
+void Config::setBandIndex(uint8_t idx) {
+    if (conf.bandIndex != idx) {
+        conf.bandIndex = idx;
+        modified = true;
+    }
+}
+
+void Config::setChannelIndex(uint8_t idx) {
+    if (conf.channelIndex != idx) {
+        conf.channelIndex = idx;
+        modified = true;
+    }
+}
+
+extern const uint16_t freqLookup[][8];
+
+uint16_t Config::getFrequencyForBandChannel(uint8_t bandIdx, uint8_t channelIdx) {
+    if (bandIdx < 22 && channelIdx < 8) {
+        return freqLookup[bandIdx][channelIdx];
+    }
+    return 0;
 }
 
 // Setters for RotorHazard node mode
@@ -1189,6 +1387,7 @@ float Config::getBatteryVoltageDivider() {
 }
 
 void Config::setBatteryVoltageDivider(float ratio) {
+    ratio = sanitizeBatteryDivider(ratio);
     if (conf.batteryVoltageDivider != ratio) {
         conf.batteryVoltageDivider = ratio;
         modified = true;
@@ -1446,6 +1645,58 @@ void Config::setSplitGateDistance(uint8_t index, float distance) {
     }
 }
 
+uint8_t Config::getElrsBackpackEspnow() {
+    return (conf.elrsBackpackEspnow == 1) ? 1u : 0u;
+}
+void Config::setElrsBackpackEspnow(uint8_t enabled) {
+    const uint8_t v = (enabled == 1) ? 1u : 0u;
+    if (conf.elrsBackpackEspnow != v) {
+        conf.elrsBackpackEspnow = v;
+        modified = true;
+    }
+}
+char* Config::getElrsBackpackBindPhrase() { return conf.elrsBackpackBindPhrase; }
+void Config::setElrsBackpackBindPhrase(const char* phrase) {
+    if (!phrase) phrase = "";
+    if (strcmp(phrase, conf.elrsBackpackBindPhrase) != 0) {
+        strlcpy(conf.elrsBackpackBindPhrase, phrase, sizeof(conf.elrsBackpackBindPhrase));
+        modified = true;
+    }
+}
+uint8_t Config::getElrsOsdLapRow() {
+    return (conf.elrsOsdLapRow <= 18) ? conf.elrsOsdLapRow : 5;
+}
+void Config::setElrsOsdLapRow(uint8_t row) {
+    if (row <= 18 && conf.elrsOsdLapRow != row) {
+        conf.elrsOsdLapRow = row;
+        modified = true;
+    }
+}
+uint8_t Config::getElrsOsdLapCol() {
+    if (conf.elrsOsdLapCol == ELRS_OSD_LAP_COL_AUTO || conf.elrsOsdLapCol <= 49) return conf.elrsOsdLapCol;
+    return ELRS_OSD_LAP_COL_AUTO;
+}
+void Config::setElrsOsdLapCol(uint8_t col) {
+    if ((col <= 49 || col == ELRS_OSD_LAP_COL_AUTO) && conf.elrsOsdLapCol != col) {
+        conf.elrsOsdLapCol = col;
+        modified = true;
+    }
+}
+uint8_t Config::getElrsOsdClearOnStop() { return conf.elrsOsdClearOnStop <= 1 ? conf.elrsOsdClearOnStop : 0; }
+void Config::setElrsOsdClearOnStop(uint8_t v) {
+    if (v <= 1 && conf.elrsOsdClearOnStop != v) {
+        conf.elrsOsdClearOnStop = v;
+        modified = true;
+    }
+}
+uint8_t Config::getElrsOsdPlaybackLaps() { return conf.elrsOsdPlaybackLaps <= 1 ? conf.elrsOsdPlaybackLaps : 0; }
+void Config::setElrsOsdPlaybackLaps(uint8_t v) {
+    if (v <= 1 && conf.elrsOsdPlaybackLaps != v) {
+        conf.elrsOsdPlaybackLaps = v;
+        modified = true;
+    }
+}
+
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -1517,12 +1768,18 @@ void Config::setDefaults(void) {
     memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
     conf.rhNodeIndex = 0;            // Seat 0 by default
     // Split time gate defaults
-    conf.splitGateNumber = 0;        // Not a split gate
+    conf.splitGateNumber = 0;
     memset(conf.splitMasterHostname, 0, sizeof(conf.splitMasterHostname));
     memset(conf.splitGates, 0, sizeof(conf.splitGates));
     conf.splitGateCount = 0;
     memset(conf.splitGateNumbers, 0, sizeof(conf.splitGateNumbers));
     memset(conf.splitGateDistances, 0, sizeof(conf.splitGateDistances));
+    conf.elrsBackpackEspnow = 0;
+    memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
+    conf.elrsOsdLapRow = 5;
+    conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+    conf.elrsOsdClearOnStop = 0;
+    conf.elrsOsdPlaybackLaps = 0;
     modified = true;
     write();
 }
