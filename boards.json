@@ -1,19 +1,24 @@
 {
   "boards": [
     {
+      "value": "fpvgateaio",
+      "label": "FPVGate AIO - Recommended",
+      "expert_mode": 0
+    },
+    {
       "value": "esp32s3",
-      "label": "ESP32-S3 DevKitC-1 (8MB Flash) - Recommended",
+      "label": "ESP32-S3 DevKitC-1 (8MB Flash)",
+      "expert_mode": 0
+    },
+    {
+      "value": "seeedxiaos3",
+      "label": "Seeed Studio XIAO ESP32S3 (8MB)",
       "expert_mode": 0
     },
     {
       "value": "esp32s3supermini",
       "label": "ESP32-S3 Super Mini (4MB Flash)",
       "expert_mode": 1
-    },
-    {
-      "value": "seeedxiaos3",
-      "label": "Seeed Studio XIAO ESP32S3 (8MB)",
-      "expert_mode": 0
     },
     {
       "value": "lilygo",
@@ -23,11 +28,6 @@
     {
       "value": "wavesharelcd2",
       "label": "Waveshare ESP32-S3-LCD-2 (16MB Flash)",
-      "expert_mode": 1
-    },
-    {
-      "value": "fpvgateaiov4",
-      "label": "FPVGate AIO V4 (8MB) - Coming Soon"
       "expert_mode": 1
     },
     {
