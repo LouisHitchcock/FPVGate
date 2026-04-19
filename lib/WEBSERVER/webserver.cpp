@@ -9,7 +9,6 @@
 #include <HTTPClient.h>
 
 #include "debug.h"
-#include "elrs_backpack_espnow.h"
 
 #ifdef HAS_RGB_LED
 #include "rgbled.h"
@@ -42,20 +41,11 @@ static const char *wifi_ap_password = "fpvgate1";
 static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
-/** When ELRS backpack ESP-NOW is enabled, use AP+STA so ESP-NOW can share the radio with Wi-Fi. */
-static wifi_mode_t effectiveWifiModeForRole(bool primaryAp, Config* cfg) {
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    if (cfg && cfg->getElrsBackpackEspnow()) {
-        return WIFI_AP_STA;
-    }
-#else
-    (void)cfg;
-#endif
+static wifi_mode_t effectiveWifiModeForRole(bool primaryAp, Config* /*cfg*/) {
     return primaryAp ? WIFI_AP : WIFI_STA;
 }
 
 void Webserver::requestWifiStackReinit() {
-    elrsBackpackEspnowStopIfRunning();
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true, true);
     wifiMode = WIFI_OFF;
@@ -65,7 +55,7 @@ void Webserver::requestWifiStackReinit() {
         changeMode = WIFI_STA;
     }
     changeTimeMs = millis() - WIFI_RECONNECT_TIMEOUT_MS - 1;
-    DEBUG("WiFi stack reinit requested (ELRS backpack / mode)\n");
+    DEBUG("WiFi stack reinit requested\n");
 }
 
 void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr) {
@@ -271,9 +261,6 @@ void Webserver::triggerStart() {
 void Webserver::triggerStop() {
     sendSyncCommand(conf, "/timer/stop");
     timer->stop();
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    elrsBackpackEspnowOnRaceStop(conf);
-#endif
     pendingRaceState = "stopped";
 }
 
@@ -324,9 +311,6 @@ void Webserver::update(uint32_t currentTimeMs) {
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    elrsBackpackEspnowPoll(conf, currentTimeMs);
-#endif
     // Process deferred race state events from LCD triggers (must run on core 0)
     if (pendingRaceState) {
         const char* state = (const char*)pendingRaceState;
@@ -410,16 +394,10 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             case WIFI_AP:
                 DEBUG("Changing to WiFi AP mode\n");
 
-                elrsBackpackEspnowStopIfRunning();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                /* Sets MACs inside: WiFi.mode(WIFI_AP_STA) + disconnect — not after WIFI_OFF (0x3001 NOT_INIT). */
-                elrsBackpackEspnowPrepareWifiMacForElrs(conf);
-#else
                 WiFi.mode(WIFI_OFF);
                 delay(30);
-#endif
 
                 wifiMode = WIFI_AP;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
@@ -434,21 +412,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 DEBUG("Starting WiFi AP: %s with password: %s\n", wifi_ap_ssid.c_str(), wifi_ap_password);
                 
                 // Start AP with max 4 connections to limit power draw.
-                // When ELRS backpack ESP-NOW is on, use ch 1 — same as ExpressLRS SetSoftMACAddress() so
-                // goggles ACK; otherwise ch 6 is a reasonable default for AP-only.
-                {
-                    uint8_t ap_ch = 6;
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                    if (conf && conf->getElrsBackpackEspnow()) {
-                        ap_ch = kElrsBackpackEspnowWifiChannel;
-                    }
-#endif
-                    WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, ap_ch, 0, 4);
-                }
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                /* softAP() / driver can revert custom MACs set in prepare; VRx accepts only source MAC == bind UID. */
-                elrsBackpackEspnowReassertCustomMacsForElrs(conf);
-#endif
+                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, 6, 0, 4);
 
 #ifdef SEEED_XIAO_ESP32S3
                 // Disable WiFi power saving for faster responsiveness on XIAO
@@ -462,31 +426,21 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 esp_wifi_set_max_tx_power(44); // 11dBm in 0.25dBm units (44 * 0.25 = 11dBm)
                 
                 DEBUG("WiFi AP started. SSID: %s, Power: 11dBm, Max clients: 4\n", WiFi.softAPSSID().c_str());
-                elrsBackpackEspnowStartIfEnabled(conf);
                 startServices();
                 buz->beep(1000);
                 led->on(1000);
                 break;
             case WIFI_STA:
                 DEBUG("Connecting to WiFi network\n");
-                elrsBackpackEspnowStopIfRunning();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                elrsBackpackEspnowPrepareWifiMacForElrs(conf);
-#else
                 WiFi.mode(WIFI_OFF);
                 delay(30);
-#endif
                 wifiMode = WIFI_STA;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
                 WiFi.mode(effectiveWifiModeForRole(false, conf));
                 changeTimeMs = currentTimeMs;
                 WiFi.begin(conf->getSsid(), conf->getPassword());
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                elrsBackpackEspnowReassertCustomMacsForElrs(conf);
-#endif
-                elrsBackpackEspnowStartIfEnabled(conf);
                 startServices();
                 led->blink(200);
             default:
@@ -824,9 +778,6 @@ EEPROM:\n\
             transportMgr->broadcastRaceStateEvent("stopped");
         }
         setPendingLcdEvent(PendingLcdEvent::ShowFinish);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        elrsBackpackEspnowOnRaceStop(conf);
-#endif
 #ifdef HAS_I2S_AUDIO
         if (g_audioAnnouncer) {
             g_audioAnnouncer->announceRaceStop();
@@ -903,9 +854,6 @@ EEPROM:\n\
             if (transportMgr) {
                 transportMgr->broadcastLapEvent(lapTimeMs);
             }
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-            elrsBackpackEspnowOnPlaybackLap(conf, lapTimeMs);
-#endif
 #ifdef HAS_RGB_LED
             if (g_rgbLed) {
                 g_rgbLed->flashLap();
@@ -1065,25 +1013,7 @@ EEPROM:\n\
         serializeJsonPretty(jsonObj, DEBUG_OUT);
         DEBUG("\n");
 #endif
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        uint8_t prev_elrs_backpack = conf->getElrsBackpackEspnow();
-        char prev_elrs_bind[33];
-        strlcpy(prev_elrs_bind, conf->getElrsBackpackBindPhrase(), sizeof(prev_elrs_bind));
-#endif
         conf->fromJson(jsonObj);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        bool reboot_to_enable_elrs_espnow = false;
-        if (!jsonObj["elrsBackpackEspnow"].isNull() && prev_elrs_backpack != conf->getElrsBackpackEspnow()) {
-            if (conf->getElrsBackpackEspnow() == 1 && prev_elrs_backpack == 0) {
-                reboot_to_enable_elrs_espnow = true;
-            } else {
-                requestWifiStackReinit();
-            }
-        } else if (!jsonObj["elrsBackpackBindPhrase"].isNull() &&
-                   strcmp(prev_elrs_bind, conf->getElrsBackpackBindPhrase()) != 0) {
-            requestWifiStackReinit();
-        }
-#endif
         
         // Update battery monitor voltage divider if it changed
 #ifdef HAS_BATTERY_MONITOR
@@ -1091,17 +1021,6 @@ EEPROM:\n\
             float ratio = conf->getBatteryVoltageDivider();
             monitor->setVoltageDivider(ratio);
             DEBUG("Battery voltage divider updated to %.1f\n", ratio);
-        }
-#endif
-
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        if (reboot_to_enable_elrs_espnow) {
-            conf->write();
-            request->send(200, "application/json", "{\"status\":\"OK\",\"reboot\":true}");
-            led->on(200);
-            delay(200);
-            ESP.restart();
-            return;
         }
 #endif
         

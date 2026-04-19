@@ -241,9 +241,6 @@
 #define CONFIG_MAGIC (0b01U << 30)
 #define CONFIG_VERSION 19U
 
-/** Lap OSD column: use auto centering in firmware (HDZero-width heuristic). */
-#define ELRS_OSD_LAP_COL_AUTO 255U
-
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
 #define RACE_SYNC_MASTER 1
@@ -323,12 +320,11 @@ typedef struct {
     uint8_t rhEnabled;               // RH integration enabled (0=disabled, 1=enabled)
     char rhHostIP[32];               // RH server IP or hostname
     uint8_t rhNodeIndex;             // Node/seat index on RH (0-7)
-    uint8_t elrsBackpackEspnow;      // ELRS backpack via ESP-NOW (0=off, 1=on); AP+STA + ESP-NOW when enabled
-    char elrsBackpackBindPhrase[33]; // Same semantics as vrxc_elrs pilot attr comm_elrs; NUL-terminated, max 32 chars
-    uint8_t elrsOsdLapRow;           // MSP lap text row (e.g. HDZero 0–14)
-    uint8_t elrsOsdLapCol;           // 0–49 fixed column, or ELRS_OSD_LAP_COL_AUTO for centered text
-    uint8_t elrsOsdClearOnStop;      // 1 = send clear OSD MSP when race stops
-    uint8_t elrsOsdPlaybackLaps;     // 1 = send lap-line MSP for /timer/playbackLap
+    // Reserved slack where the ELRS Backpack fields used to live (kept to
+    // preserve EEPROM layout for already-deployed devices). Active ELRS
+    // development lives on the feature/ELRSBackpack branch; when it is
+    // merged back these bytes will be re-reintroduced as typed fields.
+    uint8_t _reservedELRS[38];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -468,19 +464,6 @@ class Config {
     void setRhHostIP(const char* ip);
     uint8_t getRhNodeIndex();
     void setRhNodeIndex(uint8_t index);
-    
-    uint8_t getElrsBackpackEspnow();
-    void setElrsBackpackEspnow(uint8_t enabled);
-    char* getElrsBackpackBindPhrase();
-    void setElrsBackpackBindPhrase(const char* phrase);
-    uint8_t getElrsOsdLapRow();
-    void setElrsOsdLapRow(uint8_t row);
-    uint8_t getElrsOsdLapCol();
-    void setElrsOsdLapCol(uint8_t col);
-    uint8_t getElrsOsdClearOnStop();
-    void setElrsOsdClearOnStop(uint8_t v);
-    uint8_t getElrsOsdPlaybackLaps();
-    void setElrsOsdPlaybackLaps(uint8_t v);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();

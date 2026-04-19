@@ -15,8 +15,7 @@
 #include "usb.h"
 #include "webhook.h"
 #include "rotorhazard.h"
-#include "elrs_backpack_espnow.h"
-// DISABLED FOR NOW: #include "nodemode.h"  // Uncomment to re-enable RotorHazard support
+// DISABLED FOR NOW: #include "nodemode.h"
 #include <ElegantOTA.h>
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -419,17 +418,7 @@ void setup() {
         g_lastKnownEnter = config.getEnterRssi();
         g_lastKnownExit = config.getExitRssi();
         g_lcdUi->setThresholdDisplay(g_lastKnownEnter, g_lastKnownExit);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        g_lcdUi->syncElrsLcdSettingsWidgets(config.getElrsBackpackEspnow(), config.getElrsOsdLapRow(),
-                                            config.getElrsOsdLapCol(), config.getElrsOsdClearOnStop(),
-                                            config.getElrsOsdPlaybackLaps(), config.getElrsBackpackBindPhrase());
-#endif
-        g_lcdUi->setStatusBarIndicators(ws.isLcdWifiIndicatorOn(),
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                                        config.getElrsBackpackEspnow() != 0);
-#else
-                                        false);
-#endif
+        g_lcdUi->setStatusBarIndicators(ws.isLcdWifiIndicatorOn());
     }
 #endif
     
@@ -548,12 +537,7 @@ void loop() {
             raceHistory.saveRace(s_pendingLcdRaceSave);
         }
         g_lcdUi->updateRSSI(timer.getRssi());
-        g_lcdUi->setStatusBarIndicators(ws.isLcdWifiIndicatorOn(),
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-                                        config.getElrsBackpackEspnow() != 0);
-#else
-                                        false);
-#endif
+        g_lcdUi->setStatusBarIndicators(ws.isLcdWifiIndicatorOn());
 
         // Update timers based on race state
         static bool wasRunning = false;
@@ -628,46 +612,6 @@ void loop() {
             ws.triggerClearLaps();
             g_lcdUi->clearLaps();
         }
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        {
-            ElrsLcdSettingsApply elrsAp{};
-            if (g_lcdUi->consumeElrsLcdSettingsApply(&elrsAp)) {
-                const uint8_t prevEsp = config.getElrsBackpackEspnow();
-                char prevBind[33];
-                strlcpy(prevBind, config.getElrsBackpackBindPhrase() ? config.getElrsBackpackBindPhrase() : "",
-                        sizeof(prevBind));
-                config.setElrsBackpackEspnow(elrsAp.backpackEspnow);
-                config.setElrsOsdLapRow(elrsAp.osdLapRow);
-                config.setElrsOsdLapCol(elrsAp.osdLapCol);
-                config.setElrsOsdClearOnStop(elrsAp.osdClearOnStop);
-                config.setElrsOsdPlaybackLaps(elrsAp.osdPlaybackLaps);
-                config.setElrsBackpackBindPhrase(elrsAp.bindPhrase);
-                config.write();
-                const bool elrsEspnowOrBindChanged =
-                    (prevEsp != elrsAp.backpackEspnow || strcmp(prevBind, elrsAp.bindPhrase) != 0);
-                /* Turning ESP-NOW on needs a full restart: soft WiFi reinit often leaves the radio/ESP-NOW
-                   stack in a bad state vs cold boot (AP+STA + esp_now_init). Disabling still uses reinit. */
-                const bool rebootToEnableElrsEspnow = (prevEsp == 0 && elrsAp.backpackEspnow == 1);
-                if (elrsEspnowOrBindChanged) {
-                    if (rebootToEnableElrsEspnow) {
-                        ws.triggerConfigUpdated();
-                        g_lcdUi->notifyElrsSettingsSaved();
-                        vTaskDelay(pdMS_TO_TICKS(150));
-                        ESP.restart();
-                    } else {
-                        ws.requestWifiStackReinit();
-                    }
-                }
-                if (!rebootToEnableElrsEspnow || !elrsEspnowOrBindChanged) {
-                    ws.triggerConfigUpdated();
-                    g_lcdUi->syncElrsLcdSettingsWidgets(config.getElrsBackpackEspnow(), config.getElrsOsdLapRow(),
-                                                        config.getElrsOsdLapCol(), config.getElrsOsdClearOnStop(),
-                                                        config.getElrsOsdPlaybackLaps(), config.getElrsBackpackBindPhrase());
-                    g_lcdUi->notifyElrsSettingsSaved();
-                }
-            }
-        }
-#endif
         // Sync display with web timer actions (countdown overlay, STOPPED overlay)
         auto lcdEv = ws.consumePendingLcdEvent();
         if (lcdEv == Webserver::PendingLcdEvent::Countdown) {
@@ -800,9 +744,6 @@ void loop() {
         if (ws.consumePendingLap(webLap)) {
             timer.addManualLap(webLap);  // Update LapTimer state
             g_lcdUi->addLap(webLap);     // Update LCD display
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-            elrsBackpackEspnowOnLap(&config, webLap, timer.getLapCount());
-#endif
         }
         if (ws.consumePendingClear()) {
             g_lcdUi->clearLaps();
@@ -814,9 +755,6 @@ void loop() {
     if (timer.isLapAvailable()) {
         uint32_t lapTime = timer.getLapTime();
         transportManager.broadcastLapEvent(lapTime);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        elrsBackpackEspnowOnLap(&config, lapTime, timer.getLapCount());
-#endif
 
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
         if (g_lcdUi) {

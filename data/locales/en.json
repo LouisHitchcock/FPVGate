@@ -160,7 +160,6 @@
             "led": "LED Setup",
             "wifi": "WiFi & Connection",
             "webhooks": "Webhooks",
-            "elrs_backpack": "ELRS Backpack",
             "system": "System Settings",
             "osd": "On Screen Displays",
             "diagnostics": "Diagnostics"
@@ -219,19 +218,6 @@
                 "webspeech": "Web Speech (Browser TTS)"
             },
             "examples": "Examples: \"Louis Lap 5, 12.34\" / \"Lap 5, 12.34\" / \"12.34\""
-        },
-        "elrs_backpack": {
-            "title": "ELRS Backpack",
-            "intro": "Send lap times and playback laps to HDZero-style goggles via ESP-NOW. Swipe past System on the device LCD for the same options.",
-            "espnow": "ELRS backpack (ESP-NOW + Wi-Fi):",
-            "bind_phrase": "Bind phrase:",
-            "bind_note": "Changing phrase disconnects Wi-Fi briefly.",
-            "osd_title": "Goggle OSD (lap line)",
-            "lap_row": "Lap text row (0–18):",
-            "center_col": "Center lap text horizontally:",
-            "fixed_col": "Fixed column (0–49):",
-            "clear_on_stop": "Clear goggle OSD when race stops:",
-            "playback": "Send playback laps to OSD:"
         },
         "pilot": {
             "title": "Pilot Info",

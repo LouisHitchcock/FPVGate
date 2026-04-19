@@ -1,4 +1,4 @@
-#include "fpv_lcd_ui.h"
+﻿#include "fpv_lcd_ui.h"
 #include "config.h"
 #include <cstdio>
 #include <cstring>
@@ -40,13 +40,7 @@ FpvLcdUI::FpvLcdUI()
       lap_count_label(nullptr), status_label(nullptr),
       battery_label(nullptr), battery_icon(nullptr),
       status_wifi_label(nullptr),
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-      status_elrs_label(nullptr),
-#endif
       _pendingWifiEnabled(false),
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-      _pendingElrsEnabled(false),
-#endif
       _statusBarDirty(true),
       race_time_label(nullptr), current_lap_label(nullptr),
       fastest_lap_label(nullptr), fastest_3_label(nullptr),
@@ -55,25 +49,6 @@ FpvLcdUI::FpvLcdUI()
       band_label(nullptr), channel_label(nullptr), freq_label(nullptr), 
       threshold_label(nullptr), threshold_enter_label(nullptr), threshold_exit_label(nullptr),
       brightness_slider(nullptr), brightness_label(nullptr),
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-      tab_elrs(nullptr),
-      elrs_backpack_switch(nullptr),
-      elrs_row_slider(nullptr),
-      elrs_row_label(nullptr),
-      elrs_auto_col_switch(nullptr),
-      elrs_col_slider(nullptr),
-      elrs_col_label(nullptr),
-      elrs_clear_osd_switch(nullptr),
-      elrs_playback_switch(nullptr),
-      elrs_save_btn(nullptr),
-      elrs_save_label(nullptr),
-      elrs_bind_textarea(nullptr),
-      elrs_keyboard(nullptr),
-      _elrsApplyRequested(false),
-      _elrsUiSyncing(false),
-      _elrsSaveFlashUntilMs(0),
-      _elrsSaveFlashShowingSaved(false),
-#endif
       lap_times_box(nullptr),
       countdown_overlay(nullptr), countdown_label(nullptr),
       _countdownActive(false), _countdownValue(10), _countdownStartTime(0), _lastBeepValue(-1), _countdownTriggersStart(true), _startingInFivePlayed(false),
@@ -268,7 +243,7 @@ void FpvLcdUI::prepareHardwareForDeepSleep() {
     if (!spiMutexTake(pdMS_TO_TICKS(500))) {
         return;
     }
-    // ST7789T3 (Sitronix DCS): DISPOFF then SLPIN — panel driver sleep, not just idle.
+    // ST7789T3 (Sitronix DCS): DISPOFF then SLPIN â€” panel driver sleep, not just idle.
     bus->sendCommand(0x28);  // DISPOFF
     delay(20);
     bus->sendCommand(0x10);  // SLPIN
@@ -326,7 +301,7 @@ void FpvLcdUI::pollPortraitAutoRotate() {
         return;
     }
 
-    // On Waveshare LCD-2, sensor Y aligns with screen left–right; X aligns with screen top–bottom.
+    // On Waveshare LCD-2, sensor Y aligns with screen leftâ€“right; X aligns with screen topâ€“bottom.
     // Require |ax| clearly larger than |ay| so small roll doesn't look like "flip".
     if (fabsf(ay) * 1.5f >= fabsf(ax)) {
         return;
@@ -398,9 +373,6 @@ void FpvLcdUI::uiTask(void* parameter) {
             ui->_requestShowFinish = false;
             ui->showFinish();
         }
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-        ui->processElrsSaveFlash();
-#endif
 
         lv_timer_handler();
 
@@ -540,20 +512,12 @@ void FpvLcdUI::createPersistentHeader(lv_obj_t* parent) {
     lv_obj_set_flex_align(right_cluster, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(right_cluster, 6, 0);
 
-    /* ASCII "WiFi" — reliable width in Montserrat; LV_SYMBOL_WIFI can be 0px without LV_USE_FONT_PLACEHOLDER */
+    /* ASCII "WiFi" â€” reliable width in Montserrat; LV_SYMBOL_WIFI can be 0px without LV_USE_FONT_PLACEHOLDER */
     status_wifi_label = lv_label_create(right_cluster);
     lv_label_set_text(status_wifi_label, "WiFi");
     lv_obj_set_style_text_font(status_wifi_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(status_wifi_label, lv_color_hex(0x666666), 0);
     lv_obj_set_style_bg_opa(status_wifi_label, LV_OPA_TRANSP, 0);
-
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    status_elrs_label = lv_label_create(right_cluster);
-    lv_label_set_text(status_elrs_label, "ELRS");
-    lv_obj_set_style_text_font(status_elrs_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(status_elrs_label, lv_color_hex(0x777777), 0);
-    lv_obj_set_style_bg_opa(status_elrs_label, LV_OPA_TRANSP, 0);
-#endif
 
     lv_obj_t* battery_wrap = lv_obj_create(right_cluster);
     lv_obj_set_size(battery_wrap, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -611,60 +575,42 @@ void FpvLcdUI::createUI() {
     // Optimize tabview animation for smoother/faster swiping
     lv_obj_set_style_anim_time(tabview, 200, 0);  // 200ms transition (default is 300ms)
 
-    // Create main swipe pages (Racing, Pilot, Calib, System, [ELRS])
+    // Create main swipe pages (Racing, Pilot, Calib, System)
     tab_racing = lv_tabview_add_tab(tabview, "");
     tab_pilot = lv_tabview_add_tab(tabview, "");
     tab_calib = lv_tabview_add_tab(tabview, "");
     tab_system = lv_tabview_add_tab(tabview, "");
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    tab_elrs = lv_tabview_add_tab(tabview, "");
-#endif
 
     // Style pages and disable horizontal scrolling
     lv_obj_set_style_bg_color(tab_racing, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_color(tab_pilot, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_color(tab_calib, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_color(tab_system, lv_color_hex(0x000000), 0);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_set_style_bg_color(tab_elrs, lv_color_hex(0x000000), 0);
-#endif
 
     lv_obj_set_size(tab_racing, lv_pct(100), lv_pct(100));
     lv_obj_set_size(tab_pilot, lv_pct(100), lv_pct(100));
     lv_obj_set_size(tab_calib, lv_pct(100), lv_pct(100));
     lv_obj_set_size(tab_system, lv_pct(100), lv_pct(100));
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_set_size(tab_elrs, lv_pct(100), lv_pct(100));
-#endif
     
     // Racing tab: allow all directions so gestures can be properly delegated
     lv_obj_set_scroll_dir(tab_racing, LV_DIR_ALL);
     lv_obj_set_scroll_dir(tab_pilot, LV_DIR_VER);
     lv_obj_set_scroll_dir(tab_calib, LV_DIR_VER);
     lv_obj_set_scroll_dir(tab_system, LV_DIR_VER);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_set_scroll_dir(tab_elrs, LV_DIR_VER);
-#endif
     
     // Remove ALL padding to use full screen height
     lv_obj_set_style_pad_all(tab_racing, 0, 0);
     lv_obj_set_style_pad_all(tab_pilot, 0, 0);
     lv_obj_set_style_pad_all(tab_calib, 0, 0);
     lv_obj_set_style_pad_all(tab_system, 0, 0);
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_set_style_pad_all(tab_elrs, 0, 0);
-#endif
     
     // Create content
     createRacingTab();
     createPilotTab();
     createCalibTab();
     createSystemTab();
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    createElrsTab();
-#endif
 
-    /* Zero-height tab button row still accepted clicks and blocked ELRS switches. Hide + non-clickable. */
+    /* Zero-height tab button row still accepted clicks and blocked inner switches. Hide + non-clickable. */
     {
         lv_obj_t* tv_btns = lv_tabview_get_tab_btns(tabview);
         if (tv_btns) {
@@ -1557,496 +1503,6 @@ bool FpvLcdUI::consumeDeepSleepRequest() {
 }
 #endif
 
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-
-static void elrs_copy_bind_from_ta(lv_obj_t* ta, char* out, size_t cap) {
-    if (!out || cap == 0) {
-        return;
-    }
-    out[0] = '\0';
-    if (!ta) {
-        return;
-    }
-    const char* t = lv_textarea_get_text(ta);
-    if (!t) {
-        return;
-    }
-    size_t j = 0;
-    for (size_t i = 0; t[i] != '\0' && j + 1 < cap; i++) {
-        if (t[i] != '\r' && t[i] != '\n') {
-            out[j++] = t[i];
-        }
-    }
-    out[j] = '\0';
-}
-
-/* If the pointer indev has begun scrolling a parent, lv_obj's RELEASED handler skips
- * toggling LV_STATE_CHECKED (lvgl src/core/lv_obj.c). That only affected the first ELRS
- * row in practice. PREPROCESS runs before the class handler: toggle here and send
- * VALUE_CHANGED so lv_switch updates the knob like the default path. */
-static void elrs_backpack_switch_scroll_safe_toggle(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_RELEASED) {
-        return;
-    }
-    lv_indev_t* indev = static_cast<lv_indev_t*>(lv_event_get_param(e));
-    if (!indev || lv_indev_get_scroll_obj(indev) == nullptr) {
-        return;
-    }
-    lv_obj_t* sw = lv_event_get_target(e);
-    if (!lv_obj_has_flag(sw, LV_OBJ_FLAG_CHECKABLE)) {
-        return;
-    }
-    if (!(lv_obj_get_state(sw) & LV_STATE_CHECKED)) {
-        lv_obj_add_state(sw, LV_STATE_CHECKED);
-    } else {
-        lv_obj_clear_state(sw, LV_STATE_CHECKED);
-    }
-    lv_event_send(sw, LV_EVENT_VALUE_CHANGED, nullptr);
-}
-
-void FpvLcdUI::createElrsTab() {
-    lv_obj_t* scr = tab_elrs;
-
-    lv_obj_t* title = lv_label_create(scr);
-    lv_label_set_text(title, "ELRS Backpack");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
-    lv_obj_set_pos(title, 10, 4);
-
-    lv_obj_t* en_box = lv_obj_create(scr);
-    lv_obj_set_size(en_box, 220, 44);
-    lv_obj_set_pos(en_box, 10, 28);
-    lv_obj_set_style_bg_color(en_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(en_box, 1, 0);
-    lv_obj_set_style_border_color(en_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(en_box, 6, 0);
-    lv_obj_clear_flag(en_box, LV_OBJ_FLAG_SCROLLABLE);
-    /* Padding area is not clickable: otherwise hits land on en_box and never reach the switch. */
-    lv_obj_clear_flag(en_box, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t* en_lbl = lv_label_create(en_box);
-    lv_label_set_text(en_lbl, "ESP-NOW + Wi-Fi");
-    lv_obj_set_style_text_color(en_lbl, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_set_style_text_font(en_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(en_lbl, 4, 10);
-    elrs_backpack_switch = lv_switch_create(en_box);
-    lv_obj_set_size(elrs_backpack_switch, 40, 22);
-    lv_obj_set_pos(elrs_backpack_switch, 168, 8);
-    /* anim_time 0: programmatic sync must match knob; theme default anim can desync CHECKED vs draw */
-    lv_obj_set_style_anim_time(elrs_backpack_switch, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(elrs_backpack_switch, LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_style_bg_color(elrs_backpack_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    /* Explicit off/on indicator colors (default theme can leave "off" looking like "on") */
-    lv_obj_set_style_bg_color(elrs_backpack_switch, lv_color_hex(0x333333), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(elrs_backpack_switch, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(elrs_backpack_switch, lv_color_hex(0x00aa66), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(elrs_backpack_switch, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_ext_click_area(elrs_backpack_switch, 12);
-    lv_obj_add_event_cb(elrs_backpack_switch, elrs_backpack_switch_scroll_safe_toggle,
-                        (lv_event_code_t)(LV_EVENT_RELEASED | LV_EVENT_PREPROCESS), nullptr);
-
-    lv_obj_t* bind_box = lv_obj_create(scr);
-    lv_obj_set_size(bind_box, 220, 64);
-    lv_obj_set_pos(bind_box, 10, 76);
-    lv_obj_set_style_bg_color(bind_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(bind_box, 1, 0);
-    lv_obj_set_style_border_color(bind_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(bind_box, 6, 0);
-    lv_obj_clear_flag(bind_box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* bp_lbl = lv_label_create(bind_box);
-    lv_label_set_text(bp_lbl, "Bind phrase");
-    lv_obj_set_style_text_color(bp_lbl, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_set_style_text_font(bp_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(bp_lbl, 4, 4);
-    elrs_bind_textarea = lv_textarea_create(bind_box);
-    lv_obj_set_size(elrs_bind_textarea, 200, 30);
-    lv_obj_set_pos(elrs_bind_textarea, 4, 22);
-    lv_textarea_set_one_line(elrs_bind_textarea, true);
-    lv_textarea_set_max_length(elrs_bind_textarea, 32);
-    lv_textarea_set_accepted_chars(elrs_bind_textarea,
-                                   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ");
-    lv_textarea_set_placeholder_text(elrs_bind_textarea, "Empty = callsign");
-    lv_obj_set_style_text_font(elrs_bind_textarea, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_set_style_text_color(elrs_bind_textarea, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_set_style_text_color(elrs_bind_textarea, lv_color_hex(0x888888), LV_PART_TEXTAREA_PLACEHOLDER);
-    lv_obj_set_style_bg_color(elrs_bind_textarea, lv_color_hex(0x2a2a2a), LV_PART_MAIN);
-    lv_obj_set_style_border_color(elrs_bind_textarea, lv_color_hex(0x555555), LV_PART_MAIN);
-    lv_obj_set_style_border_width(elrs_bind_textarea, 1, LV_PART_MAIN);
-    {
-        lv_obj_t* ta_lbl = lv_textarea_get_label(elrs_bind_textarea);
-        lv_obj_set_style_text_color(ta_lbl, lv_color_hex(0xffffff), LV_PART_MAIN);
-        lv_obj_set_style_text_font(ta_lbl, &lv_font_montserrat_12, LV_PART_MAIN);
-    }
-    lv_obj_set_style_bg_color(elrs_bind_textarea, lv_color_hex(0xffffff), LV_PART_CURSOR);
-    lv_obj_set_style_bg_opa(elrs_bind_textarea, LV_OPA_COVER, LV_PART_CURSOR);
-    lv_obj_add_event_cb(elrs_bind_textarea, elrsBindPhraseTaEvent, LV_EVENT_ALL, this);
-
-    elrs_keyboard = lv_keyboard_create(lv_layer_top());
-    lv_obj_set_size(elrs_keyboard, 240, 130);
-    lv_obj_align(elrs_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_flag(elrs_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_keyboard_set_mode(elrs_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_obj_set_style_bg_color(elrs_keyboard, lv_color_hex(0x252525), 0);
-    lv_obj_add_event_cb(elrs_keyboard, elrsKeyboardDismissEvent, LV_EVENT_READY, this);
-    lv_obj_add_event_cb(elrs_keyboard, elrsKeyboardDismissEvent, LV_EVENT_CANCEL, this);
-
-    lv_obj_t* row_box = lv_obj_create(scr);
-    lv_obj_set_size(row_box, 220, 52);
-    lv_obj_set_pos(row_box, 10, 146);
-    lv_obj_set_style_bg_color(row_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(row_box, 1, 0);
-    lv_obj_set_style_border_color(row_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(row_box, 6, 0);
-    lv_obj_clear_flag(row_box, LV_OBJ_FLAG_SCROLLABLE);
-    elrs_row_label = lv_label_create(row_box);
-    lv_label_set_text(elrs_row_label, "Lap row: 5");
-    lv_obj_set_style_text_color(elrs_row_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(elrs_row_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(elrs_row_label, 4, 4);
-    elrs_row_slider = lv_slider_create(row_box);
-    lv_obj_set_size(elrs_row_slider, 200, 10);
-    lv_obj_set_pos(elrs_row_slider, 6, 28);
-    lv_slider_set_range(elrs_row_slider, 0, 18);
-    lv_slider_set_value(elrs_row_slider, 5, LV_ANIM_OFF);
-    lv_obj_add_event_cb(elrs_row_slider, elrsRowSliderEvent, LV_EVENT_VALUE_CHANGED, this);
-
-    lv_obj_t* ac_box = lv_obj_create(scr);
-    lv_obj_set_size(ac_box, 220, 40);
-    lv_obj_set_pos(ac_box, 10, 202);
-    lv_obj_set_style_bg_color(ac_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(ac_box, 1, 0);
-    lv_obj_set_style_border_color(ac_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(ac_box, 6, 0);
-    lv_obj_clear_flag(ac_box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* ac_lbl = lv_label_create(ac_box);
-    lv_label_set_text(ac_lbl, "Center lap text");
-    lv_obj_set_style_text_color(ac_lbl, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_set_style_text_font(ac_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(ac_lbl, 4, 8);
-    elrs_auto_col_switch = lv_switch_create(ac_box);
-    lv_obj_set_size(elrs_auto_col_switch, 40, 22);
-    lv_obj_set_pos(elrs_auto_col_switch, 168, 6);
-    lv_obj_set_style_anim_time(elrs_auto_col_switch, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(elrs_auto_col_switch, LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_style_bg_color(elrs_auto_col_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(elrs_auto_col_switch, lv_color_hex(0x333333), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(elrs_auto_col_switch, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(elrs_auto_col_switch, lv_color_hex(0x0088aa), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(elrs_auto_col_switch, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_add_state(elrs_auto_col_switch, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(elrs_auto_col_switch, elrsAutoColSwitchEvent, LV_EVENT_VALUE_CHANGED, this);
-
-    lv_obj_t* col_box = lv_obj_create(scr);
-    lv_obj_set_size(col_box, 220, 52);
-    lv_obj_set_pos(col_box, 10, 246);
-    lv_obj_set_style_bg_color(col_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(col_box, 1, 0);
-    lv_obj_set_style_border_color(col_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(col_box, 6, 0);
-    lv_obj_clear_flag(col_box, LV_OBJ_FLAG_SCROLLABLE);
-    elrs_col_label = lv_label_create(col_box);
-    lv_label_set_text(elrs_col_label, "Lap col: Auto");
-    lv_obj_set_style_text_color(elrs_col_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(elrs_col_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(elrs_col_label, 4, 4);
-    elrs_col_slider = lv_slider_create(col_box);
-    lv_obj_set_size(elrs_col_slider, 200, 10);
-    lv_obj_set_pos(elrs_col_slider, 6, 28);
-    lv_slider_set_range(elrs_col_slider, 0, 49);
-    lv_slider_set_value(elrs_col_slider, 0, LV_ANIM_OFF);
-    lv_obj_add_state(elrs_col_slider, LV_STATE_DISABLED);
-    lv_obj_add_event_cb(elrs_col_slider, elrsColSliderEvent, LV_EVENT_VALUE_CHANGED, this);
-
-    lv_obj_t* clr_box = lv_obj_create(scr);
-    lv_obj_set_size(clr_box, 220, 40);
-    lv_obj_set_pos(clr_box, 10, 302);
-    lv_obj_set_style_bg_color(clr_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(clr_box, 1, 0);
-    lv_obj_set_style_border_color(clr_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(clr_box, 6, 0);
-    lv_obj_clear_flag(clr_box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* clr_lbl = lv_label_create(clr_box);
-    lv_label_set_text(clr_lbl, "Clear OSD on stop");
-    lv_obj_set_style_text_color(clr_lbl, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_set_style_text_font(clr_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(clr_lbl, 4, 8);
-    elrs_clear_osd_switch = lv_switch_create(clr_box);
-    lv_obj_set_size(elrs_clear_osd_switch, 40, 22);
-    lv_obj_set_pos(elrs_clear_osd_switch, 168, 6);
-    lv_obj_set_style_anim_time(elrs_clear_osd_switch, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(elrs_clear_osd_switch, LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_style_bg_color(elrs_clear_osd_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(elrs_clear_osd_switch, lv_color_hex(0x333333), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(elrs_clear_osd_switch, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(elrs_clear_osd_switch, lv_color_hex(0xaa6600), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(elrs_clear_osd_switch, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
-
-    lv_obj_t* pb_box = lv_obj_create(scr);
-    lv_obj_set_size(pb_box, 220, 40);
-    lv_obj_set_pos(pb_box, 10, 346);
-    lv_obj_set_style_bg_color(pb_box, lv_color_hex(0x1a1a1a), 0);
-    lv_obj_set_style_border_width(pb_box, 1, 0);
-    lv_obj_set_style_border_color(pb_box, lv_color_hex(0x333333), 0);
-    lv_obj_set_style_pad_all(pb_box, 6, 0);
-    lv_obj_clear_flag(pb_box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t* pb_lbl = lv_label_create(pb_box);
-    lv_label_set_text(pb_lbl, "Playback to OSD");
-    lv_obj_set_style_text_color(pb_lbl, lv_color_hex(0xaaaaaa), 0);
-    lv_obj_set_style_text_font(pb_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(pb_lbl, 4, 8);
-    elrs_playback_switch = lv_switch_create(pb_box);
-    lv_obj_set_size(elrs_playback_switch, 40, 22);
-    lv_obj_set_pos(elrs_playback_switch, 168, 6);
-    lv_obj_set_style_anim_time(elrs_playback_switch, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(elrs_playback_switch, LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_style_bg_color(elrs_playback_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(elrs_playback_switch, lv_color_hex(0x333333), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(elrs_playback_switch, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(elrs_playback_switch, lv_color_hex(0x8844aa), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(elrs_playback_switch, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_CHECKED);
-
-    lv_obj_t* hint = lv_label_create(scr);
-    lv_label_set_text(hint, "Tap phrase field for keyboard. OK / X closes.");
-    lv_obj_set_style_text_color(hint, lv_color_hex(0x666666), 0);
-    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(hint, 10, 390);
-
-    elrs_save_btn = lv_btn_create(scr);
-    lv_obj_set_size(elrs_save_btn, 200, 36);
-    lv_obj_set_pos(elrs_save_btn, 20, 412);
-    lv_obj_set_style_bg_color(elrs_save_btn, lv_color_hex(0x006644), LV_PART_MAIN);
-    elrs_save_label = lv_label_create(elrs_save_btn);
-    lv_label_set_text(elrs_save_label, "Save");
-    lv_obj_set_style_text_font(elrs_save_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(elrs_save_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_center(elrs_save_label);
-    lv_obj_add_event_cb(elrs_save_btn, elrsSaveBtnEvent, LV_EVENT_CLICKED, this);
-}
-
-void FpvLcdUI::elrsHideBindKeyboard() {
-    if (!elrs_keyboard) {
-        return;
-    }
-    lv_keyboard_set_textarea(elrs_keyboard, NULL);
-    lv_obj_add_flag(elrs_keyboard, LV_OBJ_FLAG_HIDDEN);
-    if (elrs_bind_textarea) {
-        lv_obj_clear_state(elrs_bind_textarea, LV_STATE_FOCUSED);
-    }
-}
-
-void FpvLcdUI::elrsBindPhraseTaEvent(lv_event_t* e) {
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (!ui || ui->_elrsUiSyncing) {
-        return;
-    }
-    const lv_event_code_t code = lv_event_get_code(e);
-    if (code != LV_EVENT_FOCUSED) {
-        return;
-    }
-    if (!ui->elrs_keyboard || !ui->elrs_bind_textarea) {
-        return;
-    }
-    lv_keyboard_set_textarea(ui->elrs_keyboard, ui->elrs_bind_textarea);
-    lv_obj_clear_flag(ui->elrs_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(ui->elrs_keyboard);
-}
-
-void FpvLcdUI::elrsKeyboardDismissEvent(lv_event_t* e) {
-    const lv_event_code_t code = lv_event_get_code(e);
-    if (code != LV_EVENT_READY && code != LV_EVENT_CANCEL) {
-        return;
-    }
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (ui) {
-        ui->elrsHideBindKeyboard();
-    }
-}
-
-void FpvLcdUI::elrsUpdateRowLabel(FpvLcdUI* ui) {
-    if (!ui || !ui->elrs_row_label || !ui->elrs_row_slider) {
-        return;
-    }
-    char b[24];
-    snprintf(b, sizeof(b), "Lap row: %d", (int)lv_slider_get_value(ui->elrs_row_slider));
-    lv_label_set_text(ui->elrs_row_label, b);
-}
-
-void FpvLcdUI::elrsUpdateColLabel(FpvLcdUI* ui) {
-    if (!ui || !ui->elrs_col_label) {
-        return;
-    }
-    if (ui->elrs_auto_col_switch && lv_obj_has_state(ui->elrs_auto_col_switch, LV_STATE_CHECKED)) {
-        lv_label_set_text(ui->elrs_col_label, "Lap col: Auto");
-        return;
-    }
-    if (ui->elrs_col_slider) {
-        char b[24];
-        snprintf(b, sizeof(b), "Lap col: %d", (int)lv_slider_get_value(ui->elrs_col_slider));
-        lv_label_set_text(ui->elrs_col_label, b);
-    }
-}
-
-void FpvLcdUI::elrsRowSliderEvent(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
-        return;
-    }
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (ui) {
-        elrsUpdateRowLabel(ui);
-    }
-}
-
-void FpvLcdUI::elrsColSliderEvent(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
-        return;
-    }
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (ui) {
-        elrsUpdateColLabel(ui);
-    }
-}
-
-void FpvLcdUI::elrsAutoColSwitchEvent(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
-        return;
-    }
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (!ui || !ui->elrs_col_slider) {
-        return;
-    }
-    const bool autoOn = ui->elrs_auto_col_switch && lv_obj_has_state(ui->elrs_auto_col_switch, LV_STATE_CHECKED);
-    if (autoOn) {
-        lv_obj_add_state(ui->elrs_col_slider, LV_STATE_DISABLED);
-    } else {
-        lv_obj_clear_state(ui->elrs_col_slider, LV_STATE_DISABLED);
-    }
-    elrsUpdateColLabel(ui);
-}
-
-void FpvLcdUI::elrsSaveBtnEvent(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
-        return;
-    }
-    FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
-    if (!ui || ui->_elrsUiSyncing) {
-        return;
-    }
-    ui->elrsHideBindKeyboard();
-    const bool autoOn = ui->elrs_auto_col_switch && lv_obj_has_state(ui->elrs_auto_col_switch, LV_STATE_CHECKED);
-    const uint8_t col = autoOn ? static_cast<uint8_t>(ELRS_OSD_LAP_COL_AUTO)
-                               : static_cast<uint8_t>(lv_slider_get_value(ui->elrs_col_slider));
-    ui->_elrsApplySnap.backpackEspnow =
-        (ui->elrs_backpack_switch && lv_obj_has_state(ui->elrs_backpack_switch, LV_STATE_CHECKED)) ? 1 : 0;
-    ui->_elrsApplySnap.osdLapRow = static_cast<uint8_t>(lv_slider_get_value(ui->elrs_row_slider));
-    ui->_elrsApplySnap.osdLapCol = col;
-    ui->_elrsApplySnap.osdClearOnStop =
-        (ui->elrs_clear_osd_switch && lv_obj_has_state(ui->elrs_clear_osd_switch, LV_STATE_CHECKED)) ? 1 : 0;
-    ui->_elrsApplySnap.osdPlaybackLaps =
-        (ui->elrs_playback_switch && lv_obj_has_state(ui->elrs_playback_switch, LV_STATE_CHECKED)) ? 1 : 0;
-    elrs_copy_bind_from_ta(ui->elrs_bind_textarea, ui->_elrsApplySnap.bindPhrase, sizeof(ui->_elrsApplySnap.bindPhrase));
-    ui->_elrsApplyRequested = true;
-}
-
-bool FpvLcdUI::consumeElrsLcdSettingsApply(ElrsLcdSettingsApply* out) {
-    if (!_elrsApplyRequested || !out) {
-        return false;
-    }
-    _elrsApplyRequested = false;
-    *out = _elrsApplySnap;
-    return true;
-}
-
-void FpvLcdUI::notifyElrsSettingsSaved() {
-    _elrsSaveFlashUntilMs = millis() + 1600;
-}
-
-void FpvLcdUI::processElrsSaveFlash() {
-    if (!elrs_save_btn || !elrs_save_label) {
-        return;
-    }
-    const uint32_t until = _elrsSaveFlashUntilMs;
-    const uint32_t now = millis();
-    if (until == 0) {
-        if (_elrsSaveFlashShowingSaved) {
-            lv_label_set_text(elrs_save_label, "Save");
-            lv_obj_set_style_bg_color(elrs_save_btn, lv_color_hex(0x006644), LV_PART_MAIN);
-            _elrsSaveFlashShowingSaved = false;
-        }
-        return;
-    }
-    if (now < until) {
-        if (!_elrsSaveFlashShowingSaved) {
-            lv_label_set_text(elrs_save_label, "Saved!");
-            lv_obj_set_style_bg_color(elrs_save_btn, lv_color_hex(0x2a9966), LV_PART_MAIN);
-            _elrsSaveFlashShowingSaved = true;
-        }
-    } else {
-        _elrsSaveFlashUntilMs = 0;
-        lv_label_set_text(elrs_save_label, "Save");
-        lv_obj_set_style_bg_color(elrs_save_btn, lv_color_hex(0x006644), LV_PART_MAIN);
-        _elrsSaveFlashShowingSaved = false;
-    }
-}
-
-void FpvLcdUI::syncElrsLcdSettingsWidgets(uint8_t backpackEspnow, uint8_t osdLapRow, uint8_t osdLapCol,
-                                          uint8_t osdClearOnStop, uint8_t osdPlaybackLaps, const char* bindPhrase) {
-    if (!tab_elrs) {
-        return;
-    }
-    _elrsUiSyncing = true;
-    elrsHideBindKeyboard();
-    if (elrs_backpack_switch) {
-        if (backpackEspnow == 1) {
-            lv_obj_add_state(elrs_backpack_switch, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(elrs_backpack_switch, LV_STATE_CHECKED);
-        }
-        lv_obj_invalidate(elrs_backpack_switch);
-    }
-    if (elrs_row_slider) {
-        int r = osdLapRow;
-        if (r > 18) {
-            r = 5;
-        }
-        lv_slider_set_value(elrs_row_slider, r, LV_ANIM_OFF);
-    }
-    if (elrs_auto_col_switch && elrs_col_slider) {
-        if (osdLapCol == ELRS_OSD_LAP_COL_AUTO) {
-            lv_obj_add_state(elrs_auto_col_switch, LV_STATE_CHECKED);
-            lv_obj_add_state(elrs_col_slider, LV_STATE_DISABLED);
-            lv_slider_set_value(elrs_col_slider, 0, LV_ANIM_OFF);
-        } else {
-            lv_obj_clear_state(elrs_auto_col_switch, LV_STATE_CHECKED);
-            lv_obj_clear_state(elrs_col_slider, LV_STATE_DISABLED);
-            int c = osdLapCol;
-            if (c > 49) {
-                c = 0;
-            }
-            lv_slider_set_value(elrs_col_slider, c, LV_ANIM_OFF);
-        }
-    }
-    if (elrs_clear_osd_switch) {
-        if (osdClearOnStop) {
-            lv_obj_add_state(elrs_clear_osd_switch, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(elrs_clear_osd_switch, LV_STATE_CHECKED);
-        }
-    }
-    if (elrs_playback_switch) {
-        if (osdPlaybackLaps) {
-            lv_obj_add_state(elrs_playback_switch, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(elrs_playback_switch, LV_STATE_CHECKED);
-        }
-    }
-    if (elrs_bind_textarea) {
-        const char* p = bindPhrase ? bindPhrase : "";
-        lv_textarea_set_text(elrs_bind_textarea, p);
-    }
-    elrsUpdateRowLabel(this);
-    elrsUpdateColLabel(this);
-    _elrsUiSyncing = false;
-}
-#endif
 
 void FpvLcdUI::bandPrevEvent(lv_event_t* e) {
     FpvLcdUI* ui = static_cast<FpvLcdUI*>(lv_event_get_user_data(e));
@@ -2213,18 +1669,10 @@ void FpvLcdUI::processBatteryUpdate() {
     }
 }
 
-void FpvLcdUI::setStatusBarIndicators(bool wifiEnabled, bool elrsBackpackEnabled) {
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    if (_pendingWifiEnabled == wifiEnabled && _pendingElrsEnabled == elrsBackpackEnabled) {
-        return;
-    }
-    _pendingElrsEnabled = elrsBackpackEnabled;
-#else
-    (void)elrsBackpackEnabled;
+void FpvLcdUI::setStatusBarIndicators(bool wifiEnabled) {
     if (_pendingWifiEnabled == wifiEnabled) {
         return;
     }
-#endif
     _pendingWifiEnabled = wifiEnabled;
     _statusBarDirty = true;
 }
@@ -2240,14 +1688,6 @@ void FpvLcdUI::processStatusBarUpdate() {
         lv_obj_set_style_text_color(status_wifi_label, lv_color_hex(w ? 0x88ccff : 0x666666), 0);
         lv_obj_invalidate(status_wifi_label);
     }
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    const bool e = _pendingElrsEnabled;
-    if (status_elrs_label) {
-        lv_obj_clear_flag(status_elrs_label, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_color(status_elrs_label, lv_color_hex(e ? 0x66ddaa : 0x777777), 0);
-        lv_obj_invalidate(status_elrs_label);
-    }
-#endif
 }
 
 // Thread-safe: called from loop() on core 1, just stores the value

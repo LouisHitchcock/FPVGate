@@ -93,83 +93,64 @@ void Config::load(void) {
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
         
-        // Migration from version 18 to 19: ELRS OSD options (row/col/clear/playback)
+        // Migration from version 18 to 19: stamp current version only.
+        // (Previously this path initialised ELRS OSD fields which have been
+        //  moved to the feature/ELRSBackpack branch and replaced with
+        //  reserved padding; no field-level initialisation is required.)
         if (version == 18) {
-            DEBUG("Migrating config from v18 to v19 (elrsOsd lap row/col + flags)\n");
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            DEBUG("Migrating config from v18 to v19 (no-op; ELRS fields removed)\n");
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 17 to 18: ELRS backpack bind phrase
+        // Migration from version 17 to 19: stamp current version only.
         else if (version == 17) {
-            DEBUG("Migrating config from v17 to v19 (elrsBackpackBindPhrase + OSD options)\n");
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            DEBUG("Migrating config from v17 to v19 (no-op; ELRS fields removed)\n");
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 16 to 18: ELRS backpack ESP-NOW + bind phrase
+        // Migration from version 16 to 19: stamp current version only.
         else if (version == 16) {
-            DEBUG("Migrating config from v16 to v19 (elrsBackpackEspnow + bind phrase + OSD options)\n");
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            DEBUG("Migrating config from v16 to v19 (no-op; ELRS fields removed)\n");
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 15 to 16: add RotorHazard integration fields
+        // Migration from version 15 to 19: add RotorHazard integration fields.
         else if (version == 15) {
-            DEBUG("Migrating config from v15 to v18 (adding RH integration fields)\n");
+            DEBUG("Migrating config from v15 to v19 (adding RH integration fields)\n");
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 14 to 15: add speakerEnabled
+        // Migration from version 14 to 19: add speakerEnabled + RH.
         else if (version == 14) {
-            DEBUG("Migrating config from v14 to v15 (adding speakerEnabled)\n");
+            DEBUG("Migrating config from v14 to v19 (adding speakerEnabled + RH)\n");
             conf.speakerEnabled = 1;  // Enabled by default
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 13 to 16
+        // Migration from version 13 to 19.
         else if (version == 13) {
-            DEBUG("Migrating config from v13 to v16\n");
+            DEBUG("Migrating config from v13 to v19\n");
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
             conf.novaFilterMA = 0;
@@ -182,20 +163,15 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 12 to 16
+        // Migration from version 12 to 19.
         else if (version == 12) {
-            DEBUG("Migrating config from v12 to v16\n");
+            DEBUG("Migrating config from v12 to v19\n");
             conf.receiverRadio = 0;
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
@@ -209,20 +185,15 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 11 to 16
+        // Migration from version 11 to 19.
         else if (version == 11) {
-            DEBUG("Migrating config from v11 to v16\n");
+            DEBUG("Migrating config from v11 to v19\n");
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
             conf.receiverRadio = 0;
@@ -238,20 +209,15 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 10 to 16
+        // Migration from version 10 to 19.
         else if (version == 10) {
-            DEBUG("Migrating config from v10 to v16\n");
+            DEBUG("Migrating config from v10 to v19\n");
             memset(conf.masterHostname, 0, sizeof(conf.masterHostname));
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
@@ -268,12 +234,7 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
-            conf.elrsBackpackEspnow = 0;
-            memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-            conf.elrsOsdLapRow = 5;
-            conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-            conf.elrsOsdClearOnStop = 0;
-            conf.elrsOsdPlaybackLaps = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -426,18 +387,6 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["rhEnabled"] = conf.rhEnabled;
     config["rhHostIP"] = conf.rhHostIP;
     config["rhNodeIndex"] = conf.rhNodeIndex;
-    
-    config["elrsBackpackEspnow"] = conf.elrsBackpackEspnow;
-    config["elrsBackpackBindPhrase"] = conf.elrsBackpackBindPhrase;
-    config["elrsOsdLapRow"] = conf.elrsOsdLapRow;
-    config["elrsOsdLapCol"] = conf.elrsOsdLapCol;
-    config["elrsOsdClearOnStop"] = conf.elrsOsdClearOnStop;
-    config["elrsOsdPlaybackLaps"] = conf.elrsOsdPlaybackLaps;
-#ifdef ENABLE_ELRS_BACKPACK_ESPNOW
-    config["elrsBackpackEspnowBuild"] = 1;
-#else
-    config["elrsBackpackEspnowBuild"] = 0;
-#endif
     
     // Add battery voltage if monitor exists
     if (batteryMonitor) {
@@ -860,58 +809,6 @@ void Config::fromJson(JsonObject source) {
         uint8_t val = source["rhNodeIndex"].as<uint8_t>();
         if (val <= 7) {
             conf.rhNodeIndex = val;
-            modified = true;
-        }
-    }
-    if (!source["elrsBackpackEspnow"].isNull() && source["elrsBackpackEspnow"] != conf.elrsBackpackEspnow) {
-        uint8_t val = source["elrsBackpackEspnow"].as<uint8_t>();
-        if (val <= 1) {
-            conf.elrsBackpackEspnow = val;
-            modified = true;
-        }
-    }
-    if (!source["elrsBackpackBindPhrase"].isNull()) {
-        const char* v = source["elrsBackpackBindPhrase"] | "";
-        char sanitized[33];
-        size_t j = 0;
-        for (size_t i = 0; v[i] != '\0' && j < 32; i++) {
-            if (v[i] != '\r' && v[i] != '\n') {
-                sanitized[j++] = v[i];
-            }
-        }
-        sanitized[j] = '\0';
-        if (strcmp(sanitized, conf.elrsBackpackBindPhrase) != 0) {
-            strlcpy(conf.elrsBackpackBindPhrase, sanitized, sizeof(conf.elrsBackpackBindPhrase));
-            modified = true;
-        }
-    }
-    if (!source["elrsOsdLapRow"].isNull()) {
-        uint8_t val = source["elrsOsdLapRow"].as<uint8_t>();
-        if (val <= 18 && val != conf.elrsOsdLapRow) {
-            conf.elrsOsdLapRow = val;
-            modified = true;
-        }
-    }
-    if (!source["elrsOsdLapCol"].isNull()) {
-        uint8_t val = source["elrsOsdLapCol"].as<uint8_t>();
-        if (val <= 49 || val == ELRS_OSD_LAP_COL_AUTO) {
-            if (val != conf.elrsOsdLapCol) {
-                conf.elrsOsdLapCol = val;
-                modified = true;
-            }
-        }
-    }
-    if (!source["elrsOsdClearOnStop"].isNull() && source["elrsOsdClearOnStop"] != conf.elrsOsdClearOnStop) {
-        uint8_t v = source["elrsOsdClearOnStop"].as<uint8_t>();
-        if (v <= 1) {
-            conf.elrsOsdClearOnStop = v;
-            modified = true;
-        }
-    }
-    if (!source["elrsOsdPlaybackLaps"].isNull() && source["elrsOsdPlaybackLaps"] != conf.elrsOsdPlaybackLaps) {
-        uint8_t v = source["elrsOsdPlaybackLaps"].as<uint8_t>();
-        if (v <= 1) {
-            conf.elrsOsdPlaybackLaps = v;
             modified = true;
         }
     }
@@ -1487,65 +1384,6 @@ void Config::setRhNodeIndex(uint8_t index) {
     }
 }
 
-uint8_t Config::getElrsBackpackEspnow() {
-    /* Only 0/1 are valid; corrupted flash or older blobs must not read as "always on". */
-    return (conf.elrsBackpackEspnow == 1) ? 1u : 0u;
-}
-void Config::setElrsBackpackEspnow(uint8_t enabled) {
-    const uint8_t v = (enabled == 1) ? 1u : 0u;
-    if (conf.elrsBackpackEspnow != v) {
-        conf.elrsBackpackEspnow = v;
-        modified = true;
-    }
-}
-
-char* Config::getElrsBackpackBindPhrase() { return conf.elrsBackpackBindPhrase; }
-void Config::setElrsBackpackBindPhrase(const char* phrase) {
-    if (!phrase) {
-        phrase = "";
-    }
-    if (strcmp(phrase, conf.elrsBackpackBindPhrase) != 0) {
-        strlcpy(conf.elrsBackpackBindPhrase, phrase, sizeof(conf.elrsBackpackBindPhrase));
-        modified = true;
-    }
-}
-
-uint8_t Config::getElrsOsdLapRow() {
-    return (conf.elrsOsdLapRow <= 18) ? conf.elrsOsdLapRow : 5;
-}
-void Config::setElrsOsdLapRow(uint8_t row) {
-    if (row <= 18 && conf.elrsOsdLapRow != row) {
-        conf.elrsOsdLapRow = row;
-        modified = true;
-    }
-}
-uint8_t Config::getElrsOsdLapCol() {
-    if (conf.elrsOsdLapCol == ELRS_OSD_LAP_COL_AUTO || conf.elrsOsdLapCol <= 49) {
-        return conf.elrsOsdLapCol;
-    }
-    return ELRS_OSD_LAP_COL_AUTO;
-}
-void Config::setElrsOsdLapCol(uint8_t col) {
-    if ((col <= 49 || col == ELRS_OSD_LAP_COL_AUTO) && conf.elrsOsdLapCol != col) {
-        conf.elrsOsdLapCol = col;
-        modified = true;
-    }
-}
-uint8_t Config::getElrsOsdClearOnStop() { return conf.elrsOsdClearOnStop <= 1 ? conf.elrsOsdClearOnStop : 0; }
-void Config::setElrsOsdClearOnStop(uint8_t v) {
-    if (v <= 1 && conf.elrsOsdClearOnStop != v) {
-        conf.elrsOsdClearOnStop = v;
-        modified = true;
-    }
-}
-uint8_t Config::getElrsOsdPlaybackLaps() { return conf.elrsOsdPlaybackLaps <= 1 ? conf.elrsOsdPlaybackLaps : 0; }
-void Config::setElrsOsdPlaybackLaps(uint8_t v) {
-    if (v <= 1 && conf.elrsOsdPlaybackLaps != v) {
-        conf.elrsOsdPlaybackLaps = v;
-        modified = true;
-    }
-}
-
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -1616,12 +1454,8 @@ void Config::setDefaults(void) {
     conf.rhEnabled = 0;              // Disabled by default
     memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
     conf.rhNodeIndex = 0;            // Seat 0 by default
-    conf.elrsBackpackEspnow = 0;
-    memset(conf.elrsBackpackBindPhrase, 0, sizeof(conf.elrsBackpackBindPhrase));
-    conf.elrsOsdLapRow = 5;
-    conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
-    conf.elrsOsdClearOnStop = 0;
-    conf.elrsOsdPlaybackLaps = 0;
+    // Reserved slack for future ELRS Backpack fields
+    memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
     modified = true;
     write();
 }

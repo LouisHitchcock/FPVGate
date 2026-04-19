@@ -157,7 +157,7 @@
 #define LV_USE_CHART      1
 #define LV_USE_COLORWHEEL 1
 #define LV_USE_IMGBTN     1
-#define LV_USE_KEYBOARD   1  /* ELRS bind phrase on Waveshare: lv_textarea + lv_keyboard on lv_layer_top() */
+#define LV_USE_KEYBOARD   1  /* On-screen keyboard for lv_textarea; used by optional bind-phrase textareas on Waveshare. */
 #define LV_USE_LED        1
 #define LV_USE_LIST       1
 #define LV_USE_MENU       1

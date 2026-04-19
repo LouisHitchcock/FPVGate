@@ -6,18 +6,6 @@
 #include "buzzer.h"
 #include "CST820.h"
 
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-/** Snapshot from ELRS Backpack LCD page; applied on Save (core 1). */
-struct ElrsLcdSettingsApply {
-    uint8_t backpackEspnow;
-    uint8_t osdLapRow;
-    uint8_t osdLapCol;
-    uint8_t osdClearOnStop;
-    uint8_t osdPlaybackLaps;
-    char bindPhrase[33];  // NUL-terminated, max 32 chars (matches config / web)
-};
-#endif
-
 // LCD UI class matching StarForge display implementation
 class FpvLcdUI {
 public:
@@ -54,8 +42,8 @@ public:
     void setBandChannelDisplay(uint8_t systemIdx, uint8_t bandIdx, uint8_t channelIdx, uint16_t freqMhz);
     void setThresholdDisplay(uint8_t enterRssi, uint8_t exitRssi);
     void setBatteryDisplay(uint16_t voltage);  // Voltage in tenths of volts (e.g. 42 = 4.2V)
-    /** Core 1: WiFi on/off and ELRS backpack on/off for persistent top status bar (LCD task applies). */
-    void setStatusBarIndicators(bool wifiEnabled, bool elrsBackpackEnabled);
+    /** Core 1: WiFi on/off state for the persistent top status bar (LCD task applies). */
+    void setStatusBarIndicators(bool wifiEnabled);
     
     void updateBandChannel(uint8_t band, uint8_t channel);
     void updateFrequency(uint16_t freq);
@@ -76,16 +64,6 @@ public:
     void setImu(class Qmi8658* imu);
     /** Core 1: true once when user tapped Sleep in System Settings (same deep sleep as power button). */
     bool consumeDeepSleepRequest();
-#endif
-
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    /** Core 1: true once after user tapped Save on ELRS Backpack tab. */
-    bool consumeElrsLcdSettingsApply(ElrsLcdSettingsApply* out);
-    /** Core 0 (UI task): load widgets from config (boot or after apply). */
-    void syncElrsLcdSettingsWidgets(uint8_t backpackEspnow, uint8_t osdLapRow, uint8_t osdLapCol,
-                                    uint8_t osdClearOnStop, uint8_t osdPlaybackLaps, const char* bindPhrase);
-    /** Core 1: call after settings were written to storage (flash + sync). UI task shows brief "Saved!" on Save. */
-    void notifyElrsSettingsSaved();
 #endif
 
 #if defined(BOARD_ESP32_S3_TOUCH)
@@ -133,9 +111,6 @@ private:
     lv_obj_t* tab_pilot;
     lv_obj_t* tab_calib;
     lv_obj_t* tab_system;
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_t* tab_elrs;
-#endif
     
     // UI objects - main elements
     lv_obj_t* rssi_label;
@@ -150,13 +125,7 @@ private:
     lv_obj_t* battery_label;
     lv_obj_t* battery_icon;
     lv_obj_t* status_wifi_label;
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_t* status_elrs_label;
-#endif
     volatile bool _pendingWifiEnabled;
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    volatile bool _pendingElrsEnabled;
-#endif
     volatile bool _statusBarDirty;
     
     // Race timing displays
@@ -193,25 +162,6 @@ private:
     lv_obj_t* brightness_slider;
     lv_obj_t* brightness_label;
     lv_obj_t* battery_voltage_label;  // System tab voltage display
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    lv_obj_t* elrs_backpack_switch;
-    lv_obj_t* elrs_row_slider;
-    lv_obj_t* elrs_row_label;
-    lv_obj_t* elrs_auto_col_switch;
-    lv_obj_t* elrs_col_slider;
-    lv_obj_t* elrs_col_label;
-    lv_obj_t* elrs_clear_osd_switch;
-    lv_obj_t* elrs_playback_switch;
-    lv_obj_t* elrs_save_btn;
-    lv_obj_t* elrs_save_label;
-    lv_obj_t* elrs_bind_textarea;
-    lv_obj_t* elrs_keyboard;
-    volatile bool _elrsApplyRequested;
-    ElrsLcdSettingsApply _elrsApplySnap{};
-    bool _elrsUiSyncing;
-    volatile uint32_t _elrsSaveFlashUntilMs;
-    bool _elrsSaveFlashShowingSaved;
-#endif
     
     // Lap times display (full list for current race, up to 10 laps)
     lv_obj_t* lap_times_box;
@@ -311,18 +261,6 @@ private:
     void createPilotTab();
     void createCalibTab();
     void createSystemTab();
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    void createElrsTab();
-    static void elrsRowSliderEvent(lv_event_t* e);
-    static void elrsColSliderEvent(lv_event_t* e);
-    static void elrsAutoColSwitchEvent(lv_event_t* e);
-    static void elrsSaveBtnEvent(lv_event_t* e);
-    static void elrsBindPhraseTaEvent(lv_event_t* e);
-    static void elrsKeyboardDismissEvent(lv_event_t* e);
-    void elrsHideBindKeyboard();
-    static void elrsUpdateRowLabel(FpvLcdUI* ui);
-    static void elrsUpdateColLabel(FpvLcdUI* ui);
-#endif
     void processRssiUpdate();
     void processLapUpdate();           // Called from UI task only
     void processBandChannelUpdate();   // Called from UI task only
@@ -339,9 +277,6 @@ private:
     void updateFinish();
     void stopFinish();
     void processBootOverlay();   // Dismiss boot overlay when _bootComplete (UI task only)
-#if defined(ENABLE_ELRS_BACKPACK_ESPNOW)
-    void processElrsSaveFlash();  // UI task: brief Save -> Saved! feedback after notifyElrsSettingsSaved()
-#endif
     void createPersistentHeader(lv_obj_t* parent);
     void processStatusBarUpdate();
 

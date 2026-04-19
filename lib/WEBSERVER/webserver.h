@@ -21,7 +21,7 @@ class Webserver : public TransportInterface {
     void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr = nullptr);
     void setTransportManager(TransportManager *tm);
     void recheckWifiMode();  // Re-evaluate WiFi mode after config changes
-    /** Disconnect and re-apply AP/STA (+ ESP-NOW) after ELRS backpack setting changes. */
+    /** Disconnect and re-apply AP/STA Wi-Fi mode (public so LCD/UI callers can force a radio reinit). */
     void requestWifiStackReinit();
     void handleWebUpdate(uint32_t currentTimeMs);
     
