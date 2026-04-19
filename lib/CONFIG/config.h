@@ -132,10 +132,10 @@
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
-#define PIN_SD_MOSI 9          // D10
-#define PIN_SD_MISO 8          // D9
+#define PIN_SD_MOSI 8          // D9 (GPIO8)
+#define PIN_SD_MISO 9          // D10 (GPIO9)
 
-// XIAO ESP32S3 Plus (16MB Flash)
+// XIAO ESP32S3 Plus
 #elif defined(XIAO_ESP32S3_PLUS)
 
 #define PIN_LED 21             // Onboard user LED
