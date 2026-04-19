@@ -132,6 +132,7 @@ var splitGates = []; // Array of {hostname, gateNumber, distance} from config
 var splitSectors = []; // Latest sector data from SSE
 var splitBestSectors = {}; // Best sector times: key="from-to", value=ms
 var splitPersonalView = localStorage.getItem('splitPersonalView') !== '0'; // true = personal race view with full detail
+var splitEnhancedView = localStorage.getItem('splitEnhancedView') === '1'; // true = card-style split display (default off)
 var thisSplitGateNumber = 0; // This device's split gate number (0 = not a split gate)
 var splitMasterHostname = ''; // Master hostname this split gate reports to
 
@@ -666,6 +667,15 @@ function renderSplitTimesDisplay() {
     return;
   }
   
+  if (splitEnhancedView) {
+    renderEnhancedSplitTimes(container);
+  } else {
+    renderClassicSplitTimes(container);
+  }
+}
+
+// Classic table-based split times view
+function renderClassicSplitTimes(container) {
   // Group sectors by lap
   const laps = {};
   splitSectors.forEach(s => {
@@ -722,6 +732,199 @@ function renderSplitTimesDisplay() {
   container.innerHTML = html;
 }
 
+// Enhanced card-based split times view with color coded deltas versus previous lap.
+//
+// Columns per lap (scales with number of split gates, N = splitGateCount):
+//   Start Gate | Gate 1 | ... | Gate N | End Gate   (N + 2 columns)
+//
+// Times shown:
+//   Start Gate: absolute race time when the lap started (cumulative)
+//   Gate X:     elapsed time within the current lap when gate X was crossed
+//   End Gate:   absolute race time when the lap ended (cumulative)
+//
+// Deltas (shown beneath each time) are simply (this lap's value) - (previous
+// lap's value for the same column). For Start/End gates this represents the
+// corresponding lap duration; for Gate X it's the in-lap improvement/regression.
+// Colors apply to Gate X and End Gate cells only (green = faster, yellow =
+// within 0.05s, red = slower). Start Gate is always neutral because its delta
+// just reflects the previous lap's duration.
+function renderEnhancedSplitTimes(container) {
+  const CLOSE_MS = 50; // 0.05 seconds tolerance for yellow
+
+  // Format milliseconds as seconds / minutes:seconds depending on size
+  const fmtTime = (ms) => {
+    if (ms == null || !isFinite(ms)) return '-';
+    const s = ms / 1000;
+    if (s < 60) return s.toFixed(2) + 's';
+    const mins = Math.floor(s / 60);
+    const rem = s - mins * 60;
+    return `${mins}:${rem.toFixed(2).padStart(5, '0')}`;
+  };
+  const fmtDelta = (ms) => {
+    if (ms == null || !isFinite(ms)) return '';
+    const sign = ms >= 0 ? '+' : '-';
+    return `${sign}${(Math.abs(ms) / 1000).toFixed(2)}s`;
+  };
+
+  // Determine the highest gate number seen (S/F crossing gate)
+  let maxGate = 0;
+  splitSectors.forEach(s => {
+    if (s.from > maxGate) maxGate = s.from;
+    if (s.to > maxGate) maxGate = s.to;
+  });
+  if (maxGate < 2) maxGate = 2; // at least S/F + 1 split gate
+  const splitGateCount = maxGate - 1; // N split gates between Start and End
+
+  // Group sectors by lap
+  const lapsBySector = {};
+  splitSectors.forEach(s => {
+    if (!lapsBySector[s.lap]) lapsBySector[s.lap] = [];
+    lapsBySector[s.lap].push(s);
+  });
+
+  const lapKeys = Object.keys(lapsBySector).sort((a, b) => parseInt(a) - parseInt(b));
+
+  // Derive, for each lap, the absolute race time at each crossing.
+  // crossingMs[g] = race time (ms) when gate g was crossed during this lap.
+  //   - crossingMs[1]         = toMs of the wrap sector (maxGate -> 1)
+  //   - crossingMs[g] for g>1 = toMs of the forward sector (g-1 -> g)
+  //   - crossingMs[maxGate]   = toMs of the last forward sector ((maxGate-1) -> maxGate)
+  //                             (this is also the END of the lap)
+  // lapStartMs = crossingMs[1] - wrapSectorTime, i.e. S/F crossing that ended
+  //             the previous lap and started this one.
+  const lapData = {};
+  lapKeys.forEach(lap => {
+    const sectorsForLap = lapsBySector[lap];
+    const crossingMs = {};
+    sectorsForLap.forEach(s => {
+      if (typeof s.toMs === 'number') crossingMs[s.to] = s.toMs;
+    });
+    const wrapSector = sectorsForLap.find(s => s.from === maxGate && s.to === 1);
+    let startMs = null;
+    if (wrapSector && typeof wrapSector.toMs === 'number') {
+      startMs = wrapSector.toMs - wrapSector.timeMs;
+    } else if (parseInt(lap) === 0) {
+      // Lap 0 always starts at race time 0
+      startMs = 0;
+    }
+    const endMs = crossingMs[maxGate] != null ? crossingMs[maxGate] : null;
+    const lapTotalMs = (startMs != null && endMs != null) ? (endMs - startMs)
+      : sectorsForLap.reduce((sum, s) => sum + s.timeMs, 0);
+    lapData[lap] = { startMs, endMs, crossingMs, lapTotalMs };
+  });
+
+  // Identify the best (shortest total) lap that has all sectors
+  let bestLapKey = null;
+  let bestLapTotal = Infinity;
+  const fullSectorCount = maxGate; // N+1 sectors for a complete lap
+  lapKeys.forEach(lap => {
+    if (lapsBySector[lap].length >= fullSectorCount &&
+        lapData[lap].lapTotalMs < bestLapTotal) {
+      bestLapTotal = lapData[lap].lapTotalMs;
+      bestLapKey = lap;
+    }
+  });
+
+  // Column definitions: Start Gate, Gate 1..N, End Gate
+  // Each column has a `kind` and `gate` number (where applicable).
+  const columns = [];
+  columns.push({ kind: 'start', label: 'Start Gate' });
+  for (let g = 1; g <= splitGateCount; g++) {
+    columns.push({ kind: 'gate', gate: g, label: `Gate ${g}` });
+  }
+  columns.push({ kind: 'end', label: 'End Gate' });
+
+  // Retrieve the value for a given column in a given lap
+  const valueFor = (lap, col) => {
+    const d = lapData[lap];
+    if (!d) return null;
+    if (col.kind === 'start') return d.startMs;
+    if (col.kind === 'end') return d.endMs;
+    // Gate X: elapsed within lap = absolute crossing time - lap start
+    const abs = d.crossingMs[col.gate];
+    if (abs == null || d.startMs == null) return null;
+    return abs - d.startMs;
+  };
+
+  let html = '<h3>Split Times</h3>';
+  html += '<div class="split-lap-cards">';
+
+  lapKeys.forEach((lap, lapOrderIdx) => {
+    const lapNum = parseInt(lap) + 1;
+    const d = lapData[lap];
+    const isBestLap = (lap === bestLapKey);
+    const prevLap = lapOrderIdx > 0 ? lapKeys[lapOrderIdx - 1] : null;
+
+    html += '<div class="split-lap-card">';
+
+    // Header row
+    html += '<div class="split-lap-header">';
+    html += `<div class="split-lap-title">Lap ${lapNum}`;
+    if (isBestLap) {
+      html += ' <span class="split-lap-badge split-lap-badge-best">Best Lap</span>';
+    }
+    html += '</div>';
+    html += `<div class="split-lap-total">Total: ${fmtTime(d.lapTotalMs)}</div>`;
+    html += '</div>';
+
+    // Body: meta column + crossing cells
+    html += '<div class="split-lap-body">';
+    html += '<div class="split-lap-meta">';
+    html += '<div class="split-lap-meta-main">Crossings</div>';
+    html += `<div class="split-lap-meta-sub">${splitGateCount} split gate${splitGateCount === 1 ? '' : 's'}</div>`;
+    html += `<div class="split-lap-meta-sub">${fmtTime(d.lapTotalMs)} total</div>`;
+    html += '</div>';
+
+    html += '<div class="split-sectors-grid">';
+    columns.forEach(col => {
+      const val = valueFor(lap, col);
+      if (val == null) {
+        html += '<div class="split-sector-box split-sector-empty">';
+        html += `<div class="split-sector-label">${col.label}</div>`;
+        html += '<div class="split-sector-time">-</div>';
+        html += '<div class="split-sector-delta">&nbsp;</div>';
+        html += '</div>';
+        return;
+      }
+
+      // Compute delta vs. previous lap's same column
+      let deltaMs = null;
+      if (prevLap != null) {
+        const prevVal = valueFor(prevLap, col);
+        if (prevVal != null) deltaMs = val - prevVal;
+      }
+
+      // Determine color class
+      //   Start Gate: always neutral (delta is previous lap duration)
+      //   Gate X:     green if faster, yellow if close, red if slower
+      //   End Gate:   green/yellow/red based on lap duration change
+      let cls = 'split-sector-neutral';
+      if (col.kind === 'gate' || col.kind === 'end') {
+        if (deltaMs != null) {
+          if (deltaMs < -CLOSE_MS) cls = 'split-sector-best';
+          else if (deltaMs <= CLOSE_MS) cls = 'split-sector-close';
+          else cls = 'split-sector-slow';
+        } else {
+          cls = 'split-sector-neutral';
+        }
+      }
+
+      html += `<div class="split-sector-box ${cls}">`;
+      html += `<div class="split-sector-label">${col.label}</div>`;
+      html += `<div class="split-sector-time">${fmtTime(val)}</div>`;
+      const deltaText = fmtDelta(deltaMs);
+      html += `<div class="split-sector-delta">${deltaText || '&nbsp;'}</div>`;
+      html += '</div>';
+    });
+    html += '</div>'; // sectors-grid
+    html += '</div>'; // lap-body
+    html += '</div>'; // lap-card
+  });
+
+  html += '</div>'; // lap-cards
+  container.innerHTML = html;
+}
+
 // Clear split time data (called on race clear)
 function clearSplitData() {
   splitSectors = [];
@@ -749,6 +952,8 @@ function renderSplitGatesConfig() {
   // Restore toggle state
   const toggle = document.getElementById('splitPersonalViewToggle');
   if (toggle) toggle.checked = splitPersonalView;
+  const enhancedToggle = document.getElementById('splitEnhancedViewToggle');
+  if (enhancedToggle) enhancedToggle.checked = splitEnhancedView;
   
   // Sort gates by gate number
   const sorted = [...splitGates].sort((a, b) => a.gateNumber - b.gateNumber);
@@ -844,6 +1049,14 @@ function toggleSplitPersonalView(enabled) {
   console.log('[Split] Personal view:', enabled);
   updateSlaveModelUI();
   localStorage.setItem('splitPersonalView', enabled ? '1' : '0');
+}
+
+// Toggle the enhanced (card-style) split times display
+function toggleSplitEnhancedView(enabled) {
+  splitEnhancedView = enabled;
+  console.log('[Split] Enhanced view:', enabled);
+  localStorage.setItem('splitEnhancedView', enabled ? '1' : '0');
+  renderSplitTimesDisplay();
 }
 
 // Trigger manual clock sync with all split gates
@@ -2428,6 +2641,8 @@ async function saveConfig() {
     rhHostIP: document.getElementById("rhHostIP") ? document.getElementById("rhHostIP").value : "",
     rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
     splitGates: splitGates.map(g => ({ hostname: g.hostname, gateNumber: g.gateNumber, distance: g.distance || 0 })),
+    splitGateNumber: thisSplitGateNumber,
+    splitMasterHostname: splitMasterHostname,
   };
 
   if (elrsBackpackEspnowBuild === 1) {
@@ -3849,14 +4064,15 @@ function updateSlaveModelUI() {
       if (personalBanner) personalBanner.style.display = "none";
       if (splitBanner) splitBanner.style.display = "none";
       if (rotorhazardBanner) rotorhazardBanner.style.display = "block";
-    } else if (thisSplitGateNumber > 0) {
+  } else if (thisSplitGateNumber > 0 || (syncDevices.find(d => d.isThisDevice) || {}).role === 'splitgate') {
       // This device is a split gate
       if (personalBanner) personalBanner.style.display = "none";
       if (splitBanner) splitBanner.style.display = "none";
       if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
       const gateBanner = document.getElementById("splitGateBanner");
       if (gateBanner) {
-        gateBanner.textContent = `GATE ${thisSplitGateNumber}`;
+        const gateNum = thisSplitGateNumber > 0 ? thisSplitGateNumber : 1;
+        gateBanner.textContent = `GATE ${gateNum}`;
         gateBanner.style.display = "block";
       }
     } else if (splitGates.length > 0 && splitPersonalView) {
@@ -4209,6 +4425,20 @@ function mapSyncDevicesToConfig() {
   });
   splitGates = updatedSplitGates;
   
+  // If a remote device has role='master' and this device is still 'personal',
+  // auto-promote this device to 'slave' -- having a remote master with a personal
+  // local device makes no functional sense for race sync.
+  const hasMaster = syncDevices.some(d => !d.isThisDevice && d.role === 'master');
+  const thisDevNode = syncDevices.find(d => d.isThisDevice);
+  if (hasMaster && thisDevNode && thisDevNode.role === 'personal') {
+    thisDevNode.role = 'slave';
+    raceSyncMode = 2;
+    rhEnabled = 0;
+    thisSplitGateNumber = 0;
+    masterHostname = syncDevices.find(d => !d.isThisDevice && d.role === 'master')?.address || '';
+    renderSyncDevicesList();
+  }
+
   console.log('[Sync] Mapped config - mode:', raceSyncMode, 'master:', masterHostname, 'slaves:', syncedTimers, 'splitGates:', splitGates);
   
   // Update UI elements that depend on mode
@@ -8674,6 +8904,11 @@ function openSettingsModal() {
     modal.classList.add("active");
 
     // Load full config to populate all settings
+    // Flush any pending save BEFORE cancelling the timer and reloading from device,
+    // so user changes (e.g. sync mode) are not silently discarded.
+    if (saveTimeout !== null) {
+      saveConfig();
+    }
     _refreshingFromDevice = true;
     clearTimeout(saveTimeout);
     fetch("/config")

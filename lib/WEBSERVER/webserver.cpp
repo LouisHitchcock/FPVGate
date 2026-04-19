@@ -1336,6 +1336,7 @@ EEPROM:\n\
                     s["from"] = splits[i].fromGate;
                     s["to"] = splits[i].toGate;
                     s["timeMs"] = splits[i].sectorTimeMs;
+                    s["toMs"] = splits[i].toRaceElapsedMs;
                     s["lap"] = splits[i].lapIndex;
                 }
                 
@@ -1365,6 +1366,7 @@ EEPROM:\n\
                 s["fromGate"] = splits[i].fromGate;
                 s["toGate"] = splits[i].toGate;
                 s["sectorTimeMs"] = splits[i].sectorTimeMs;
+                s["toRaceElapsedMs"] = splits[i].toRaceElapsedMs;
                 s["distanceM"] = splits[i].distanceM;
                 s["speedMps"] = splits[i].speedMps;
                 s["lapIndex"] = splits[i].lapIndex;

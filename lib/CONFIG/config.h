@@ -236,7 +236,7 @@
 #define WIFI_MODE LOW          // GND on switch pin = WiFi/Standalone mode
 #define ROTORHAZARD_MODE HIGH  // HIGH (floating/pullup) = RotorHazard node mode
 
-#define EEPROM_RESERVED_SIZE 1024
+#define EEPROM_RESERVED_SIZE 1280
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
 #define CONFIG_VERSION 20U
@@ -348,6 +348,7 @@ class Config {
    public:
     void init();
     void load();
+    void sanitizeAfterLoad();
     void write();
     void toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor = nullptr);
     void toJsonString(char* buf);

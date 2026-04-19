@@ -65,47 +65,76 @@ uint8_t SplitTimeManager::getSplits(SectorSplit* output, uint8_t maxOutput) cons
 
     uint8_t splitCount = 0;
 
-    // For each crossing, find the next crossing at the next higher gate number.
-    // This produces only valid sectors: G1->G2, G2->G3, etc.
-    // A crossing at the highest gate resets to the lowest for the next lap.
-    for (uint16_t i = 0; i < crossingCount && splitCount < maxOutput; i++) {
+    // Determine the highest gate number seen so we can wrap from the S/F
+    // (max gate) back to gate 1 as the "Start -> Gate 1" sector.
+    uint8_t maxGate = 0;
+    for (uint16_t k = 0; k < crossingCount; k++) {
+        if (crossings[k].gateNumber > maxGate) maxGate = crossings[k].gateNumber;
+    }
+
+    // Walk the crossings in order. For each "from" crossing we look for the
+    // first valid target crossing (next higher-numbered gate, or wrap from
+    // max-gate back to gate 1) and emit a sector between them. After emitting,
+    // we advance the cursor to the target crossing so that any intermediate
+    // duplicate source crossings (e.g. RSSI noise producing two G1 hits before
+    // the next S/F) are consumed rather than spawning phantom extra sectors.
+    uint16_t i = 0;
+    while (i < crossingCount && splitCount < maxOutput) {
         const GateCrossing& from = crossings[i];
-        uint8_t nextGate = from.gateNumber + 1;
+        uint8_t nextGate;
+        bool isWrap = false;
+        if (from.gateNumber == maxGate) {
+            if (maxGate <= 1) { i++; continue; } // nothing to wrap to
+            nextGate = 1;
+            isWrap = true;
+        } else {
+            nextGate = from.gateNumber + 1;
+        }
 
         // Find the next crossing at nextGate that happens after this one
-        for (uint16_t j = i + 1; j < crossingCount; j++) {
+        uint16_t j = i + 1;
+        while (j < crossingCount) {
             if (crossings[j].gateNumber == nextGate &&
                 crossings[j].raceElapsedMs > from.raceElapsedMs) {
-                
-                SectorSplit& split = output[splitCount];
-                split.fromGate = from.gateNumber;
-                split.toGate = nextGate;
-                split.sectorTimeMs = crossings[j].raceElapsedMs - from.raceElapsedMs;
-
-                // Calculate distance and speed if available
-                split.distanceM = gateDistances[nextGate];
-                if (split.distanceM > 0 && split.sectorTimeMs > 0) {
-                    split.speedMps = (split.distanceM * 1000.0f) / (float)split.sectorTimeMs;
-                } else {
-                    split.speedMps = 0;
-                }
-
-                // Determine lap index: count how many complete sequences of gate 1
-                // have been seen before this sector's start
-                uint8_t lapIdx = 0;
-                uint8_t lowestGate = crossings[0].gateNumber;
-                for (uint16_t k = 0; k < crossingCount; k++) {
-                    if (crossings[k].gateNumber < lowestGate) lowestGate = crossings[k].gateNumber;
-                }
-                for (uint16_t k = 1; k <= i; k++) {
-                    if (crossings[k].gateNumber == lowestGate) lapIdx++;
-                }
-                split.lapIndex = lapIdx;
-
-                splitCount++;
-                break; // Only match the first valid next-gate crossing
+                break;
             }
+            j++;
         }
+        if (j >= crossingCount) {
+            // No matching target after this crossing; move on.
+            i++;
+            continue;
+        }
+
+        SectorSplit& split = output[splitCount];
+        split.fromGate = from.gateNumber;
+        split.toGate = nextGate;
+        split.sectorTimeMs = crossings[j].raceElapsedMs - from.raceElapsedMs;
+        split.toRaceElapsedMs = crossings[j].raceElapsedMs;
+
+        // Distance/speed only meaningful for forward sectors
+        split.distanceM = isWrap ? 0.0f : gateDistances[nextGate];
+        if (split.distanceM > 0 && split.sectorTimeMs > 0) {
+            split.speedMps = (split.distanceM * 1000.0f) / (float)split.sectorTimeMs;
+        } else {
+            split.speedMps = 0;
+        }
+
+        // Lap index: count how many complete sequences of gate 1 have
+        // been seen up to (and including) this sector's starting crossing.
+        uint8_t lapIdx = 0;
+        for (uint16_t k = 1; k <= i; k++) {
+            if (crossings[k].gateNumber == 1) lapIdx++;
+        }
+        // Wrap sector (S/F -> G1) belongs to the lap that is just starting,
+        // i.e. the lap of the G1 crossing it targets.
+        if (isWrap) lapIdx++;
+        split.lapIndex = lapIdx;
+
+        splitCount++;
+        // Advance past the target so duplicate source crossings between i and
+        // j are skipped rather than producing phantom duplicate sectors.
+        i = j;
     }
 
     return splitCount;

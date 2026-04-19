@@ -338,6 +338,109 @@ void Config::load(void) {
         conf.announcerRate = 10;
         modified = true;
     }
+
+    // Defensive sanitize: repair fields that may be uninitialized if the
+    // laptimer_config_t struct was expanded without a CONFIG_VERSION bump.
+    // Without this, 0xFF bytes from erased flash can leak into JSON responses
+    // and break the Web UI (invalid UTF-8 in string fields).
+    sanitizeAfterLoad();
+}
+
+static void ensureNullTerm(char* buf, size_t sz, bool& outModified) {
+    if (sz == 0) return;
+    // If buffer looks like uninitialized flash (starts with 0xFF), clear it.
+    if ((uint8_t)buf[0] == 0xFF) {
+        memset(buf, 0, sz);
+        outModified = true;
+        return;
+    }
+    // Otherwise ensure a null terminator exists within the buffer.
+    bool hasNull = false;
+    for (size_t i = 0; i < sz; i++) {
+        if (buf[i] == '\0') { hasNull = true; break; }
+    }
+    if (!hasNull) {
+        buf[sz - 1] = '\0';
+        outModified = true;
+    }
+}
+
+void Config::sanitizeAfterLoad(void) {
+    bool changed = false;
+
+    // Scalar char buffers
+    ensureNullTerm(conf.pilotName, sizeof(conf.pilotName), changed);
+    ensureNullTerm(conf.pilotCallsign, sizeof(conf.pilotCallsign), changed);
+    ensureNullTerm(conf.pilotPhonetic, sizeof(conf.pilotPhonetic), changed);
+    ensureNullTerm(conf.theme, sizeof(conf.theme), changed);
+    ensureNullTerm(conf.selectedVoice, sizeof(conf.selectedVoice), changed);
+    ensureNullTerm(conf.lapFormat, sizeof(conf.lapFormat), changed);
+    ensureNullTerm(conf.ssid, sizeof(conf.ssid), changed);
+    ensureNullTerm(conf.password, sizeof(conf.password), changed);
+    ensureNullTerm(conf.masterHostname, sizeof(conf.masterHostname), changed);
+    ensureNullTerm(conf.rhHostIP, sizeof(conf.rhHostIP), changed);
+    ensureNullTerm(conf.splitMasterHostname, sizeof(conf.splitMasterHostname), changed);
+    ensureNullTerm(conf.elrsBackpackBindPhrase, sizeof(conf.elrsBackpackBindPhrase), changed);
+
+    // Array char buffers
+    for (uint8_t i = 0; i < 10; i++) {
+        ensureNullTerm(conf.webhookIPs[i], sizeof(conf.webhookIPs[i]), changed);
+    }
+    for (uint8_t i = 0; i < 5; i++) {
+        ensureNullTerm(conf.syncedTimers[i], sizeof(conf.syncedTimers[i]), changed);
+    }
+    for (uint8_t i = 0; i < MAX_SPLIT_GATES; i++) {
+        ensureNullTerm(conf.splitGates[i], sizeof(conf.splitGates[i]), changed);
+    }
+
+    // Clamp counts that iterate over string arrays
+    if (conf.webhookCount > 10) { conf.webhookCount = 0; changed = true; }
+    if (conf.syncedTimerCount > 5) { conf.syncedTimerCount = 0; changed = true; }
+    if (conf.splitGateCount > MAX_SPLIT_GATES) { conf.splitGateCount = 0; changed = true; }
+
+    // Clamp boolean-style flags that have 0xFF when uninitialized
+    auto clampBool = [&](uint8_t& v) {
+        if (v != 0 && v != 1) { v = 0; changed = true; }
+    };
+    clampBool(conf.elrsBackpackEspnow);
+    clampBool(conf.elrsOsdClearOnStop);
+    clampBool(conf.elrsOsdPlaybackLaps);
+    clampBool(conf.rhEnabled);
+    clampBool(conf.speakerEnabled);
+    clampBool(conf.batteryAlarmEnabled);
+    clampBool(conf.tracksEnabled);
+    clampBool(conf.webhooksEnabled);
+    clampBool(conf.gateLEDsEnabled);
+    clampBool(conf.webhookRaceStart);
+    clampBool(conf.webhookRaceStop);
+    clampBool(conf.webhookLap);
+    clampBool(conf.ledManualOverride);
+    clampBool(conf.autoThresholdEnabled);
+
+    // Split gate numbers (1..MAX_SPLIT_GATES, 0 = unassigned)
+    if (conf.splitGateNumber > MAX_SPLIT_GATES) { conf.splitGateNumber = 0; changed = true; }
+    for (uint8_t i = 0; i < MAX_SPLIT_GATES; i++) {
+        if (conf.splitGateNumbers[i] > MAX_SPLIT_GATES) { conf.splitGateNumbers[i] = 0; changed = true; }
+    }
+
+    // ELRS OSD row (valid 0..18)
+    if (conf.elrsOsdLapRow > 18) {
+        conf.elrsOsdLapRow = 5;
+        changed = true;
+    }
+    // ELRS OSD col: 0..49 or ELRS_OSD_LAP_COL_AUTO (255)
+    if (conf.elrsOsdLapCol != ELRS_OSD_LAP_COL_AUTO && conf.elrsOsdLapCol > 49) {
+        conf.elrsOsdLapCol = ELRS_OSD_LAP_COL_AUTO;
+        changed = true;
+    }
+
+    // Race sync mode: 0/1/2
+    if (conf.raceSyncMode > 2) { conf.raceSyncMode = 0; changed = true; }
+
+    if (changed) {
+        DEBUG("sanitizeAfterLoad: repaired uninitialized/invalid config fields\n");
+        modified = true;
+    }
 }
 
 void Config::write(void) {

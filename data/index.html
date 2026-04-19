@@ -895,7 +895,7 @@
 
               <!-- Gate configuration (shown when split gates exist) -->
               <div id="splitGatesConfig" style="display: none">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
                   <label class="switch" style="flex-shrink: 0;">
                     <input type="checkbox" id="splitPersonalViewToggle" checked onchange="toggleSplitPersonalView(this.checked)" />
                     <span class="slider"></span>
@@ -903,6 +903,17 @@
                   <div>
                     <div style="font-weight: bold; font-size: 14px;">Personal Race View</div>
                     <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show full lap detail (times, gaps, analysis) during split time sessions</div>
+                  </div>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                  <label class="switch" style="flex-shrink: 0;">
+                    <input type="checkbox" id="splitEnhancedViewToggle" onchange="toggleSplitEnhancedView(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                  <div>
+                    <div style="font-weight: bold; font-size: 14px;">Enhanced Split Display</div>
+                    <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap cards with color-coded gate splits (green = best, yellow = within 0.05s, red = slower)</div>
                   </div>
                 </div>
 

@@ -17,6 +17,7 @@ struct SectorSplit {
     uint8_t fromGate;         // Starting gate number
     uint8_t toGate;           // Ending gate number
     uint32_t sectorTimeMs;    // Time to travel between gates (ms)
+    uint32_t toRaceElapsedMs; // Absolute race-elapsed time at the 'to' crossing (ms)
     float distanceM;          // Distance between gates (meters, 0 if not set)
     float speedMps;           // Speed in m/s (0 if distance not set)
     uint8_t lapIndex;         // Which lap this split belongs to (0-based)
