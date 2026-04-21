@@ -454,7 +454,8 @@
         },
         "diagnostics": {
             "title": "Diagnostik",
-            "debug_mode": "Debug-Modus",
+              "debug_mode": "Debug-Modus",
+              "debug_popout": "RSSI-Debug in neuem Fenster öffnen",
             "debug_mode_tip": "Live RSSI-Diagramm auf dem Rennbildschirm anzeigen",
             "hardware_tests": "Hardware-Tests",
             "description": "Umfassende Hardware- und Software-Tests ausführen um alle FPVGate-Komponenten zu verifizieren.",

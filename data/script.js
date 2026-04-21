@@ -162,6 +162,10 @@ var debugRssiChart = null;
 var debugRssiSeries = new TimeSeries();
 var debugCrossingSeries = new TimeSeries();
 
+// Timestamp of the most recent user interaction with the RSSI threshold sliders.
+// Used to skip live-update overwrites while the user is actively dragging.
+var thresholdLastEditMs = 0;
+
 // Clean up any corrupt saved debug RSSI overlay position from earlier builds
 // (NaN -> null from parseInt("") caused off-screen positioning)
 (function sanitizeDebugRssiPos() {
@@ -1971,10 +1975,15 @@ function updateEnterRssi(obj, value) {
   enterRssi = parseInt(value);
   enterRssiSpan.textContent = enterRssi;
   if (enterRssi <= exitRssi) {
-    exitRssi = Math.max(0, enterRssi - 1);
+    exitRssi = Math.max(50, enterRssi - 1);
     exitRssiInput.value = exitRssi;
     exitRssiSpan.textContent = exitRssi;
   }
+  // Auto-save so other connected clients (and the device) receive the new
+  // threshold live. autoSaveConfig is debounced and no-ops while we're
+  // refreshing the UI from the device, so drags don't spam the backend.
+  if (!_refreshingFromDevice) thresholdLastEditMs = Date.now();
+  autoSaveConfig();
 }
 
 function updateExitRssi(obj, value) {
@@ -1985,6 +1994,8 @@ function updateExitRssi(obj, value) {
     enterRssiInput.value = enterRssi;
     enterRssiSpan.textContent = enterRssi;
   }
+  if (!_refreshingFromDevice) thresholdLastEditMs = Date.now();
+  autoSaveConfig();
 }
 
 
@@ -2431,14 +2442,19 @@ async function refreshConfigFromDevice() {
       populateFreqOutput();
     }
     
-    // Update threshold values if changed
-    if (configData.enterRssi !== undefined) {
-      enterRssiInput.value = configData.enterRssi;
-      updateEnterRssi(enterRssiInput, enterRssiInput.value);
-    }
-    if (configData.exitRssi !== undefined) {
-      exitRssiInput.value = configData.exitRssi;
-      updateExitRssi(exitRssiInput, exitRssiInput.value);
+    // Update threshold values if changed - unless the local user has been
+    // dragging the sliders within the last ~2 seconds, in which case the
+    // remote update would yank the slider out from under their finger.
+    const suppressThresholds = (Date.now() - thresholdLastEditMs) < 2000;
+    if (!suppressThresholds) {
+      if (configData.enterRssi !== undefined) {
+        enterRssiInput.value = configData.enterRssi;
+        updateEnterRssi(enterRssiInput, enterRssiInput.value);
+      }
+      if (configData.exitRssi !== undefined) {
+        exitRssiInput.value = configData.exitRssi;
+        updateExitRssi(exitRssiInput, exitRssiInput.value);
+      }
     }
     if (configData.raceCountdownMode !== undefined) {
       raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
@@ -3197,6 +3213,28 @@ function onRaceCountdownModeChange(el) {
     raceCountdownMode = (v === 0) ? 0 : 1;
   }
   autoSaveConfig();
+}
+
+// Open the RSSI debug view in a dedicated popout window so it can stay
+// visible while the user navigates other tabs or the settings modal.
+function openRssiDebugPopout(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  try {
+    var url = window.location.origin + "/rssi-debug.html";
+    var features = "popup=yes,width=900,height=400,menubar=no,toolbar=no,location=no,status=no";
+    var win = window.open(url, "fpvgateRssiDebug", features);
+    if (win && !win.closed) {
+      try { win.focus(); } catch (e) { /* ignore cross-origin focus errors */ }
+    } else {
+      // Popup was blocked - fall back to a normal tab
+      window.open(url, "_blank");
+    }
+  } catch (err) {
+    console.error("[RSSI Debug] Failed to open popout:", err);
+  }
 }
 
 async function startRace() {

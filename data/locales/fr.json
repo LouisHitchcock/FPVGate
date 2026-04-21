@@ -454,7 +454,8 @@
         },
         "diagnostics": {
             "title": "Diagnostics",
-            "debug_mode": "Mode Débogage",
+              "debug_mode": "Mode Debug",
+              "debug_popout": "Ouvrir le débogage RSSI dans une nouvelle fenêtre",
             "debug_mode_tip": "Afficher le graphique RSSI en direct sur l'écran de course",
             "hardware_tests": "Tests Matériel",
             "description": "Exécuter tests matériels et logiciels complets pour vérifier tous les composants FPVGate.",

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FPVGate RSSI Debug</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #0b0f14;
+        color: #e6edf3;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        overflow: hidden;
+      }
+      .rssi-debug-root {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+      .rssi-debug-header {
+        display: flex;
+        gap: 18px;
+        align-items: baseline;
+        padding: 8px 6px;
+        border-bottom: 1px solid #1f2a36;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+      .rssi-debug-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: #9fd3ff;
+        letter-spacing: 0.5px;
+      }
+      .rssi-debug-stat {
+        font-size: 14px;
+        color: #9aa7b2;
+      }
+      .rssi-debug-stat b {
+        color: #e6edf3;
+        font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+        margin-left: 4px;
+      }
+      .rssi-debug-stat.enter b { color: hsl(8.2, 86.5%, 65%); }
+      .rssi-debug-stat.exit  b { color: hsl(25, 85%, 65%); }
+      .rssi-debug-stat.live  b { color: hsl(214, 70%, 75%); font-size: 18px; }
+      .rssi-debug-crossing {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #334050;
+        margin-left: 6px;
+        transition: background 0.15s;
+        vertical-align: middle;
+      }
+      .rssi-debug-crossing.active {
+        background: hsl(136, 71%, 55%);
+        box-shadow: 0 0 8px hsl(136, 71%, 55%);
+      }
+      .rssi-debug-conn {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #9aa7b2;
+      }
+      .rssi-debug-conn-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #e74c3c;
+        transition: background 0.3s;
+      }
+      .rssi-debug-conn-dot.connected { background: #2ecc71; }
+      .rssi-debug-chart-wrap {
+        flex: 1;
+        min-height: 0;
+        background: #050a12;
+        border: 1px solid #1f2a36;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      #rssiChart {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="rssi-debug-root">
+      <div class="rssi-debug-header">
+        <span class="rssi-debug-title">RSSI DEBUG</span>
+        <span class="rssi-debug-stat live">Live:<b id="liveValue">--</b></span>
+        <span class="rssi-debug-stat enter">Enter:<b id="enterValue">--</b></span>
+        <span class="rssi-debug-stat exit">Exit:<b id="exitValue">--</b></span>
+        <span class="rssi-debug-stat">Min:<b id="minValue">--</b></span>
+        <span class="rssi-debug-stat">Max:<b id="maxValue">--</b></span>
+        <span class="rssi-debug-stat">
+          Crossing<span id="crossingDot" class="rssi-debug-crossing"></span>
+        </span>
+        <span class="rssi-debug-conn">
+          <span id="connDot" class="rssi-debug-conn-dot"></span>
+          <span id="connLabel">Connecting...</span>
+        </span>
+      </div>
+      <div class="rssi-debug-chart-wrap">
+        <canvas id="rssiChart"></canvas>
+      </div>
+    </div>
+
+    <script src="smoothie.js"></script>
+    <script src="rssi-debug.js"></script>
+  </body>
+</html>

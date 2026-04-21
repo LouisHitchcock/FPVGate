@@ -454,7 +454,8 @@
         },
         "diagnostics": {
             "title": "诊断",
-            "debug_mode": "调试模式",
+              "debug_mode": "调试模式",
+              "debug_popout": "在新窗口打开 RSSI 调试",
             "debug_mode_tip": "在比赛屏幕上显示实时 RSSI 图表",
             "hardware_tests": "硬件测试",
             "description": "运行全面的硬件和软件测试，验证所有 FPVGate 组件是否正常运行。",

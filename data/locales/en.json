@@ -455,8 +455,9 @@
         },
         "diagnostics": {
             "title": "Diagnostics",
-            "debug_mode": "Debug Mode",
-            "debug_mode_tip": "Show live RSSI graph overlay on the race screen",
+              "debug_mode": "Debug Mode",
+              "debug_mode_tip": "Show live RSSI graph overlay on the race screen",
+              "debug_popout": "Open RSSI debug in a new window",
             "hardware_tests": "Hardware Tests",
             "description": "Run comprehensive hardware and software tests to verify all FPVGate components are functioning correctly.",
             "run_test": "Run System Self-Test",

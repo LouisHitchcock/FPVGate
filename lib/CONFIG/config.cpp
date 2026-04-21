@@ -279,6 +279,30 @@ void Config::load(void) {
         conf.announcerRate = 10;
         modified = true;
     }
+
+    // Sanity: RSSI thresholds. Anything below the slider minimum (50) is treated as
+    // corrupt and restored to a sensible default so the UI never boots showing the min.
+    if (conf.enterRssi < 50 || conf.enterRssi == 0xFF) {
+        DEBUG("Invalid enterRssi=%u; resetting to default 72\n", conf.enterRssi);
+        conf.enterRssi = 72;
+        modified = true;
+    }
+    if (conf.exitRssi < 50 || conf.exitRssi == 0xFF) {
+        DEBUG("Invalid exitRssi=%u; resetting to default 68\n", conf.exitRssi);
+        conf.exitRssi = 68;
+        modified = true;
+    }
+    if (conf.exitRssi >= conf.enterRssi) {
+        DEBUG("Invalid enter/exit relationship (enter=%u, exit=%u); clamping\n",
+              conf.enterRssi, conf.exitRssi);
+        if (conf.enterRssi > 50) {
+            conf.exitRssi = conf.enterRssi - 1;
+        } else {
+            conf.enterRssi = 72;
+            conf.exitRssi = 68;
+        }
+        modified = true;
+    }
 }
 
 void Config::write(void) {
@@ -493,12 +517,24 @@ void Config::fromJson(JsonObject source) {
         }
     }
     if (!source["enterRssi"].isNull() && source["enterRssi"] != conf.enterRssi) {
-        conf.enterRssi = source["enterRssi"];
-        modified = true;
+        int val = source["enterRssi"].as<int>();
+        // Reject out-of-range values (UI slider is 50..255) so we don't persist
+        // bogus zeros from stale/partial payloads.
+        if (val >= 50 && val <= 255) {
+            conf.enterRssi = (uint8_t)val;
+            modified = true;
+        } else {
+            DEBUG("Rejected out-of-range enterRssi=%d\n", val);
+        }
     }
     if (!source["exitRssi"].isNull() && source["exitRssi"] != conf.exitRssi) {
-        conf.exitRssi = source["exitRssi"];
-        modified = true;
+        int val = source["exitRssi"].as<int>();
+        if (val >= 50 && val <= 254) {
+            conf.exitRssi = (uint8_t)val;
+            modified = true;
+        } else {
+            DEBUG("Rejected out-of-range exitRssi=%d\n", val);
+        }
     }
     if (!source["maxLaps"].isNull() && source["maxLaps"] != conf.maxLaps) {
         conf.maxLaps = source["maxLaps"];

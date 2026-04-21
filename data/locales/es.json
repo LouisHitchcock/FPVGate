@@ -454,7 +454,8 @@
         },
         "diagnostics": {
             "title": "Diagnósticos",
-            "debug_mode": "Modo Depuración",
+              "debug_mode": "Modo Debug",
+              "debug_popout": "Abrir depuración RSSI en una nueva ventana",
             "debug_mode_tip": "Mostrar gráfico RSSI en vivo en la pantalla de carrera",
             "hardware_tests": "Pruebas Hardware",
             "description": "Ejecutar pruebas completas hardware y software para verificar todos los componentes FPVGate.",

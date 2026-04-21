@@ -1024,6 +1024,11 @@ EEPROM:\n\
         }
 #endif
         
+        // Notify other connected clients (and the LCD) that config changed so
+        // they can refresh their UI. Safe to call here; broadcast runs on the
+        // web update loop via pendingConfigUpdate.
+        triggerConfigUpdated();
+        
         request->send(200, "application/json", "{\"status\": \"OK\"}");
         led->on(200);
     });
