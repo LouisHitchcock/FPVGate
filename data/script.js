@@ -159,6 +159,23 @@ var debugRssiChart = null;
 var debugRssiSeries = new TimeSeries();
 var debugCrossingSeries = new TimeSeries();
 
+// Clean up any corrupt saved debug RSSI overlay position from earlier builds
+// (NaN -> null from parseInt("") caused off-screen positioning)
+(function sanitizeDebugRssiPos() {
+  try {
+    var raw = localStorage.getItem('debugRssiPos');
+    if (!raw) return;
+    var pos = JSON.parse(raw);
+    if (!pos || typeof pos !== 'object' ||
+        !Number.isFinite(pos.top) || !Number.isFinite(pos.left)) {
+      localStorage.removeItem('debugRssiPos');
+      console.log('[DebugOverlay] Cleared corrupt debugRssiPos from localStorage');
+    }
+  } catch (e) {
+    localStorage.removeItem('debugRssiPos');
+  }
+})();
+
 // Fetch and display version
 async function fetchVersion() {
   try {
@@ -1738,16 +1755,30 @@ function updateDebugOverlay() {
   var raceVisible = race.style.display != "none";
   if (debugMode && raceVisible) {
     overlay.style.display = "block";
-    // Restore saved position
+    // Restore saved position (only if it's a valid, in-viewport numeric pair)
     var saved = localStorage.getItem('debugRssiPos');
     if (saved) {
       try {
         var pos = JSON.parse(saved);
-        overlay.style.top = pos.top + 'px';
-        overlay.style.left = pos.left + 'px';
-        overlay.style.bottom = 'auto';
-        overlay.style.right = 'auto';
-      } catch(e) {}
+        if (pos && typeof pos === 'object' &&
+            Number.isFinite(pos.top) && Number.isFinite(pos.left)) {
+          var w = overlay.offsetWidth || 320;
+          var h = overlay.offsetHeight || 120;
+          var maxLeft = Math.max(0, window.innerWidth - w);
+          var maxTop = Math.max(0, window.innerHeight - h);
+          var clampedLeft = Math.max(0, Math.min(pos.left, maxLeft));
+          var clampedTop = Math.max(0, Math.min(pos.top, maxTop));
+          overlay.style.top = clampedTop + 'px';
+          overlay.style.left = clampedLeft + 'px';
+          overlay.style.bottom = 'auto';
+          overlay.style.right = 'auto';
+        } else {
+          // Corrupt entry - nuke it so we fall back to the default bottom/right anchor
+          localStorage.removeItem('debugRssiPos');
+        }
+      } catch(e) {
+        localStorage.removeItem('debugRssiPos');
+      }
     }
     if (debugRssiChart) debugRssiChart.start();
     // Ensure RSSI streaming is active
@@ -1760,13 +1791,24 @@ function updateDebugOverlay() {
 
 // --- Debug RSSI Overlay Drag ---
 (function() {
-  var dragHandle, overlay, offsetX, offsetY, dragging = false;
+  var dragHandle, overlay, offsetX, offsetY, dragging = false, moved = false;
+
+  function persistPosition() {
+    // Only persist if the overlay was actually dragged to new coordinates.
+    // Guards against click-only interactions poisoning localStorage with NaN.
+    if (!overlay || !moved) return;
+    var top = parseInt(overlay.style.top, 10);
+    var left = parseInt(overlay.style.left, 10);
+    if (!Number.isFinite(top) || !Number.isFinite(left)) return;
+    localStorage.setItem('debugRssiPos', JSON.stringify({ top: top, left: left }));
+  }
 
   function onMouseDown(e) {
     if (e.button !== 0) return;
     overlay = document.getElementById('debugRssiOverlay');
     if (!overlay) return;
     dragging = true;
+    moved = false;
     var rect = overlay.getBoundingClientRect();
     offsetX = e.clientX - rect.left;
     offsetY = e.clientY - rect.top;
@@ -1786,17 +1828,15 @@ function updateDebugOverlay() {
     overlay.style.top = newTop + 'px';
     overlay.style.bottom = 'auto';
     overlay.style.right = 'auto';
+    moved = true;
   }
 
   function onMouseUp() {
     if (!dragging) return;
     dragging = false;
     dragHandle.style.cursor = 'grab';
-    // Persist position
-    localStorage.setItem('debugRssiPos', JSON.stringify({
-      top: parseInt(overlay.style.top),
-      left: parseInt(overlay.style.left)
-    }));
+    persistPosition();
+    moved = false;
   }
 
   // Touch support
@@ -1805,6 +1845,7 @@ function updateDebugOverlay() {
     overlay = document.getElementById('debugRssiOverlay');
     if (!overlay) return;
     dragging = true;
+    moved = false;
     var rect = overlay.getBoundingClientRect();
     offsetX = t.clientX - rect.left;
     offsetY = t.clientY - rect.top;
@@ -1823,16 +1864,15 @@ function updateDebugOverlay() {
     overlay.style.top = newTop + 'px';
     overlay.style.bottom = 'auto';
     overlay.style.right = 'auto';
+    moved = true;
     e.preventDefault();
   }
 
   function onTouchEnd() {
     if (!dragging) return;
     dragging = false;
-    localStorage.setItem('debugRssiPos', JSON.stringify({
-      top: parseInt(overlay.style.top),
-      left: parseInt(overlay.style.left)
-    }));
+    persistPosition();
+    moved = false;
   }
 
   dragHandle = document.getElementById('debugRssiDragHandle');
