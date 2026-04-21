@@ -1,6 +1,10 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
+## [1.7.2] - 2026-04-21
+
+### Changed
+- Bumped firmware version to 1.7.2
 
 ## [1.7.1] - 2026-04-09
 
