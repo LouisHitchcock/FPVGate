@@ -175,6 +175,10 @@
             "infinite": "Unendlich",
             "infinite_tip": "Tipp: Setze 0 für unendliche Runden",
             "infinite_label": "Unendlich",
+            "max_heat_time": "Maximale Heat-Zeit:",
+            "max_heat_time_tip": "Tipp: Setze 0 für unbegrenzte Heat-Zeit. Andernfalls stoppt das Rennen nach N Minuten automatisch.",
+            "unlimited_label": "Unbegrenzt",
+            "minutes_short": "{n} Min",
             "min_lap": "Minimale Rundenzeit:",
             "beep_volume": "Piep-Lautstärke:"
         },

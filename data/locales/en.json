@@ -176,6 +176,10 @@
             "infinite": "Infinite",
             "infinite_tip": "Tip: Set to 0 for infinite laps",
             "infinite_label": "Infinite",
+            "max_heat_time": "Maximum Heat Time:",
+            "max_heat_time_tip": "Tip: Set to 0 for unlimited heat time. Otherwise the race auto-stops after N minutes.",
+            "unlimited_label": "Unlimited",
+            "minutes_short": "{n} min",
             "min_lap": "Minimum Lap Time:",
             "beep_volume": "Beep Volume:"
         },

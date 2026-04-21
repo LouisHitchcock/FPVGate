@@ -499,6 +499,15 @@
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.race_setup.infinite_tip">Tip: Set to 0 for infinite laps</div>
 
               <div class="config-item">
+                <label for="maxHeatTime" data-i18n="settings.race_setup.max_heat_time">Maximum Heat Time:</label>
+                <div class="input-with-value">
+                  <span class="val" data-i18n="settings.race_setup.unlimited_label">Unlimited</span>
+                  <input type="range" id="maxHeatTime" step="1" min="0" max="60" value="0" oninput="updateMaxHeatTime(this,value)" />
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.race_setup.max_heat_time_tip">Tip: Set to 0 for unlimited heat time. Otherwise the race auto-stops after the selected duration.</div>
+
+              <div class="config-item">
                 <label for="minLap" data-i18n="settings.race_setup.min_lap">Minimum Lap Time:</label>
                 <div class="input-with-value">
                   <span class="val">10.0s</span>

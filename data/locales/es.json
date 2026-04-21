@@ -175,6 +175,10 @@
             "infinite": "Infinito",
             "infinite_tip": "Consejo: Establece 0 para vueltas infinitas",
             "infinite_label": "Infinito",
+            "max_heat_time": "Tiempo Máximo de Manga:",
+            "max_heat_time_tip": "Consejo: Establece 0 para tiempo ilimitado. De lo contrario, la carrera se detiene automáticamente tras N minutos.",
+            "unlimited_label": "Ilimitado",
+            "minutes_short": "{n} min",
             "min_lap": "Tiempo Mínimo Vuelta:",
             "beep_volume": "Volumen del Pitido:"
         },

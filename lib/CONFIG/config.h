@@ -239,7 +239,7 @@
 #define EEPROM_RESERVED_SIZE 832
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 20U
+#define CONFIG_VERSION 22U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -323,11 +323,15 @@ typedef struct {
     // Pre-race countdown style: 0="Less than 5" (classic TTS + random 1-5s delay),
     // 1="10 Second Countdown" (visible 10s countdown overlay matching LCD).
     uint8_t raceCountdownMode;
+    // Maximum heat time in 30-second blocks. 0 = unlimited, 1..60 = auto-stop
+    // the race after (value * 30) seconds (1 = 30s, 2 = 1 min, ... 60 = 30 min).
+    // Enforced client-side; mirrors the maxLaps pattern.
+    uint8_t maxHeatTime30s;
     // Reserved slack where the ELRS Backpack fields used to live (kept to
     // preserve EEPROM layout for already-deployed devices). Active ELRS
     // development lives on the feature/ELRSBackpack branch; when it is
     // merged back these bytes will be re-reintroduced as typed fields.
-    uint8_t _reservedELRS[37];
+    uint8_t _reservedELRS[36];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -471,6 +475,10 @@ class Config {
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     uint8_t getRaceCountdownMode();
     void setRaceCountdownMode(uint8_t mode);
+
+    // Maximum heat time in 30-second blocks (0 = unlimited)
+    uint8_t getMaxHeatTime30s();
+    void setMaxHeatTime30s(uint8_t blocks);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();

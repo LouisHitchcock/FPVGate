@@ -31,6 +31,7 @@ const ssidInput = document.getElementById("ssid");
 const pwdInput = document.getElementById("pwd");
 const minLapInput = document.getElementById("minLap");
 const maxLapsInput = document.getElementById("maxLaps");
+const maxHeatTimeInput = document.getElementById("maxHeatTime");
 
 const freqLookup = [
   [5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725], // A
@@ -103,6 +104,11 @@ var raceCountdownMode = 1;
 var lapNo = -1;
 var lapTimes = [];
 var maxLaps = 0;
+// Maximum heat time in 30-second blocks (0 = unlimited, 1 = 30s, 2 = 1 min, ...
+// 60 = 30 min). When >0, the race auto-stops via a setTimeout scheduled in
+// startRace().
+var maxHeatTime30s = 0;
+var heatTimeoutId = null;
 
 // Track data for current race
 var currentTrackId = 0;
@@ -1238,6 +1244,10 @@ onload = async function (e) {
     if (configData.pwd !== undefined) pwdInput.value = configData.pwd;
     maxLapsInput.value = configData.maxLaps !== undefined ? configData.maxLaps : 0;
     updateMaxLaps(maxLapsInput, maxLapsInput.value);
+    if (maxHeatTimeInput) {
+      maxHeatTimeInput.value = configData.maxHeatTime30s !== undefined ? configData.maxHeatTime30s : 0;
+      updateMaxHeatTime(maxHeatTimeInput, maxHeatTimeInput.value);
+    }
 
     // Load beep volume from localStorage (browser audio volume)
     const beepVolumeInput = document.getElementById("beepVolume");
@@ -2176,6 +2186,7 @@ async function saveConfig() {
     enterRssi: enterRssi,
     exitRssi: exitRssi,
     maxLaps: maxLaps,
+    maxHeatTime30s: maxHeatTime30s,
     receiverRadio: receiverRadioSelect ? parseInt(receiverRadioSelect.value) : 0,
     novaFilterKalman: document.getElementById("novaFilterKalman") ? (document.getElementById("novaFilterKalman").checked ? 1 : 0) : 1,
     novaFilterMedian: document.getElementById("novaFilterMedian") ? (document.getElementById("novaFilterMedian").checked ? 1 : 0) : 0,
@@ -2479,6 +2490,14 @@ async function refreshConfigFromDevice() {
       const rcEl = document.getElementById("raceCountdownMode");
       if (rcEl) rcEl.value = String(raceCountdownMode);
     }
+    if (configData.maxHeatTime30s !== undefined && maxHeatTimeInput) {
+      maxHeatTimeInput.value = configData.maxHeatTime30s;
+      updateMaxHeatTime(maxHeatTimeInput, maxHeatTimeInput.value);
+    }
+    if (configData.maxLaps !== undefined && maxLapsInput) {
+      maxLapsInput.value = configData.maxLaps;
+      updateMaxLaps(maxLapsInput, maxLapsInput.value);
+    }
     
     console.log("[Config] Refreshed from device: band=" + configData.bandIndex + " ch=" + configData.channelIndex + " freq=" + configData.freq);
   } catch (err) {
@@ -2556,6 +2575,23 @@ function updateMaxLaps(obj, value) {
     displayText = i18n.t("race.table.lap_singular");
   } else {
     displayText = i18n.t("race.table.lap_plural", { n: maxLaps });
+  }
+  $(obj).parent().find("span").text(displayText);
+  // Auto-save when changed
+  autoSaveConfig();
+}
+
+function updateMaxHeatTime(obj, value) {
+  maxHeatTime30s = parseInt(value);
+  let displayText;
+  if (maxHeatTime30s === 0) {
+    displayText = i18n.t("settings.race_setup.unlimited_label");
+  } else {
+    // Format N 30-second blocks as M:SS (e.g. 1 -> "0:30", 2 -> "1:00", 3 -> "1:30")
+    const totalSeconds = maxHeatTime30s * 30;
+    const mm = Math.floor(totalSeconds / 60);
+    const ss = totalSeconds % 60;
+    displayText = `${mm}:${ss < 10 ? "0" + ss : ss}`;
   }
   $(obj).parent().find("span").text(displayText);
   // Auto-save when changed
@@ -3354,6 +3390,25 @@ async function startRace() {
   // Start polling distance if tracks enabled
   startDistancePolling();
 
+  // Auto-stop the race after maxHeatTime30s * 30 seconds (0 = unlimited).
+  // Guarded by stopRaceButton.disabled in case stopRace already ran.
+  if (heatTimeoutId) {
+    clearTimeout(heatTimeoutId);
+    heatTimeoutId = null;
+  }
+  if (maxHeatTime30s > 0) {
+    const heatMs = maxHeatTime30s * 30 * 1000;
+    console.log(`[Race] Heat time limit ${maxHeatTime30s * 30}s - scheduling auto-stop in ${heatMs} ms`);
+    heatTimeoutId = setTimeout(function () {
+      heatTimeoutId = null;
+      if (!stopRaceButton.disabled) {
+        console.log("[Race] Max heat time reached - stopping race");
+        stopRace();
+        queueSpeak(`<p>${i18n.t("settings.tts.race_complete")}</p>`);
+      }
+    }, heatMs);
+  }
+
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
 
@@ -3362,6 +3417,11 @@ function stopRace() {
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
     return;
+  }
+  // Cancel pending heat-time auto-stop (idempotent)
+  if (heatTimeoutId) {
+    clearTimeout(heatTimeoutId);
+    heatTimeoutId = null;
   }
   // Clear any queued audio to prevent race start sounds
   if (audioAnnouncer) {
@@ -3422,6 +3482,11 @@ function clearLaps() {
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
     return;
+  }
+  // Cancel pending heat-time auto-stop (idempotent)
+  if (heatTimeoutId) {
+    clearTimeout(heatTimeoutId);
+    heatTimeoutId = null;
   }
   // Auto-save race if there are laps before clearing
   if (lapTimes.length > 0) {

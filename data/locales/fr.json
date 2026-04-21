@@ -175,6 +175,10 @@
             "infinite": "Infini",
             "infinite_tip": "Conseil: Mettre 0 pour tours infinis",
             "infinite_label": "Infini",
+            "max_heat_time": "Durée Maximale de Manche:",
+            "max_heat_time_tip": "Conseil: Mettre 0 pour une durée illimitée. Sinon la course s'arrête automatiquement après N minutes.",
+            "unlimited_label": "Illimité",
+            "minutes_short": "{n} min",
             "min_lap": "Temps Tour Minimum:",
             "beep_volume": "Volume du Bip:"
         },

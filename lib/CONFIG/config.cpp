@@ -93,78 +93,109 @@ void Config::load(void) {
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
         
-        // Migration from version 19 to 20: add raceCountdownMode field
+        // Migration from version 21 to 22: reinterpret maxHeatTime field from
+        // minutes to 30-second blocks. Storage layout unchanged (both uint8_t
+        // at the same offset); value is doubled so existing "1 min" stays
+        // equivalent (2 * 30s = 60s).
+        if (version == 21) {
+            DEBUG("Migrating config from v21 to v22 (maxHeatTime minutes -> 30s blocks)\n");
+            uint16_t doubled = (uint16_t)conf.maxHeatTime30s * 2;  // struct overlays old maxHeatTimeMin
+            conf.maxHeatTime30s = (doubled > 60) ? 60 : (uint8_t)doubled;
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 20 to 22: add maxHeatTime30s field
+        // (carved out of _reservedELRS padding). Default 0 = unlimited
+        // preserves existing no-auto-stop behaviour for existing installs.
+        else if (version == 20) {
+            DEBUG("Migrating config from v20 to v22 (adding maxHeatTime30s)\n");
+            conf.maxHeatTime30s = 0;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 19 to 22: add raceCountdownMode + maxHeatTime30s
         // (carved out of _reservedELRS padding). Preserve the post-merge
         // behaviour (10-second visible countdown) for existing installs.
-        if (version == 19) {
-            DEBUG("Migrating config from v19 to v20 (adding raceCountdownMode)\n");
+        else if (version == 19) {
+            DEBUG("Migrating config from v19 to v22 (adding raceCountdownMode + maxHeatTime30s)\n");
             conf.raceCountdownMode = 1;  // Preserve post-merge 10-second countdown behaviour
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 18 to 20: no-op ELRS fields + raceCountdownMode.
+        // Migration from version 18 to 22: no-op ELRS fields + raceCountdownMode + maxHeatTime30s.
         else if (version == 18) {
-            DEBUG("Migrating config from v18 to v20 (no-op ELRS + raceCountdownMode)\n");
+            DEBUG("Migrating config from v18 to v22 (no-op ELRS + raceCountdownMode + maxHeatTime30s)\n");
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 17 to 20: stamp current version only.
+        // Migration from version 17 to 22: stamp current version only.
         else if (version == 17) {
-            DEBUG("Migrating config from v17 to v20\n");
+            DEBUG("Migrating config from v17 to v22\n");
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 16 to 20.
+        // Migration from version 16 to 22.
         else if (version == 16) {
-            DEBUG("Migrating config from v16 to v20\n");
+            DEBUG("Migrating config from v16 to v22\n");
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 15 to 20: add RotorHazard integration fields.
+        // Migration from version 15 to 22: add RotorHazard integration fields.
         else if (version == 15) {
-            DEBUG("Migrating config from v15 to v20 (adding RH integration fields)\n");
+            DEBUG("Migrating config from v15 to v22 (adding RH integration fields)\n");
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 14 to 20: add speakerEnabled + RH.
+        // Migration from version 14 to 22: add speakerEnabled + RH.
         else if (version == 14) {
-            DEBUG("Migrating config from v14 to v20 (adding speakerEnabled + RH)\n");
+            DEBUG("Migrating config from v14 to v22 (adding speakerEnabled + RH)\n");
             conf.speakerEnabled = 1;  // Enabled by default
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 13 to 20.
+        // Migration from version 13 to 22.
         else if (version == 13) {
-            DEBUG("Migrating config from v13 to v20\n");
+            DEBUG("Migrating config from v13 to v22\n");
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
             conf.novaFilterMA = 0;
@@ -178,15 +209,16 @@ void Config::load(void) {
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 12 to 20.
+        // Migration from version 12 to 22.
         else if (version == 12) {
-            DEBUG("Migrating config from v12 to v20\n");
+            DEBUG("Migrating config from v12 to v22\n");
             conf.receiverRadio = 0;
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
@@ -201,15 +233,16 @@ void Config::load(void) {
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 11 to 20.
+        // Migration from version 11 to 22.
         else if (version == 11) {
-            DEBUG("Migrating config from v11 to v20\n");
+            DEBUG("Migrating config from v11 to v22\n");
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
             conf.receiverRadio = 0;
@@ -226,15 +259,16 @@ void Config::load(void) {
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 10 to 20.
+        // Migration from version 10 to 22.
         else if (version == 10) {
-            DEBUG("Migrating config from v10 to v20\n");
+            DEBUG("Migrating config from v10 to v22\n");
             memset(conf.masterHostname, 0, sizeof(conf.masterHostname));
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
@@ -252,6 +286,7 @@ void Config::load(void) {
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
             conf.raceCountdownMode = 1;
+            conf.maxHeatTime30s = 0;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
@@ -432,6 +467,9 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
 
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     config["raceCountdownMode"] = conf.raceCountdownMode;
+
+    // Maximum heat time in 30-second blocks (0 = unlimited)
+    config["maxHeatTime30s"] = conf.maxHeatTime30s;
     
     // Add battery voltage if monitor exists
     if (batteryMonitor) {
@@ -877,6 +915,14 @@ void Config::fromJson(JsonObject source) {
         uint8_t val = source["raceCountdownMode"].as<uint8_t>();
         if (val <= 1) {
             conf.raceCountdownMode = val;
+            modified = true;
+        }
+    }
+    // Maximum heat time in 30-second blocks (0 = unlimited, 1..60 = 30s..30min)
+    if (!source["maxHeatTime30s"].isNull() && source["maxHeatTime30s"] != conf.maxHeatTime30s) {
+        uint8_t val = source["maxHeatTime30s"].as<uint8_t>();
+        if (val <= 60) {
+            conf.maxHeatTime30s = val;
             modified = true;
         }
     }
@@ -1460,6 +1506,14 @@ void Config::setRaceCountdownMode(uint8_t mode) {
     }
 }
 
+uint8_t Config::getMaxHeatTime30s() { return conf.maxHeatTime30s; }
+void Config::setMaxHeatTime30s(uint8_t blocks) {
+    if (blocks <= 60 && conf.maxHeatTime30s != blocks) {
+        conf.maxHeatTime30s = blocks;
+        modified = true;
+    }
+}
+
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -1532,6 +1586,8 @@ void Config::setDefaults(void) {
     conf.rhNodeIndex = 0;            // Seat 0 by default
     // Pre-race countdown defaults: keep the post-merge 10-second visible countdown
     conf.raceCountdownMode = 1;
+    // Maximum heat time: 0 = unlimited (no auto-stop), else N * 30 seconds
+    conf.maxHeatTime30s = 0;
     // Reserved slack for future ELRS Backpack fields
     memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
     modified = true;
