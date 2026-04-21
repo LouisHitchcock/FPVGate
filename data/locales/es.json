@@ -180,7 +180,13 @@
         },
         "tts": {
             "title": "Configuración TTS",
-            "announcer_type": "Tipo de Anunciador:",
+            "announcer_type": "Tipo de Locutor:",
+            "race_countdown": "Cuenta regresiva:",
+            "race_countdown_tip": "Menos de 5: aviso TTS clásico con inicio aleatorio en ~5 segundos. Cuenta de 10 segundos: superposición visible 10..1..GO.",
+            "countdown_options": {
+                "less_than_5": "Menos de 5",
+                "ten_second": "Cuenta regresiva de 10 segundos"
+            },
             "format": "Formato Anuncio:",
             "voice": "Voz:",
             "rate": "Velocidad Anunciador:",

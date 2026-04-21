@@ -93,64 +93,78 @@ void Config::load(void) {
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
         
-        // Migration from version 18 to 19: stamp current version only.
-        // (Previously this path initialised ELRS OSD fields which have been
-        //  moved to the feature/ELRSBackpack branch and replaced with
-        //  reserved padding; no field-level initialisation is required.)
-        if (version == 18) {
-            DEBUG("Migrating config from v18 to v19 (no-op; ELRS fields removed)\n");
+        // Migration from version 19 to 20: add raceCountdownMode field
+        // (carved out of _reservedELRS padding). Preserve the post-merge
+        // behaviour (10-second visible countdown) for existing installs.
+        if (version == 19) {
+            DEBUG("Migrating config from v19 to v20 (adding raceCountdownMode)\n");
+            conf.raceCountdownMode = 1;  // Preserve post-merge 10-second countdown behaviour
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 17 to 19: stamp current version only.
+        // Migration from version 18 to 20: no-op ELRS fields + raceCountdownMode.
+        else if (version == 18) {
+            DEBUG("Migrating config from v18 to v20 (no-op ELRS + raceCountdownMode)\n");
+            conf.raceCountdownMode = 1;
+            memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+            DEBUG("Migration complete, config preserved\n");
+        }
+        // Migration from version 17 to 20: stamp current version only.
         else if (version == 17) {
-            DEBUG("Migrating config from v17 to v19 (no-op; ELRS fields removed)\n");
+            DEBUG("Migrating config from v17 to v20\n");
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 16 to 19: stamp current version only.
+        // Migration from version 16 to 20.
         else if (version == 16) {
-            DEBUG("Migrating config from v16 to v19 (no-op; ELRS fields removed)\n");
+            DEBUG("Migrating config from v16 to v20\n");
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 15 to 19: add RotorHazard integration fields.
+        // Migration from version 15 to 20: add RotorHazard integration fields.
         else if (version == 15) {
-            DEBUG("Migrating config from v15 to v19 (adding RH integration fields)\n");
+            DEBUG("Migrating config from v15 to v20 (adding RH integration fields)\n");
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 14 to 19: add speakerEnabled + RH.
+        // Migration from version 14 to 20: add speakerEnabled + RH.
         else if (version == 14) {
-            DEBUG("Migrating config from v14 to v19 (adding speakerEnabled + RH)\n");
+            DEBUG("Migrating config from v14 to v20 (adding speakerEnabled + RH)\n");
             conf.speakerEnabled = 1;  // Enabled by default
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 13 to 19.
+        // Migration from version 13 to 20.
         else if (version == 13) {
-            DEBUG("Migrating config from v13 to v19\n");
+            DEBUG("Migrating config from v13 to v20\n");
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
             conf.novaFilterMA = 0;
@@ -163,15 +177,16 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 12 to 19.
+        // Migration from version 12 to 20.
         else if (version == 12) {
-            DEBUG("Migrating config from v12 to v19\n");
+            DEBUG("Migrating config from v12 to v20\n");
             conf.receiverRadio = 0;
             conf.novaFilterKalman = 1;
             conf.novaFilterMedian = 0;
@@ -185,15 +200,16 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 11 to 19.
+        // Migration from version 11 to 20.
         else if (version == 11) {
-            DEBUG("Migrating config from v11 to v19\n");
+            DEBUG("Migrating config from v11 to v20\n");
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
             conf.receiverRadio = 0;
@@ -209,15 +225,16 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
         }
-        // Migration from version 10 to 19.
+        // Migration from version 10 to 20.
         else if (version == 10) {
-            DEBUG("Migrating config from v10 to v19\n");
+            DEBUG("Migrating config from v10 to v20\n");
             memset(conf.masterHostname, 0, sizeof(conf.masterHostname));
             conf.autoThresholdEnabled = 0;
             conf.autoThresholdOffset = 15;
@@ -234,6 +251,7 @@ void Config::load(void) {
             conf.rhEnabled = 0;
             memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
             conf.rhNodeIndex = 0;
+            conf.raceCountdownMode = 1;
             memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
@@ -387,6 +405,9 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     config["rhEnabled"] = conf.rhEnabled;
     config["rhHostIP"] = conf.rhHostIP;
     config["rhNodeIndex"] = conf.rhNodeIndex;
+
+    // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
+    config["raceCountdownMode"] = conf.raceCountdownMode;
     
     // Add battery voltage if monitor exists
     if (batteryMonitor) {
@@ -431,7 +452,7 @@ void Config::fromJson(JsonObject source) {
         conf.version = CONFIG_VERSION | CONFIG_MAGIC;
     }
     
-    if (source["freq"] != conf.frequency) {
+    if (!source["freq"].isNull() && source["freq"] != conf.frequency) {
         conf.frequency = source["freq"];
         modified = true;
     }
@@ -444,17 +465,20 @@ void Config::fromJson(JsonObject source) {
         conf.channelIndex = source["channelIndex"];
         modified = true;
     }
-    if (source["minLap"] != conf.minLap) {
+    if (!source["minLap"].isNull() && source["minLap"] != conf.minLap) {
         conf.minLap = source["minLap"];
         modified = true;
     }
-    if (source["alarm"] != conf.alarm) {
+    if (!source["alarm"].isNull() && source["alarm"] != conf.alarm) {
         conf.alarm = source["alarm"];
         modified = true;
     }
-    if (source["anType"] != conf.announcerType) {
-        conf.announcerType = source["anType"];
-        modified = true;
+    if (!source["anType"].isNull() && source["anType"] != conf.announcerType) {
+        uint8_t val = source["anType"].as<uint8_t>();
+        if (val <= 4) {
+            conf.announcerType = val;
+            modified = true;
+        }
     }
     if (!source["anRate"].isNull()) {
         int r = source["anRate"].as<int>();
@@ -468,15 +492,15 @@ void Config::fromJson(JsonObject source) {
             modified = true;
         }
     }
-    if (source["enterRssi"] != conf.enterRssi) {
+    if (!source["enterRssi"].isNull() && source["enterRssi"] != conf.enterRssi) {
         conf.enterRssi = source["enterRssi"];
         modified = true;
     }
-    if (source["exitRssi"] != conf.exitRssi) {
+    if (!source["exitRssi"].isNull() && source["exitRssi"] != conf.exitRssi) {
         conf.exitRssi = source["exitRssi"];
         modified = true;
     }
-    if (source["maxLaps"] != conf.maxLaps) {
+    if (!source["maxLaps"].isNull() && source["maxLaps"] != conf.maxLaps) {
         conf.maxLaps = source["maxLaps"];
         modified = true;
     }
@@ -809,6 +833,14 @@ void Config::fromJson(JsonObject source) {
         uint8_t val = source["rhNodeIndex"].as<uint8_t>();
         if (val <= 7) {
             conf.rhNodeIndex = val;
+            modified = true;
+        }
+    }
+    // Pre-race countdown mode
+    if (!source["raceCountdownMode"].isNull() && source["raceCountdownMode"] != conf.raceCountdownMode) {
+        uint8_t val = source["raceCountdownMode"].as<uint8_t>();
+        if (val <= 1) {
+            conf.raceCountdownMode = val;
             modified = true;
         }
     }
@@ -1384,6 +1416,14 @@ void Config::setRhNodeIndex(uint8_t index) {
     }
 }
 
+uint8_t Config::getRaceCountdownMode() { return conf.raceCountdownMode <= 1 ? conf.raceCountdownMode : 1; }
+void Config::setRaceCountdownMode(uint8_t mode) {
+    if (mode <= 1 && conf.raceCountdownMode != mode) {
+        conf.raceCountdownMode = mode;
+        modified = true;
+    }
+}
+
 void Config::setDefaults(void) {
     DEBUG("Setting EEPROM defaults\n");
     // Reset everything to 0/false and then just set anything that zero is not appropriate
@@ -1454,6 +1494,8 @@ void Config::setDefaults(void) {
     conf.rhEnabled = 0;              // Disabled by default
     memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
     conf.rhNodeIndex = 0;            // Seat 0 by default
+    // Pre-race countdown defaults: keep the post-merge 10-second visible countdown
+    conf.raceCountdownMode = 1;
     // Reserved slack for future ELRS Backpack fields
     memset(conf._reservedELRS, 0, sizeof(conf._reservedELRS));
     modified = true;

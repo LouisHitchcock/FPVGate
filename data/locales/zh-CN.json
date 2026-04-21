@@ -180,7 +180,13 @@
         },
         "tts": {
             "title": "TTS 设置",
-            "announcer_type": "播报类型:",
+            "announcer_type": "播报员类型:",
+            "race_countdown": "比赛倒计时:",
+            "race_countdown_tip": "5 秒以内：经典 TTS 提示加约 5 秒内随机起飞。10 秒倒计时：可见 10..1..GO 覆盖。",
+            "countdown_options": {
+                "less_than_5": "5 秒以内",
+                "ten_second": "10 秒倒计时"
+            },
             "format": "圈速播报格式:",
             "voice": "语音:",
             "rate": "播报速率:",

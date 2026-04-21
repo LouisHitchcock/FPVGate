@@ -538,6 +538,8 @@ void loop() {
         }
         g_lcdUi->updateRSSI(timer.getRssi());
         g_lcdUi->setStatusBarIndicators(ws.isLcdWifiIndicatorOn());
+        // Keep the LCD countdown style in sync with config (cheap)
+        g_lcdUi->setCountdownMode(config.getRaceCountdownMode());
 
         // Update timers based on race state
         static bool wasRunning = false;

@@ -181,6 +181,12 @@
         "tts": {
             "title": "TTS-Einstellungen",
             "announcer_type": "Ansager-Typ:",
+            "race_countdown": "Rennstart-Countdown:",
+            "race_countdown_tip": "Weniger als 5: klassischer TTS-Hinweis mit zufälligem Start in ca. 5 Sekunden. 10-Sekunden-Countdown: sichtbares 10..1..GO-Overlay.",
+            "countdown_options": {
+                "less_than_5": "Weniger als 5",
+                "ten_second": "10 Sekunden Countdown"
+            },
             "format": "Ansage-Format:",
             "voice": "Stimme:",
             "rate": "Ansager-Geschwindigkeit:",

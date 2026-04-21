@@ -2142,11 +2142,19 @@ void FpvLcdUI::startCountdown(bool triggerStartWhenComplete) {
 #ifdef HAS_I2S_AUDIO
     if (g_audioAnnouncer) g_audioAnnouncer->announceCountdown();
 #endif
-    Serial.println("LCD: Starting 10-second countdown");
+    const uint8_t mode = _countdownMode;
+    if (mode == 0) {
+        Serial.println("LCD: Starting classic 'Less than 5' countdown");
+    } else {
+        Serial.println("LCD: Starting 10-second countdown");
+    }
     _countdownActive = true;
-    _countdownValue = 10;
+    _countdownValue = (mode == 0) ? -1 : 10;
     _startingInFivePlayed = false;
     _lastBeepValue = -1;
+    _countdownMode0FivePlayed = false;
+    // Mode 0: 5000ms for arm-quad audio + random 1-4000ms "less than 5" window
+    _countdownMode0DurationMs = (mode == 0) ? (5000UL + (uint32_t)random(0, 4001)) : 0;
     _countdownStartTime = millis();
     
     // Create fullscreen overlay on the top layer so it's always above tabview/scroll and stays visible
@@ -2166,9 +2174,9 @@ void FpvLcdUI::startCountdown(bool triggerStartWhenComplete) {
     lv_obj_clear_flag(countdown_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_move_foreground(countdown_overlay);
     
-    // Large centered countdown number
+    // Large centered countdown label
     countdown_label = lv_label_create(countdown_overlay);
-    lv_label_set_text(countdown_label, "10");
+    lv_label_set_text(countdown_label, (mode == 0) ? "ARM QUAD" : "10");
     lv_obj_set_style_text_font(countdown_label, &lv_font_montserrat_32, 0);
     lv_obj_set_style_text_color(countdown_label, lv_color_hex(0xff7b00), 0);  // Orange
     lv_obj_set_style_text_align(countdown_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -2182,7 +2190,48 @@ void FpvLcdUI::updateCountdown() {
     if (!_countdownActive) return;
     
     uint32_t elapsed = millis() - _countdownStartTime;
-    
+
+    // Mode 0: classic "Less than 5" flow - ARM QUAD overlay for 5s + random 1-4s, then GO!
+    if (_countdownMode == 0) {
+        const uint32_t armDuration = _countdownMode0DurationMs;
+        // Play "starting in less than 5" audio once at t=2500ms (overlapping with arm_your_quad)
+        if (!_countdownMode0FivePlayed && elapsed >= 2500) {
+            _countdownMode0FivePlayed = true;
+#ifdef HAS_I2S_AUDIO
+            if (g_audioAnnouncer) g_audioAnnouncer->announceStartingInFive();
+#endif
+        }
+        if (elapsed < armDuration) {
+            return;  // keep showing ARM QUAD
+        } else if (elapsed < armDuration + 600) {
+            // GO! banner for 600ms
+            if (countdown_label) {
+                lv_label_set_text(countdown_label, "GO!");
+                lv_obj_set_style_text_color(countdown_label, lv_color_hex(0x00ff88), 0);
+                lv_obj_align(countdown_label, LV_ALIGN_CENTER, 0, 0);
+                lv_obj_invalidate(countdown_label);
+            }
+            if (_lastBeepValue != 0) {
+                _pendingBuzzerCue = BUZZER_CUE_COUNTDOWN_GO;
+                _lastBeepValue = 0;
+            }
+            return;
+        } else {
+            // Countdown complete
+            stopCountdown();
+            if (start_btn) {
+                lv_obj_clear_state(start_btn, LV_STATE_DISABLED);
+                lv_obj_add_flag(start_btn, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (stop_btn) lv_obj_clear_flag(stop_btn, LV_OBJ_FLAG_HIDDEN);
+            if (_countdownTriggersStart) {
+                _startRequested = true;
+                Serial.println("LCD: Classic countdown complete, starting race");
+            }
+            return;
+        }
+    }
+
     // Calculate expected value: 10, 9, ..., 1, GO! (1s each, GO! for 600ms)
     int expectedValue;
     if (elapsed < 1000) expectedValue = 10;

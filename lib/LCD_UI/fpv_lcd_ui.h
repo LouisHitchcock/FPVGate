@@ -75,6 +75,8 @@ public:
     void requestCountdown(bool triggerStartOnComplete = true);
     /** Request STOPPED overlay (e.g. from web). Safe to call from any core. */
     void requestShowFinish();
+    /** Update the pre-race countdown style (0 = classic "Less than 5", 1 = visible 10s). Safe from any core. */
+    void setCountdownMode(uint8_t mode) { _countdownMode = (mode <= 1) ? mode : 1; }
 
 private:
     // Display hardware
@@ -177,6 +179,12 @@ private:
     bool _countdownTriggersStart;  // If true, set _startRequested when countdown completes (LCD button); if false, visual-only (web)
     bool _startingInFivePlayed;    // One-shot: "starting in less than 5" only at 5s mark
     int _lastBeepValue;
+    // Pre-race countdown style (written from core 1, read by UI task on core 0):
+    // 0 = classic "Less than 5" (audio + random 5-9s "ARM QUAD" then GO), 1 = visible 10..1..GO
+    volatile uint8_t _countdownMode = 1;
+    // Mode-0 bookkeeping: total length of the ARM QUAD window (5000 + random 0-4000 ms)
+    uint32_t _countdownMode0DurationMs = 0;
+    bool _countdownMode0FivePlayed = false;
     static const uint32_t COUNTDOWN_INTERVAL = 1000;  // 1 second per number
     
     // Finish overlay  

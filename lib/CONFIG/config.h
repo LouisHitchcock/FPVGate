@@ -239,7 +239,7 @@
 #define EEPROM_RESERVED_SIZE 832
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 19U
+#define CONFIG_VERSION 20U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -320,11 +320,14 @@ typedef struct {
     uint8_t rhEnabled;               // RH integration enabled (0=disabled, 1=enabled)
     char rhHostIP[32];               // RH server IP or hostname
     uint8_t rhNodeIndex;             // Node/seat index on RH (0-7)
+    // Pre-race countdown style: 0="Less than 5" (classic TTS + random 1-5s delay),
+    // 1="10 Second Countdown" (visible 10s countdown overlay matching LCD).
+    uint8_t raceCountdownMode;
     // Reserved slack where the ELRS Backpack fields used to live (kept to
     // preserve EEPROM layout for already-deployed devices). Active ELRS
     // development lives on the feature/ELRSBackpack branch; when it is
     // merged back these bytes will be re-reintroduced as typed fields.
-    uint8_t _reservedELRS[38];
+    uint8_t _reservedELRS[37];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -464,6 +467,10 @@ class Config {
     void setRhHostIP(const char* ip);
     uint8_t getRhNodeIndex();
     void setRhNodeIndex(uint8_t index);
+
+    // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
+    uint8_t getRaceCountdownMode();
+    void setRaceCountdownMode(uint8_t mode);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();

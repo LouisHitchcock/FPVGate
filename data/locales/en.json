@@ -182,6 +182,12 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
+            "race_countdown": "Race Countdown:",
+            "race_countdown_tip": "Less than 5: classic TTS cue with a random start within ~5 seconds. 10 Second Countdown: visible 10..1..GO overlay.",
+            "countdown_options": {
+                "less_than_5": "Less than 5",
+                "ten_second": "10 Second Countdown"
+            },
             "format": "Lap Announcement Format:",
             "voice": "Voice:",
             "rate": "Announcer Rate:",

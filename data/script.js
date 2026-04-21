@@ -95,6 +95,9 @@ var enterRssi = 120,
   exitRssi = 100;
 var frequency = 0;
 var announcerRate = 1.0;
+// Pre-race countdown mode: 0 = "Less than 5" (classic random TTS+beep),
+// 1 = "10 Second Countdown" (visible 10..1..GO overlay)
+var raceCountdownMode = 1;
 
 
 var lapNo = -1;
@@ -1142,6 +1145,11 @@ onload = async function (e) {
       exitRssiInput.value = configData.exitRssi;
       updateExitRssi(exitRssiInput, exitRssiInput.value);
     }
+    if (configData.raceCountdownMode !== undefined) {
+      raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
+      var rcEl = document.getElementById("raceCountdownMode");
+      if (rcEl) rcEl.value = String(raceCountdownMode);
+    }
     if (configData.name !== undefined) pilotNameInput.value = configData.name;
     if (configData.ssid !== undefined) ssidInput.value = configData.ssid;
     if (configData.pwd !== undefined) pwdInput.value = configData.pwd;
@@ -2109,6 +2117,12 @@ async function saveConfig() {
     rhEnabled: (syncDevices.find(d => d.isThisDevice) || {}).role === 'rotorhazard' ? 1 : 0,
     rhHostIP: document.getElementById("rhHostIP") ? document.getElementById("rhHostIP").value : "",
     rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
+    raceCountdownMode: (function() {
+      var el = document.getElementById("raceCountdownMode");
+      if (!el) return raceCountdownMode;
+      var v = parseInt(el.value);
+      return v === 0 ? 0 : 1;
+    })(),
   };
 
   if (usbConnected && transportManager) {
@@ -2425,6 +2439,11 @@ async function refreshConfigFromDevice() {
     if (configData.exitRssi !== undefined) {
       exitRssiInput.value = configData.exitRssi;
       updateExitRssi(exitRssiInput, exitRssiInput.value);
+    }
+    if (configData.raceCountdownMode !== undefined) {
+      raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
+      const rcEl = document.getElementById("raceCountdownMode");
+      if (rcEl) rcEl.value = String(raceCountdownMode);
     }
     
     console.log("[Config] Refreshed from device: band=" + configData.bandIndex + " ch=" + configData.channelIndex + " freq=" + configData.freq);
@@ -3172,13 +3191,30 @@ function highlightFastestLap() {
   }
 }
 
+function onRaceCountdownModeChange(el) {
+  if (el) {
+    var v = parseInt(el.value);
+    raceCountdownMode = (v === 0) ? 0 : 1;
+  }
+  autoSaveConfig();
+}
+
 async function startRace() {
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
     return;
   }
-  
+
+  // Always read the current dropdown value at start, so a just-changed mode
+  // applies immediately even before autoSaveConfig() has synced to the device.
+  var _rcEl = document.getElementById("raceCountdownMode");
+  if (_rcEl) {
+    var _rcVal = parseInt(_rcEl.value);
+    raceCountdownMode = (_rcVal === 0) ? 0 : 1;
+  }
+  console.log("[Race] startRace() mode=", raceCountdownMode);
+
   const RACE_COUNTDOWN_SECONDS = 10;  // Must match device LCD countdown (10.6s total: 10..1 + GO!)
   const raceCountdownEl = document.getElementById("raceCountdownOverlay");
   const raceCountdownNumberEl = document.getElementById("raceCountdownNumber");
@@ -3187,7 +3223,9 @@ async function startRace() {
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
 
-  // Fire countdown immediately so device LCD + I2S start right away
+  // Fire countdown immediately so device LCD + I2S start right away.
+  // Backend picks the right flow (visible 10s overlay vs. classic "less than 5"
+  // audio-only) from the saved raceCountdownMode.
   fetch("/timer/countdown", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3200,24 +3238,41 @@ async function startRace() {
     audioAnnouncer.unlockAudioContextMobile().catch(() => {});
   }
 
-  queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
+  // Branch on countdown mode
+  if (raceCountdownMode === 0) {
+    // Classic "Less than 5": queue TTS, wait for announcements, then random 1-5s delay
+    queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
+    queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
 
-  // Visible 10-second countdown (matches device LCD); total 10.5s so beep aligns with device "GO!"
-  if (raceCountdownEl && raceCountdownNumberEl) {
-    raceCountdownEl.style.display = "flex";
-    raceCountdownNumberEl.classList.remove("go");
-    for (let s = RACE_COUNTDOWN_SECONDS; s >= 1; s--) {
-      raceCountdownNumberEl.textContent = String(s);
-      // "Starting in less than 5" only when we actually show 5 (not at start)
-      if (s === 5) queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
-      await new Promise((r) => setTimeout(r, 1000));
+    // Wait for announcements to finish playing (bounded so we never hang)
+    const waitStart = Date.now();
+    while (audioAnnouncer && (audioAnnouncer.isSpeaking?.() || (audioAnnouncer.audioQueue && audioAnnouncer.audioQueue.length > 0))) {
+      if (Date.now() - waitStart > 10000) break;  // safety cap
+      await new Promise((r) => setTimeout(r, 100));
     }
-    raceCountdownNumberEl.textContent = "GO!";
-    raceCountdownNumberEl.classList.add("go");
-    await new Promise((r) => setTimeout(r, 500));
-    raceCountdownEl.style.display = "none";
+
+    // Random 1-5s pre-start delay
+    const delayTime = Math.random() * (5000 - 1000) + 1000;
+    await new Promise((r) => setTimeout(r, delayTime));
   } else {
-    await new Promise((r) => setTimeout(r, RACE_COUNTDOWN_SECONDS * 1000 + 500));
+    // Visible 10-second countdown (matches device LCD); total 10.5s so beep aligns with device "GO!"
+    queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
+    if (raceCountdownEl && raceCountdownNumberEl) {
+      raceCountdownEl.style.display = "flex";
+      raceCountdownNumberEl.classList.remove("go");
+      for (let s = RACE_COUNTDOWN_SECONDS; s >= 1; s--) {
+        raceCountdownNumberEl.textContent = String(s);
+        // "Starting in less than 5" only when we actually show 5 (not at start)
+        if (s === 5) queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      raceCountdownNumberEl.textContent = "GO!";
+      raceCountdownNumberEl.classList.add("go");
+      await new Promise((r) => setTimeout(r, 500));
+      raceCountdownEl.style.display = "none";
+    } else {
+      await new Promise((r) => setTimeout(r, RACE_COUNTDOWN_SECONDS * 1000 + 500));
+    }
   }
 
   // Play start beep and begin race (synced with device)
@@ -3242,7 +3297,7 @@ async function startRace() {
 
   // Start polling distance if tracks enabled
   startDistancePolling();
-  
+
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
 
@@ -8291,6 +8346,11 @@ function openSettingsModal() {
         if (config.exitRssi !== undefined) {
           exitRssiInput.value = config.exitRssi;
           updateExitRssi(exitRssiInput, exitRssiInput.value);
+        }
+        if (config.raceCountdownMode !== undefined) {
+          raceCountdownMode = parseInt(config.raceCountdownMode) === 0 ? 0 : 1;
+          const rcEl = document.getElementById("raceCountdownMode");
+          if (rcEl) rcEl.value = String(raceCountdownMode);
         }
         if (config.name !== undefined) pilotNameInput.value = config.name;
         if (config.ssid !== undefined) ssidInput.value = config.ssid;

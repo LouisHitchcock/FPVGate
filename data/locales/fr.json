@@ -180,7 +180,13 @@
         },
         "tts": {
             "title": "Paramètres TTS",
-            "announcer_type": "Type Annonceur:",
+            "announcer_type": "Type d'Annonceur:",
+            "race_countdown": "Compte à rebours:",
+            "race_countdown_tip": "Moins de 5: indice TTS classique avec démarrage aléatoire dans ~5 secondes. Compte à rebours de 10 secondes: superposition visible 10..1..GO.",
+            "countdown_options": {
+                "less_than_5": "Moins de 5",
+                "ten_second": "Compte à rebours de 10 secondes"
+            },
             "format": "Format Annonce:",
             "voice": "Voix:",
             "rate": "Vitesse Annonceur:",

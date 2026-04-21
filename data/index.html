@@ -525,6 +525,15 @@
               </div>
 
               <div class="config-item">
+                <label for="raceCountdownMode" data-i18n="settings.tts.race_countdown">Race Countdown:</label>
+                <select id="raceCountdownMode" onchange="onRaceCountdownModeChange(this)">
+                  <option value="0" data-i18n="settings.tts.countdown_options.less_than_5">Less than 5</option>
+                  <option value="1" selected data-i18n="settings.tts.countdown_options.ten_second">10 Second Countdown</option>
+                </select>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.race_countdown_tip">Less than 5: classic TTS cue with a random start within ~5 seconds. 10 Second Countdown: visible 10..1..GO overlay.</div>
+
+              <div class="config-item">
                 <label for="lapFormatSelect" data-i18n="settings.tts.format">Lap Announcement Format:</label>
                 <select id="lapFormatSelect" onchange="saveLapFormat()">
                   <option value="full" selected data-i18n="settings.tts.format_options.full">Pilot + Lap + Time</option>
