@@ -13,16 +13,33 @@ class RX5808;
 class LapTimer;
 class Buzzer;
 class RaceHistory;
-
-#ifdef HAS_RGB_LED
 class RgbLed;
-#endif
+
+// 3-state outcome. SKIP is distinct from FAIL so tests that don't apply to
+// the current board/hardware (e.g. no SD inserted, no RGB LED chain) don't
+// look like failures. All "is this feature present?" decisions are made at
+// RUNTIME so adding a new board doesn't silently flip a test to fail.
+enum class TestStatus : uint8_t {
+    Pass = 0,
+    Fail = 1,
+    Skip = 2,
+};
 
 struct TestResult {
     String name;
-    bool passed;
+    TestStatus status = TestStatus::Fail;
     String details;
-    uint32_t duration_ms;
+    uint32_t duration_ms = 0;
+
+    // Convenience: treat SKIP as "not failing" for backwards-compat call sites.
+    bool passed() const { return status != TestStatus::Fail; }
+    const char* statusString() const {
+        switch (status) {
+            case TestStatus::Pass: return "pass";
+            case TestStatus::Skip: return "skip";
+            default: return "fail";
+        }
+    }
 };
 
 class SelfTest {
@@ -33,7 +50,8 @@ class SelfTest {
     // Run all tests
     bool runAllTests();
     
-    // Individual tests
+    // Individual tests. None of these are compile-gated: each returns SKIP at
+    // runtime when the capability isn't available on this board.
     TestResult testStorage();
     TestResult testSDCard();
     TestResult testLittleFS();
@@ -51,13 +69,8 @@ class SelfTest {
     TestResult testWebhooks();
     TestResult testTransport();
     TestResult testSPIMod(RX5808* rx5808);
-    
-#ifdef HAS_RGB_LED
     TestResult testRGBLED(RgbLed* rgbLed);
-#endif
-#ifdef ESP32S3
     TestResult testUSB();
-#endif
     
     // Get results
     String getResultsJSON();

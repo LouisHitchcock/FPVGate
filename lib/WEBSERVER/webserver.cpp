@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
+#include <vector>
 
 #include "debug.h"
 
@@ -1562,13 +1563,10 @@ EEPROM:\n\
     server.addHandler(trackCreateHandler);
     server.addHandler(trackUpdateHandler);
 
-    // Self-test endpoint
-    server.on("/api/selftest", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        selftest->runAllTests();
-        String json = selftest->getResultsJSON();
-        request->send(200, "application/json", json);
-        led->on(200);
-    });
+    // (The detailed self-test endpoint is registered further below; this
+    // earlier duplicate registration was removed because AsyncWebServer
+    // dispatches to the first matching handler and it was masking the
+    // newer PASS/FAIL/SKIP implementation.)
     
     // Debug log endpoint for serial monitor
     server.on("/api/debuglog", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -1889,96 +1887,65 @@ EEPROM:\n\
         led->on(200);
     });
 
-    // Self-test endpoint
+    // Self-test endpoint. All tests are called unconditionally; each one
+    // reports PASS / FAIL / SKIP based on RUNTIME capability detection so
+    // adding a new board variant never silently causes tests to disappear
+    // or falsely fail.
     server.on("/api/selftest", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        // Run RX5808 test
-        TestResult rxTest = selftest->testRX5808(rx);
-        
-        // Run Lap Timer test
-        TestResult timerTest = selftest->testLapTimer(timer);
-        
-        // Run Audio test
-        TestResult audioTest = selftest->testAudio(buz);
-        
-        // Run Config test
-        TestResult configTest = selftest->testConfig(conf);
-        
-        // Run Race History test
-        TestResult historyTest = selftest->testRaceHistory(history);
-        
-        // Run Web Server test
-        TestResult webTest = selftest->testWebServer();
-        
-        // Run OTA test
-        TestResult otaTest = selftest->testOTA();
-        
-        // Run Storage test
-        TestResult storageTest = selftest->testStorage();
-        
-        // Run LittleFS test
-        TestResult littleFSTest = selftest->testLittleFS();
-        
-        // Run EEPROM test
-        TestResult eepromTest = selftest->testEEPROM();
-        
-        // Run WiFi test
-        TestResult wifiTest = selftest->testWiFi();
-        
-        // Run Battery test
-        TestResult batteryTest = selftest->testBattery();
-        
-        // Run Track Manager test
-        TestResult trackTest = selftest->testTrackManager();
-        
-        // Run Webhooks test
-        TestResult webhookTest = selftest->testWebhooks();
-        
-        // Run Transport test
-        TestResult transportTest = selftest->testTransport();
-        
 #ifdef HAS_RGB_LED
-        // Run RGB LED test
-        TestResult ledTest = selftest->testRGBLED(g_rgbLed);
+        RgbLed* rgbForTest = g_rgbLed;
+#else
+        RgbLed* rgbForTest = nullptr;
 #endif
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        // Run SD Card test
-        TestResult sdTest = selftest->testSDCard();
-#endif
-        
-        // Build JSON response
-        String json = "{\"tests\":[";
-        
-        auto addTest = [&json](const TestResult& test, bool first = false) {
-            if (!first) json += ",";
-            json += "{\"name\":\"" + test.name + "\",\"passed\":" + String(test.passed ? "true" : "false") + 
-                   ",\"details\":\"" + test.details + "\",\"duration\":" + String(test.duration_ms) + "}";
+        std::vector<TestResult> tests;
+        tests.push_back(selftest->testRX5808(rx));
+        tests.push_back(selftest->testLapTimer(timer));
+        tests.push_back(selftest->testAudio(buz));
+        tests.push_back(selftest->testConfig(conf));
+        tests.push_back(selftest->testRaceHistory(history));
+        tests.push_back(selftest->testWebServer());
+        tests.push_back(selftest->testOTA());
+        tests.push_back(selftest->testStorage());
+        tests.push_back(selftest->testLittleFS());
+        tests.push_back(selftest->testEEPROM());
+        tests.push_back(selftest->testWiFi());
+        tests.push_back(selftest->testBattery());
+        tests.push_back(selftest->testTrackManager());
+        tests.push_back(selftest->testWebhooks());
+        tests.push_back(selftest->testTransport());
+        tests.push_back(selftest->testRGBLED(rgbForTest));
+        tests.push_back(selftest->testSDCard());
+        tests.push_back(selftest->testUSB());
+
+        // Escape backslashes and double quotes so embedded card sizes,
+        // file paths, etc. don't break the JSON response.
+        auto jsonEscape = [](const String& in) -> String {
+            String out;
+            out.reserve(in.length() + 8);
+            for (size_t i = 0; i < in.length(); i++) {
+                char c = in[i];
+                if (c == '\\' || c == '"') { out += '\\'; out += c; }
+                else if (c == '\n') { out += "\\n"; }
+                else if (c == '\r') { out += "\\r"; }
+                else if (c == '\t') { out += "\\t"; }
+                else { out += c; }
+            }
+            return out;
         };
-        
-        addTest(rxTest, true);
-        addTest(timerTest);
-        addTest(audioTest);
-        addTest(configTest);
-        addTest(historyTest);
-        addTest(webTest);
-        addTest(otaTest);
-        addTest(storageTest);
-        addTest(littleFSTest);
-        addTest(eepromTest);
-        addTest(wifiTest);
-        addTest(batteryTest);
-        addTest(trackTest);
-        addTest(webhookTest);
-        addTest(transportTest);
-#ifdef HAS_RGB_LED
-        addTest(ledTest);
-#endif
-#ifdef HAS_SD_CARD_SUPPORT
-        addTest(sdTest);
-#endif
-        
+
+        String json = "{\"tests\":[";
+        for (size_t i = 0; i < tests.size(); i++) {
+            const TestResult& t = tests[i];
+            if (i > 0) json += ",";
+            json += "{\"name\":\""    + jsonEscape(t.name)    + "\"";
+            json += ",\"status\":\""  + String(t.statusString()) + "\"";
+            json += ",\"passed\":"    + String(t.passed() ? "true" : "false");
+            json += ",\"details\":\"" + jsonEscape(t.details) + "\"";
+            json += ",\"duration\":"  + String(t.duration_ms);
+            json += "}";
+        }
         json += "]}";
-        
+
         request->send(200, "application/json", json);
         led->on(200);
     });

@@ -7371,17 +7371,38 @@ function runSelfTest() {
     .then((data) => {
       // Hide loading
       loadingDiv.style.display = "none";
+      // Newer firmware reports an explicit status: "pass" | "fail" | "skip".
+      // Fall back to the legacy boolean for older firmware.
+      const statusOf = (test) => test.status || (test.passed ? "pass" : "fail");
 
-      // Build results HTML
       let html = "";
-      let allPassed = true;
+      let anyFailed = false;
+      let passedCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
 
       data.tests.forEach((test) => {
-        if (!test.passed) allPassed = false;
+        const status = statusOf(test);
+        const durationMs = test.duration != null ? test.duration : (test.duration_ms || 0);
 
-        const statusIcon = test.passed ? "✓" : "✗";
-        const statusColor = test.passed ? "#4ade80" : "#ff5555";
-        const bgColor = test.passed ? "rgba(74, 222, 128, 0.1)" : "rgba(255, 85, 85, 0.1)";
+        let statusIcon = "✓";
+        let statusColor = "#4ade80";
+        let bgColor = "rgba(74, 222, 128, 0.1)";
+
+        if (status === "skip") {
+          skippedCount++;
+          statusIcon = "–";
+          statusColor = "#9ca3af";
+          bgColor = "rgba(156, 163, 175, 0.1)";
+        } else if (status === "fail") {
+          failedCount++;
+          anyFailed = true;
+          statusIcon = "✗";
+          statusColor = "#ff5555";
+          bgColor = "rgba(255, 85, 85, 0.1)";
+        } else {
+          passedCount++;
+        }
 
         html += `
           <div style="margin-bottom: 12px; padding: 12px; background-color: ${bgColor}; border-left: 4px solid ${statusColor}; border-radius: 4px;">
@@ -7389,29 +7410,37 @@ function runSelfTest() {
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 20px; color: ${statusColor};">${statusIcon}</span>
                 <span style="font-weight: bold; font-size: 16px;">${test.name}</span>
+                ${status === "skip" ? '<span style="font-size: 11px; color: var(--secondary-color); border: 1px solid var(--secondary-color); border-radius: 3px; padding: 1px 6px; margin-left: 4px;">SKIPPED</span>' : ""}
               </div>
-              <span style="font-size: 12px; color: var(--secondary-color);">${test.duration}ms</span>
+              <span style="font-size: 12px; color: var(--secondary-color);">${durationMs}ms</span>
             </div>
             <div style="font-size: 14px; color: var(--secondary-color); margin-left: 28px;">
-              ${test.details}
+              ${test.details || ""}
             </div>
           </div>
         `;
       });
 
       // Add summary
-      const passedCount = data.tests.filter((t) => t.passed).length;
       const totalCount = data.tests.length;
-      const summaryColor = allPassed ? "#4ade80" : "#ff9f43";
+      const summaryColor = anyFailed ? "#ff9f43" : "#4ade80";
+      const summaryTitle = anyFailed
+        ? i18n.t("settings.diagnostics.some_failed")
+        : i18n.t("settings.diagnostics.all_passed");
+
+      let summaryLine = `${passedCount} passed`;
+      if (skippedCount > 0) summaryLine += `, ${skippedCount} skipped`;
+      if (failedCount > 0) summaryLine += `, ${failedCount} failed`;
+      summaryLine += ` (of ${totalCount})`;
 
       html =
         `
         <div style="margin-bottom: 20px; padding: 16px; background-color: var(--bg-secondary); border-radius: 8px; text-align: center;">
           <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px; color: ${summaryColor};">
-            ${allPassed ? i18n.t("settings.diagnostics.all_passed") : i18n.t("settings.diagnostics.some_failed")}
+            ${summaryTitle}
           </div>
           <div style="font-size: 14px; color: var(--secondary-color);">
-            ${passedCount} / ${totalCount} tests passed
+            ${summaryLine}
           </div>
         </div>
       ` + html;
