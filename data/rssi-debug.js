@@ -106,12 +106,15 @@
     } catch (err) { /* ignore */ }
   }
 
+  var eventSource = null;
+
   function setupEvents() {
     if (!window.EventSource) {
       setConnected(false, 'SSE not supported');
       return;
     }
-    const source = new EventSource('/events');
+    eventSource = new EventSource('/events');
+    const source = eventSource;
 
     source.addEventListener('open', () => setConnected(true, 'Connected'));
     source.addEventListener('error', (e) => {
@@ -156,6 +159,13 @@
     startStream();
   });
 
-  window.addEventListener('beforeunload', stopStream);
-  window.addEventListener('pagehide', stopStream);
+  function releaseOnUnload() {
+    if (eventSource) {
+      try { eventSource.close(); } catch (e) { /* ignore */ }
+      eventSource = null;
+    }
+    stopStream();
+  }
+  window.addEventListener('beforeunload', releaseOnUnload);
+  window.addEventListener('pagehide', releaseOnUnload);
 })();

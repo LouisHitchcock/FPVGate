@@ -1024,9 +1024,10 @@ EEPROM:\n\
         }
 #endif
         
-        // Notify other connected clients (and the LCD) that config changed so
-        // they can refresh their UI. Safe to call here; broadcast runs on the
-        // web update loop via pendingConfigUpdate.
+        // Always notify other connected clients (and the LCD) that config has
+        // been touched so they can refresh. We accept the minor extra SSE
+        // traffic from no-op POSTs in return for reliable multi-client live
+        // sync (e.g. RSSI threshold sliders across two browsers).
         triggerConfigUpdated();
         
         request->send(200, "application/json", "{\"status\": \"OK\"}");

@@ -162,9 +162,73 @@ var debugRssiChart = null;
 var debugRssiSeries = new TimeSeries();
 var debugCrossingSeries = new TimeSeries();
 
-// Timestamp of the most recent user interaction with the RSSI threshold sliders.
-// Used to skip live-update overwrites while the user is actively dragging.
-var thresholdLastEditMs = 0;
+// RSSI calibration threshold sync model:
+//  - Device is the single source of truth for enterRssi / exitRssi.
+//  - Dragging the calibration sliders is a UI preview only: updateEnterRssi /
+//    updateExitRssi mutate the in-memory `enterRssi` / `exitRssi` vars and
+//    the span next to the slider. Nothing touches the device.
+//  - Clicking "Save Thresholds" calls saveConfig(), which POSTs /config.
+//  - The backend persists the new values, then broadcasts configUpdated.
+//  - Every client (including the sender) listens for configUpdated and calls
+//    refreshConfigFromDevice(), which fetches /config and writes the
+//    authoritative values back into the UI via applyThresholdsToUI().
+//  - On page load, onload also calls applyThresholdsToUI() immediately after
+//    fetching /config, before any other config work, so the sliders always
+//    show the saved device value even if later steps in onload throw.
+function applyThresholdsToUI(cfg) {
+  if (!cfg) return;
+  if (typeof cfg.enterRssi === "number") {
+    enterRssi = cfg.enterRssi;
+    if (enterRssiInput) enterRssiInput.value = enterRssi;
+    if (enterRssiSpan) enterRssiSpan.textContent = enterRssi;
+  }
+  if (typeof cfg.exitRssi === "number") {
+    exitRssi = cfg.exitRssi;
+    if (exitRssiInput) exitRssiInput.value = exitRssi;
+    if (exitRssiSpan) exitRssiSpan.textContent = exitRssi;
+  }
+}
+
+// Same "device is the source of truth" pattern for system/band/channel.
+// Called immediately after /config fetches (onload + refreshConfigFromDevice)
+// so the selectors always match the persisted device state, even if some
+// later step in onload throws.
+function applyBandChannelToUI(cfg) {
+  if (!cfg) return;
+  // Always set the authoritative frequency first so any display code below
+  // that reads `frequency` sees the right value.
+  if (typeof cfg.freq === "number") {
+    frequency = cfg.freq;
+  }
+  const hasIdx = typeof cfg.bandIndex === "number" && typeof cfg.channelIndex === "number";
+  if (hasIdx) {
+    const bandDef = bandDefinitions[cfg.bandIndex];
+    if (!bandDef) return;
+    currentSystem = bandDef.system;
+    if (systemSelect) systemSelect.value = currentSystem;
+    if (calibSystemSelect) calibSystemSelect.value = currentSystem;
+    // Repopulate both band <select>s for the correct system, then pick the
+    // right option by matching the band's global index.
+    populateBandsBySystem(currentSystem, bandSelect);
+    populateBandsBySystem(currentSystem, calibBandSelect);
+    const filtered = bandDefinitions.filter(b => b.system === currentSystem);
+    const localBandIdx = filtered.findIndex(b => b.index === cfg.bandIndex);
+    if (localBandIdx >= 0) {
+      if (bandSelect) bandSelect.selectedIndex = localBandIdx;
+      if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
+    }
+    updateChannelAvailability(bandSelect);
+    updateChannelAvailability(calibBandSelect);
+    if (channelSelect) channelSelect.selectedIndex = cfg.channelIndex;
+    if (calibChannelSelect) calibChannelSelect.selectedIndex = cfg.channelIndex;
+  } else if (typeof cfg.freq === "number") {
+    // Fallback: find band/channel purely from frequency.
+    setBandChannelIndex(cfg.freq);
+  }
+  // Refresh the "R1 5658MHz"-style readouts in both tabs.
+  try { populateFreqOutput(); } catch (e) { /* ignore */ }
+  try { populateCalibFreqOutput(); } catch (e) { /* ignore */ }
+}
 
 // Clean up any corrupt saved debug RSSI overlay position from earlier builds
 // (NaN -> null from parseInt("") caused off-screen positioning)
@@ -255,6 +319,41 @@ document.addEventListener("DOMContentLoaded", () => {
     webhookIP.addEventListener("invalid", updateValidity);
   }
 });
+
+// Release the SSE socket + stop RSSI streaming before the page is torn down.
+// Without this the ESP32 AsyncTCP keeps the old TCP PCB around until its own
+// timeout, which can starve the new page of connection slots on reload and
+// leave us waiting ~8 minutes for things like /version, /timer/ping, etc.
+// Uses `keepalive: true` so the stop request survives the unload.
+function _releaseWifiResourcesOnUnload() {
+  try {
+    if (eventSource) {
+      try { eventSource.close(); } catch (e) { /* ignore */ }
+      eventSource = null;
+    }
+  } catch (e) { /* ignore */ }
+  if (eventSourceReconnectTimer) {
+    clearTimeout(eventSourceReconnectTimer);
+    eventSourceReconnectTimer = null;
+  }
+  if (connectionStatusUpdateInterval) {
+    clearInterval(connectionStatusUpdateInterval);
+    connectionStatusUpdateInterval = null;
+  }
+  // Best-effort request to stop the RSSI stream if we had it running so the
+  // device isn't still transmitting into a dead TCP connection.
+  if (rssiSending && !usbConnected) {
+    try {
+      fetch("/timer/rssiStop", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        keepalive: true,
+      }).catch(function() {});
+    } catch (e) { /* ignore */ }
+  }
+}
+window.addEventListener("beforeunload", _releaseWifiResourcesOnUnload);
+window.addEventListener("pagehide", _releaseWifiResourcesOnUnload);
 
 var audioEnabled = false;
 var speakObjsQueue = [];
@@ -1074,6 +1173,17 @@ onload = async function (e) {
   race.style.display = "block";
   calib.style.display = "none";
 
+  // Create the RSSI chart up front so it always exists, even if a later step
+  // in this handler throws. addRssiPoint() bails out when rssiChart is
+  // undefined, so we want it initialised before any awaits.
+  try {
+    if (typeof createRssiChart === "function" && !rssiChart) {
+      createRssiChart();
+    }
+  } catch (err) {
+    console.error("[Script] createRssiChart failed:", err);
+  }
+
   // Initialize transport (USB/WiFi)
   await initializeTransport();
 
@@ -1092,46 +1202,22 @@ onload = async function (e) {
     // Set defaults if config fetch fails
     configData = {};
   }
-  {
-    // Initialize system selectors with analog bands by default
-    populateBandsBySystem("analog", bandSelect);
-    populateBandsBySystem("analog", calibBandSelect);
-    
-    // Restore band/channel selection - prioritize bandIndex/channelIndex if available
-    if (configData.bandIndex !== undefined && configData.channelIndex !== undefined) {
-      // Determine which system this band belongs to
-      const bandDef = bandDefinitions[configData.bandIndex];
-      if (bandDef) {
-        currentSystem = bandDef.system;
-        
-        // Set system selectors
-        if (systemSelect) systemSelect.value = currentSystem;
-        if (calibSystemSelect) calibSystemSelect.value = currentSystem;
-        
-        // Populate bands for this system
-        populateBandsBySystem(currentSystem, bandSelect);
-        populateBandsBySystem(currentSystem, calibBandSelect);
-        
-        // Set band by finding the correct option index within the filtered system bands
-        const filteredBands = bandDefinitions.filter(b => b.system === currentSystem);
-        const localBandIdx = filteredBands.findIndex(b => b.index === configData.bandIndex);
-        if (localBandIdx >= 0) {
-          if (bandSelect) bandSelect.selectedIndex = localBandIdx;
-          if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
-        }
-        
-        // Update channel availability
-        updateChannelAvailability(bandSelect);
-        updateChannelAvailability(calibBandSelect);
-        
-        // Set channel
-        channelSelect.selectedIndex = configData.channelIndex;
-        if (calibChannelSelect) calibChannelSelect.selectedIndex = configData.channelIndex;
-      }
-    } else if (configData.freq !== undefined) {
-      // Fallback: find by frequency
-      setBandChannelIndex(configData.freq);
-    }
+  // Apply the authoritative slices of config to the UI FIRST, before the big
+  // config-apply block below. Keeps hydration bulletproof - any later failure
+  // in this handler can't leave these fields stuck at their HTML defaults.
+  // Band selectors must be populated before applyBandChannelToUI so its
+  // populateBandsBySystem()/selectedIndex calls have something to work with.
+  populateBandsBySystem("analog", bandSelect);
+  populateBandsBySystem("analog", calibBandSelect);
+  applyBandChannelToUI(configData);
+  applyThresholdsToUI(configData);
+  // Suppress autoSaveConfig calls from the rest of the load (updateMinLap
+  // etc.) so onload doesn't write the just-fetched config back to the device.
+  _refreshingFromDevice = true;
+  try {
+    // System/band/channel and RSSI thresholds are already hydrated above via
+    // applyBandChannelToUI() / applyThresholdsToUI(). Everything below is
+    // additional config that isn't part of the cross-client live-sync path.
     if (configData.minLap !== undefined) {
       minLapInput.value = (parseFloat(configData.minLap) / 10).toFixed(1);
       updateMinLap(minLapInput, minLapInput.value);
@@ -1141,14 +1227,7 @@ onload = async function (e) {
       announcerRateInput.value = (parseFloat(configData.anRate) / 10).toFixed(1);
       updateAnnouncerRate(announcerRateInput, announcerRateInput.value);
     }
-    if (configData.enterRssi !== undefined) {
-      enterRssiInput.value = configData.enterRssi;
-      updateEnterRssi(enterRssiInput, enterRssiInput.value);
-    }
-    if (configData.exitRssi !== undefined) {
-      exitRssiInput.value = configData.exitRssi;
-      updateExitRssi(exitRssiInput, exitRssiInput.value);
-    }
+    // enterRssi / exitRssi are hydrated up-front via applyThresholdsToUI().
     if (configData.raceCountdownMode !== undefined) {
       raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
       var rcEl = document.getElementById("raceCountdownMode");
@@ -1193,7 +1272,9 @@ onload = async function (e) {
     clearInterval(timerInterval);
     timer.innerHTML = i18n.t("race.timer_default");
     clearLaps();
-    createRssiChart();
+    // Already created up-front; keep call site as a safety net in case the
+    // early createRssiChart() above failed for any reason.
+    if (!rssiChart) createRssiChart();
     // Restore debug mode toggle from localStorage
     var debugToggle = document.getElementById("debugModeToggle");
     if (debugToggle) debugToggle.checked = debugMode;
@@ -1410,6 +1491,14 @@ onload = async function (e) {
 
     // Mark config as loaded so saves from calibration tab work
     configLoaded = true;
+  } catch (err) {
+    // Surface any silent failure in the config-application block instead of
+    // letting the async onload promise swallow it. The RSSI chart has already
+    // been created above, so we still get a usable UI.
+    console.error("[Script] onload config block failed:", err);
+    configLoaded = true;
+  } finally {
+    _refreshingFromDevice = false;
   }
 };
 
@@ -1979,11 +2068,7 @@ function updateEnterRssi(obj, value) {
     exitRssiInput.value = exitRssi;
     exitRssiSpan.textContent = exitRssi;
   }
-  // Auto-save so other connected clients (and the device) receive the new
-  // threshold live. autoSaveConfig is debounced and no-ops while we're
-  // refreshing the UI from the device, so drags don't spam the backend.
-  if (!_refreshingFromDevice) thresholdLastEditMs = Date.now();
-  autoSaveConfig();
+  // No save here - the user must press "Save Thresholds" to persist + broadcast.
 }
 
 function updateExitRssi(obj, value) {
@@ -1994,8 +2079,7 @@ function updateExitRssi(obj, value) {
     enterRssiInput.value = enterRssi;
     enterRssiSpan.textContent = enterRssi;
   }
-  if (!_refreshingFromDevice) thresholdLastEditMs = Date.now();
-  autoSaveConfig();
+  // No save here - the user must press "Save Thresholds" to persist + broadcast.
 }
 
 
@@ -2380,82 +2464,16 @@ async function refreshConfigFromDevice() {
       configData = await response.json();
     }
     
-    // Always set frequency directly from device (authoritative source)
-    if (configData.freq !== undefined) {
-      frequency = configData.freq;
-    }
+    // Device is authoritative for system/band/channel + frequency; write
+    // them straight into the UI via the shared applier. Any unsaved local
+    // selector tweak is expected to be overwritten - user saves to make
+    // their change win.
+    applyBandChannelToUI(configData);
     
-    if (configData.bandIndex !== undefined && configData.channelIndex !== undefined) {
-      const bandDef = bandDefinitions[configData.bandIndex];
-      if (bandDef) {
-        currentSystem = bandDef.system;
-        const targetChannelIdx = configData.channelIndex;
-        
-        // Update system selectors
-        if (systemSelect) systemSelect.value = currentSystem;
-        if (calibSystemSelect) calibSystemSelect.value = currentSystem;
-        
-        // Repopulate band lists for the correct system
-        populateBandsBySystem(currentSystem, bandSelect);
-        populateBandsBySystem(currentSystem, calibBandSelect);
-        
-        // Set band by finding the correct option index (more reliable than value matching)
-        const filteredBands = bandDefinitions.filter(b => b.system === currentSystem);
-        const localBandIdx = filteredBands.findIndex(b => b.index === configData.bandIndex);
-        if (localBandIdx >= 0) {
-          if (bandSelect) bandSelect.selectedIndex = localBandIdx;
-          if (calibBandSelect) calibBandSelect.selectedIndex = localBandIdx;
-        }
-        
-        // Update channel availability based on selected band
-        updateChannelAvailability(bandSelect);
-        updateChannelAvailability(calibBandSelect);
-        
-        // Set channel selection
-        if (channelSelect) channelSelect.selectedIndex = targetChannelIdx;
-        if (calibChannelSelect) calibChannelSelect.selectedIndex = targetChannelIdx;
-        
-        // Update frequency display text
-        populateFreqOutput();
-        if (calibBandSelect && calibChannelSelect && calibFreqOutput) {
-          if (calibBandSelect.selectedIndex !== -1) {
-            const selOpt = calibBandSelect.options[calibBandSelect.selectedIndex];
-            if (selOpt) {
-              const bv = selOpt.value;
-              const cv = calibChannelSelect.options[calibChannelSelect.selectedIndex]?.value || "1";
-              calibFreqOutput.textContent = bv + cv + " " + frequency + "MHz";
-            }
-          }
-        }
-        
-        // Update settings freq display in case populateFreqOutput bailed
-        if (freqOutput && bandSelect && bandSelect.selectedIndex !== -1) {
-          const opt = bandSelect.options[bandSelect.selectedIndex];
-          if (opt) {
-            const chan = channelSelect.options[channelSelect.selectedIndex]?.value || "1";
-            freqOutput.textContent = opt.value + chan + " " + frequency;
-          }
-        }
-      }
-    } else if (configData.freq !== undefined) {
-      setBandChannelIndex(configData.freq);
-      populateFreqOutput();
-    }
-    
-    // Update threshold values if changed - unless the local user has been
-    // dragging the sliders within the last ~2 seconds, in which case the
-    // remote update would yank the slider out from under their finger.
-    const suppressThresholds = (Date.now() - thresholdLastEditMs) < 2000;
-    if (!suppressThresholds) {
-      if (configData.enterRssi !== undefined) {
-        enterRssiInput.value = configData.enterRssi;
-        updateEnterRssi(enterRssiInput, enterRssiInput.value);
-      }
-      if (configData.exitRssi !== undefined) {
-        exitRssiInput.value = configData.exitRssi;
-        updateExitRssi(exitRssiInput, exitRssiInput.value);
-      }
-    }
+    // Device is the source of truth; write the fetched thresholds straight
+    // into the UI. Any local drag that hasn't been saved is expected to be
+    // overwritten - user must click Save Thresholds to make their change win.
+    applyThresholdsToUI(configData);
     if (configData.raceCountdownMode !== undefined) {
       raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
       const rcEl = document.getElementById("raceCountdownMode");
