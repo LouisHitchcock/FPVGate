@@ -430,6 +430,8 @@
             "horizontal_desc": "Diseño horizontal estándar para streams 16:9",
             "vertical": "OSD Vertical",
             "vertical_desc": "Diseño vertical para streams verticales o paneles laterales",
+            "handcam": "Overlay Handcam",
+            "handcam_desc": "Overlay compacto enfocado en handcam con panel RSSI en vivo opcional",
             "open": "Abrir",
             "copy_url": "Copiar URL",
             "obs_setup": "Configuración Fuente Navegador OBS",

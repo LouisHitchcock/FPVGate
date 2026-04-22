@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPV Overlay OBS</title>
+  <style>
+    :root {
+      --text: rgba(255,255,255,0.96);
+      --muted: rgba(255,255,255,0.64);
+      --panel: rgba(8, 10, 14, 0.7);
+      --border: rgba(255,255,255,0.12);
+      --good: #f0c54a;
+      --good2: #64e1a6;
+      --bad: #ff6e7b;
+      --info: #9fd3ff;
+      --radius: 18px;
+      --shadow: 0 10px 28px rgba(0,0,0,0.18);
+      --font: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+      --topCardW: 180px;
+      --centerCardW: 220px;
+      --rightCardW: 220px;
+      --topPanelH: 182px;
+      --labelSize: 11px;
+      --valueSize: 21px;
+      --valueBigSize: 38px;
+      --miniValueSize: 15px;
+      --edge: 18px;
+
+      --recentPanelW: 320px;
+      --rssiPanelW: 320px;
+      --bottomPanelH: 205px;
+      --bottomPanelGap: 12px;
+
+      --recentRowH: 42px;
+      --recentViewportH: 136px;
+      --recentCol1: 42px;
+      --recentCol2: 84px;
+      --recentCol3: 84px;
+      --recentGap: 6px;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: var(--font);
+      color: var(--text);
+    }
+
+    * { box-sizing: border-box; }
+
+    body.debug {
+      background:
+        linear-gradient(rgba(0,0,0,0.04), rgba(0,0,0,0.06)),
+        radial-gradient(circle at center, rgba(255,255,255,0.04), rgba(255,255,255,0.01) 40%, transparent 70%);
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .panel {
+      position: absolute;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+    }
+
+    .label {
+      font-size: var(--labelSize);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+      line-height: 1;
+    }
+
+    .value,
+    .value-big,
+    .recent-row .lap,
+    .recent-row .time,
+    .recent-row .gap,
+    .rssi-card-value {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+      letter-spacing: -0.03em;
+      white-space: nowrap;
+    }
+
+    .value {
+      font-size: var(--valueSize);
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .value-big {
+      font-size: var(--valueBigSize);
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.05em;
+    }
+
+    .good { color: var(--good); }
+    .good2 { color: var(--good2); }
+    .bad { color: var(--bad); }
+    .info { color: var(--info); }
+
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+      margin: 6px 0 4px;
+    }
+
+    .pulse {
+      animation: pulse 420ms ease;
+      will-change: transform;
+      transform-origin: center center;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      28% { transform: scale(1.035); }
+      100% { transform: scale(1); }
+    }
+
+    .top-left {
+      top: var(--edge);
+      left: var(--edge);
+      width: var(--topCardW);
+      min-height: var(--topPanelH);
+      padding: 14px;
+    }
+
+    .top-center {
+      top: var(--edge);
+      left: 50%;
+      transform: translateX(-50%);
+      width: var(--centerCardW);
+      min-height: 108px;
+      padding: 0;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      will-change: transform;
+    }
+
+    .top-center-inner {
+      width: 100%;
+      padding: 12px 18px;
+      border-radius: inherit;
+    }
+
+    .top-right {
+      top: var(--edge);
+      right: var(--edge);
+      width: var(--rightCardW);
+      min-height: var(--topPanelH);
+      padding: 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 12px;
+    }
+
+    .mini-stat .label {
+      margin-bottom: 4px;
+      font-size: calc(var(--labelSize) - 1px);
+    }
+
+    .mini-stat .value {
+      font-size: var(--miniValueSize);
+    }
+
+    .recent-panel {
+      left: var(--edge);
+      bottom: var(--edge);
+      width: var(--recentPanelW);
+      height: var(--bottomPanelH);
+      padding: 12px;
+      overflow: hidden;
+    }
+
+    .rssi-panel {
+/*      left: calc(var(--edge) + var(--recentPanelW) + var(--bottomPanelGap));*/
+      bottom: var(--edge);
+      width: var(--rssiPanelW);
+      height: var(--bottomPanelH);
+      padding: 12px;
+      overflow: hidden;
+      display: none;
+      right: var(--edge);
+    }
+
+    body.has-rssi .rssi-panel {
+      display: block;
+    }
+
+    .panel-title {
+      padding: 0 8px 8px;
+    }
+
+    .recent-grid,
+    .recent-row {
+      display: grid;
+      grid-template-columns: var(--recentCol1) var(--recentCol2) var(--recentCol3);
+      align-items: center;
+    }
+
+    .recent-grid {
+      gap: var(--recentGap);
+      padding: 0 8px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 4px;
+    }
+
+    .recent-grid span {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      line-height: 1;
+    }
+
+    .recent-viewport {
+      position: relative;
+      overflow: hidden;
+      height: var(--recentViewportH);
+    }
+
+    .recent-rows {
+      display: grid;
+      gap: 2px;
+      will-change: transform;
+    }
+
+    .recent-rows.animating {
+      transition: transform 420ms cubic-bezier(0.22, 0.8, 0.2, 1);
+    }
+
+    .recent-row {
+      gap: var(--recentGap);
+      padding: 10px 8px;
+      border-radius: 12px;
+      transition: background 180ms ease, opacity 180ms ease;
+      min-height: var(--recentRowH);
+    }
+
+    .recent-row.latest {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .recent-row.best .lap,
+    .recent-row.best .time {
+      color: var(--good);
+    }
+
+    .recent-row .lap,
+    .recent-row .time,
+    .recent-row .gap {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+      text-align: left;
+    }
+
+    .rssi-layout {
+      height: calc(100% - 26px);
+    }
+
+    .rssi-graph-wrap {
+      width: 100%;
+      height: 100%;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 14px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      overflow: hidden;
+    }
+
+    .rssi-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+
+    .safe-guides {
+      display: none;
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      border: 1px dashed rgba(255,255,255,0.16);
+    }
+
+    body.debug .safe-guides {
+      display: block;
+      margin: 28px;
+      border-radius: 18px;
+    }
+
+    .debug-chip {
+      display: none;
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(8,10,14,0.65);
+      border: 1px solid rgba(255,255,255,0.10);
+      color: rgba(255,255,255,0.82);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    body.debug .debug-chip {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay">
+    <div class="panel top-left">
+      <div class="stack">
+        <div>
+          <div class="label">Lap</div>
+          <div class="value info" id="lapCount">0/8</div>
+        </div>
+        <div class="divider"></div>
+        <div>
+          <div class="label">Fastest</div>
+          <div class="value good" id="fastest">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel top-center">
+      <div class="top-center-inner" id="currentPanel">
+        <div class="label">Current Lap</div>
+        <div class="value-big" id="currentLap">0.00s</div>
+      </div>
+    </div>
+
+    <div class="panel top-right">
+      <div class="stack">
+        <div>
+          <div class="label">Last Lap</div>
+          <div class="value" id="lastLap">--</div>
+        </div>
+        <div>
+          <div class="label">Gap to Fastest</div>
+          <div class="value" id="gap">--</div>
+        </div>
+        <div class="divider"></div>
+        <div class="mini-grid">
+          <div class="mini-stat">
+            <div class="label">B3</div>
+            <div class="value good2" id="best3">--</div>
+          </div>
+          <div class="mini-stat">
+            <div class="label">Med</div>
+            <div class="value" id="median">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel recent-panel">
+      <div class="label panel-title">Recent Laps</div>
+      <div class="recent-grid">
+        <span>Lap</span>
+        <span>Time</span>
+        <span>Gap</span>
+      </div>
+      <div class="recent-viewport">
+        <div class="recent-rows" id="recentRows"></div>
+      </div>
+    </div>
+
+    <div class="panel rssi-panel" id="rssiPanel">
+      <div class="label panel-title">RSSI Graph</div>
+      <div class="rssi-layout">
+
+        <div class="rssi-graph-wrap">
+          <canvas class="rssi-canvas" id="rssiCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="safe-guides"></div>
+  <div class="debug-chip" id="debugChip"></div>
+  <script src="smoothie.js"></script>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+
+    const config = {
+      layout: (params.get("layout") || "800x800").toLowerCase(),
+      sim: params.get("sim") === "1",
+      rssi: params.get("rssi") === "1",
+      debug: params.get("debug") === "1",
+      fps: Math.max(1, parseInt(params.get("fps") || "30", 10)),
+      lapsGoal: Math.max(1, parseInt(params.get("goal") || "8", 10))
+    };
+
+    if (config.debug) document.body.classList.add("debug");
+    if (config.rssi) document.body.classList.add("has-rssi");
+
+    const layouts = {
+      "800x800": {
+        topCardW: "180px", centerCardW: "220px", rightCardW: "220px", topPanelH: "182px",
+        labelSize: "11px", valueSize: "21px", valueBigSize: "38px", miniValueSize: "15px",
+        edge: "18px", radius: "18px",
+        recentPanelW: "300px", rssiPanelW: "300px", bottomPanelH: "205px", bottomPanelGap: "12px",
+        recentRowH: "42px", recentViewportH: "136px", recentCol1: "42px", recentCol2: "80px", recentCol3: "80px", recentGap: "6px"
+      },
+      "1920x1080": {
+        topCardW: "210px", centerCardW: "250px", rightCardW: "250px", topPanelH: "194px",
+        labelSize: "11px", valueSize: "22px", valueBigSize: "40px", miniValueSize: "16px",
+        edge: "22px", radius: "18px",
+        recentPanelW: "340px", rssiPanelW: "340px", bottomPanelH: "228px", bottomPanelGap: "14px",
+        recentRowH: "42px", recentViewportH: "138px", recentCol1: "48px", recentCol2: "88px", recentCol3: "88px", recentGap: "8px"
+      },
+      "1080x1920": {
+        topCardW: "168px", centerCardW: "208px", rightCardW: "208px", topPanelH: "170px",
+        labelSize: "10px", valueSize: "20px", valueBigSize: "34px", miniValueSize: "14px",
+        edge: "18px", radius: "18px",
+        recentPanelW: "300px", rssiPanelW: "300px", bottomPanelH: "214px", bottomPanelGap: "12px",
+        recentRowH: "40px", recentViewportH: "132px", recentCol1: "40px", recentCol2: "76px", recentCol3: "76px", recentGap: "6px"
+      },
+      "960x1080": {
+        topCardW: "172px", centerCardW: "214px", rightCardW: "214px", topPanelH: "176px",
+        labelSize: "10px", valueSize: "20px", valueBigSize: "35px", miniValueSize: "14px",
+        edge: "18px", radius: "18px",
+        recentPanelW: "310px", rssiPanelW: "310px", bottomPanelH: "220px", bottomPanelGap: "12px",
+        recentRowH: "41px", recentViewportH: "134px", recentCol1: "42px", recentCol2: "78px", recentCol3: "78px", recentGap: "6px"
+      }
+    };
+
+    const simulationLaps = [8.54, 8.91, 8.20, 8.48, 8.30, 8.54, 8.91, 8.20];
+    const animationMs = 420;
+    const defaultVisibleRows = 4;
+    const tickMs = Math.round(1000 / config.fps);
+
+    const state = {
+      laps: [],
+      idx: 0,
+      recentAnimating: false,
+      currentLapSeconds: 0,
+      lastDisplayTick: 0,
+      lastUpdateTs: performance.now(),
+      timerInterval: null
+    };
+
+    const rssiState = {
+      enterThreshold: 72,
+      exitThreshold: 64,
+      min: null,
+      max: null,
+      crossIn: 0,
+      crossOut: 0,
+      isInside: false,
+      interval: null
+    };
+
+    const el = {
+      lapCount: document.getElementById("lapCount"),
+      fastest: document.getElementById("fastest"),
+      currentLap: document.getElementById("currentLap"),
+      currentPanel: document.getElementById("currentPanel"),
+      lastLap: document.getElementById("lastLap"),
+      gap: document.getElementById("gap"),
+      best3: document.getElementById("best3"),
+      median: document.getElementById("median"),
+      recentRows: document.getElementById("recentRows"),
+      rssiCanvas: document.getElementById("rssiCanvas"),
+      debugChip: document.getElementById("debugChip")
+    };
+
+    const rssiSeries = new TimeSeries();
+    const rssiCrossingSeries = new TimeSeries();
+    let rssiChart = null;
+
+    function updateRSSIChartOptions() {
+      if (!config.rssi || !rssiChart) return;
+      const minV = Number.isFinite(rssiState.min) ? rssiState.min : Math.max(0, rssiState.exitThreshold - 10);
+      const maxV = Number.isFinite(rssiState.max) ? rssiState.max : (rssiState.enterThreshold + 10);
+      rssiChart.options.horizontalLines = [
+        { color: "hsl(8.2, 86.5%, 53.7%)", lineWidth: 1.7, value: rssiState.enterThreshold },
+        { color: "hsl(25, 85%, 55%)", lineWidth: 1.7, value: rssiState.exitThreshold }
+      ];
+      rssiChart.options.maxValue = Math.max(maxV, rssiState.enterThreshold + 10);
+      rssiChart.options.minValue = Math.max(0, Math.min(minV, rssiState.exitThreshold - 10));
+    }
+
+    function initRSSIChart() {
+      if (!config.rssi || !el.rssiCanvas || rssiChart) return;
+      rssiChart = new SmoothieChart({
+        responsive: true,
+        millisPerPixel: 50,
+        grid: {
+          strokeStyle: "rgba(255,255,255,0.15)",
+          sharpLines: true,
+          verticalSections: 0,
+          borderVisible: false
+        },
+        labels: { precision: 0, fillStyle: "rgba(255,255,255,0.72)" },
+        maxValue: 1,
+        minValue: 0
+      });
+      rssiChart.addTimeSeries(rssiSeries, {
+        lineWidth: 1.8,
+        strokeStyle: "hsl(214, 53%, 60%)",
+        fillStyle: "hsla(214, 53%, 60%, 0.35)"
+      });
+      rssiChart.addTimeSeries(rssiCrossingSeries, {
+        lineWidth: 1.2,
+        strokeStyle: "none",
+        fillStyle: "hsla(136, 71%, 70%, 0.25)"
+      });
+      updateRSSIChartOptions();
+      rssiChart.streamTo(el.rssiCanvas, 120);
+    }
+
+    function applyLayout(name) {
+      const selected = layouts[name] || layouts["800x800"];
+      const root = document.documentElement;
+      for (const [key, value] of Object.entries(selected)) {
+        root.style.setProperty(`--${key}`, value);
+      }
+      el.debugChip.textContent =
+        `layout=${name} · sim=${config.sim ? "1" : "0"} · rssi=${config.rssi ? "1" : "0"} · fps=${config.fps}`;
+      updateRSSIChartOptions();
+    }
+
+    function fmt(v) {
+      return v == null ? "--" : `${v.toFixed(2)}s`;
+    }
+
+    function fmtGap(v) {
+      if (v == null || Math.abs(v) < 0.005) return "--";
+      return `${v > 0 ? "+" : ""}${v.toFixed(2)}s`;
+    }
+
+    function getMedian(arr) {
+      if (!arr.length) return null;
+      const s = [...arr].sort((a, b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    }
+
+    function getBest3(arr) {
+      if (arr.length < 3) return null;
+      let best = Infinity;
+      for (let i = 0; i <= arr.length - 3; i++) best = Math.min(best, arr[i] + arr[i + 1] + arr[i + 2]);
+      return best;
+    }
+
+    function getFastest() {
+      return state.laps.length ? Math.min(...state.laps) : null;
+    }
+
+    function getLapHistoryRows() {
+      const rows = [];
+      let bestSoFar = null;
+      for (let i = 0; i < state.laps.length; i++) {
+        const lap = state.laps[i];
+        let gapToPreviousBest = null;
+        if (bestSoFar != null) gapToPreviousBest = +(lap - bestSoFar).toFixed(2);
+        rows.push({ lapNo: i + 1, time: lap, gap: gapToPreviousBest });
+        if (bestSoFar == null || lap < bestSoFar) bestSoFar = lap;
+      }
+      return rows;
+    }
+
+    function getLatestCompletedLapGap() {
+      const rows = getLapHistoryRows();
+      return rows.length ? rows[rows.length - 1].gap : null;
+    }
+
+    function pulse(node) {
+      node.classList.remove("pulse");
+      void node.offsetWidth;
+      node.classList.add("pulse");
+    }
+
+    function updateGapClass(gap) {
+      el.gap.className = "value";
+      if (gap == null) return;
+      if (Math.abs(gap) < 0.005) el.gap.classList.add("info");
+      else if (gap > 0) el.gap.classList.add("bad");
+      else el.gap.classList.add("good2");
+    }
+
+    function renderStats() {
+      const fastest = getFastest();
+      const last = state.laps.length ? state.laps[state.laps.length - 1] : null;
+      const median = getMedian(state.laps);
+      const best3 = getBest3(state.laps);
+      const gap = getLatestCompletedLapGap();
+
+      el.lapCount.textContent = `${state.laps.length}/${config.lapsGoal}`;
+      el.fastest.textContent = fmt(fastest);
+      el.lastLap.textContent = fmt(last);
+      el.best3.textContent = fmt(best3);
+      el.median.textContent = fmt(median);
+      el.gap.textContent = fmtGap(gap);
+      updateGapClass(gap);
+    }
+
+    function buildRowHtml(row, fastest, isLatest, extraClass = "") {
+      const isBest = fastest != null && Math.abs(row.time - fastest) < 0.001;
+      let gapClass = "";
+      if (row.gap != null) {
+        if (Math.abs(row.gap) < 0.005) gapClass = "info";
+        else if (row.gap > 0) gapClass = "bad";
+        else gapClass = "good2";
+      }
+      return `
+        <div class="recent-row ${isLatest ? "latest" : ""} ${isBest ? "best" : ""} ${extraClass}">
+          <span class="lap">L${row.lapNo}</span>
+          <span class="time">${fmt(row.time)}</span>
+          <span class="gap ${gapClass}">${fmtGap(row.gap)}</span>
+        </div>
+      `;
+    }
+
+    function getDisplayRows(count = defaultVisibleRows) {
+      return getLapHistoryRows().slice(-count).reverse();
+    }
+
+    function renderRecentStatic() {
+      const fastest = getFastest();
+      const rows = getDisplayRows(defaultVisibleRows);
+      el.recentRows.classList.remove("animating");
+      el.recentRows.style.transform = "translateY(0)";
+      el.recentRows.innerHTML = rows.map((row, i) => buildRowHtml(row, fastest, i === 0)).join("");
+    }
+
+    function renderRSSIStats() {
+      if (!config.rssi) return;
+    }
+
+    function renderAll() {
+      renderStats();
+      renderRecentStatic();
+      renderRSSIStats();
+      el.currentLap.textContent = fmt(state.currentLapSeconds);
+    }
+
+    function animateRecentOnNewLap() {
+      const fastest = getFastest();
+      const currentRows = getDisplayRows(defaultVisibleRows);
+      const previousRows = currentRows.slice(1);
+
+      if (currentRows.length <= 1) {
+        renderRecentStatic();
+        return;
+      }
+
+      const measureContainer = document.createElement("div");
+      measureContainer.style.position = "absolute";
+      measureContainer.style.visibility = "hidden";
+      measureContainer.style.pointerEvents = "none";
+      measureContainer.style.inset = "0";
+      measureContainer.innerHTML = buildRowHtml(currentRows[0], fastest, true, "entering");
+      el.recentRows.parentElement.appendChild(measureContainer);
+      const newRowHeight = measureContainer.firstElementChild.getBoundingClientRect().height + 2;
+      measureContainer.remove();
+
+      const animatedMarkup = [
+        ...currentRows.map((row, i) => buildRowHtml(row, fastest, i === 0, i === 0 ? "entering" : "")),
+        ...previousRows.map((row) => buildRowHtml(row, fastest, false, "ghost"))
+      ].join("");
+
+      el.recentRows.innerHTML = animatedMarkup;
+      el.recentRows.classList.remove("animating");
+      el.recentRows.style.transform = "translateY(0)";
+      void el.recentRows.offsetWidth;
+      el.recentRows.classList.add("animating");
+      el.recentRows.style.transform = `translateY(-${newRowHeight}px)`;
+
+      window.setTimeout(() => {
+        renderRecentStatic();
+        state.recentAnimating = false;
+      }, animationMs);
+    }
+
+    function completeLap(time) {
+      state.laps.push(+time.toFixed(2));
+      state.currentLapSeconds = 0;
+      pulse(el.currentPanel);
+      renderStats();
+
+      if (!state.recentAnimating) {
+        state.recentAnimating = true;
+        animateRecentOnNewLap();
+      } else {
+        renderRecentStatic();
+        state.recentAnimating = false;
+      }
+    }
+
+    function simStep() {
+      const now = performance.now();
+      const delta = (now - state.lastUpdateTs) / 1000;
+      state.lastUpdateTs = now;
+      state.currentLapSeconds += delta;
+
+      if (now - state.lastDisplayTick >= tickMs) {
+        el.currentLap.textContent = fmt(state.currentLapSeconds);
+        state.lastDisplayTick = now;
+      }
+
+      const target = simulationLaps[state.idx % simulationLaps.length];
+      if (state.currentLapSeconds >= target) {
+        completeLap(target);
+        state.idx += 1;
+        el.currentLap.textContent = "0.00s";
+      }
+    }
+
+    function startSim() {
+      if (state.timerInterval) return;
+      state.lastUpdateTs = performance.now();
+      state.lastDisplayTick = 0;
+      state.timerInterval = window.setInterval(simStep, tickMs);
+    }
+
+    function stopSim() {
+      if (state.timerInterval) {
+        clearInterval(state.timerInterval);
+        state.timerInterval = null;
+      }
+    }
+
+    function pushRSSISample(value, ts = Date.now()) {
+      if (!config.rssi) return;
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return;
+
+      rssiState.min = rssiState.min == null ? numeric : Math.min(rssiState.min, numeric);
+      rssiState.max = rssiState.max == null ? numeric : Math.max(rssiState.max, numeric);
+
+      if (!rssiState.isInside && numeric >= rssiState.enterThreshold) {
+        rssiState.isInside = true;
+        rssiState.crossIn += 1;
+      } else if (rssiState.isInside && numeric <= rssiState.exitThreshold) {
+        rssiState.isInside = false;
+        rssiState.crossOut += 1;
+      }
+      if (rssiChart) {
+        rssiSeries.append(ts, numeric);
+        rssiCrossingSeries.append(ts, rssiState.isInside ? 256 : -10);
+        updateRSSIChartOptions();
+      }
+
+      renderRSSIStats();
+    }
+
+    function startRSSISim() {
+      if (!config.rssi || rssiState.interval) return;
+      rssiState.interval = window.setInterval(() => {
+        const now = Date.now();
+        const t = now / 1000;
+        const base = 60 + Math.sin(t * 1.15) * 4;
+        const pulse = Math.max(0, Math.sin(t * 0.72)) * 18;
+        const ripple = Math.sin(t * 5.5) * 1.6;
+        const noise = (Math.random() - 0.5) * 2.2;
+        const sample = Math.max(40, Math.min(100, base + pulse + ripple + noise));
+        pushRSSISample(sample, now);
+      }, 80);
+    }
+
+    function stopRSSISim() {
+      if (rssiState.interval) {
+        clearInterval(rssiState.interval);
+        rssiState.interval = null;
+      }
+    }
+
+    function resetState() {
+      state.laps = [];
+      state.idx = 0;
+      state.recentAnimating = false;
+      state.currentLapSeconds = 0;
+      renderAll();
+    }
+
+    function ingestRaceData(payload) {
+      if (!payload || typeof payload !== "object") return;
+      if (typeof payload.currentLapSeconds === "number") {
+        state.currentLapSeconds = Math.max(0, payload.currentLapSeconds);
+        el.currentLap.textContent = fmt(state.currentLapSeconds);
+      }
+      if (Array.isArray(payload.laps)) {
+        state.laps = payload.laps.map(v => Number(v)).filter(v => Number.isFinite(v) && v >= 0);
+        renderAll();
+      }
+      if (typeof payload.completedLap === "number" && Number.isFinite(payload.completedLap)) {
+        completeLap(payload.completedLap);
+      }
+    }
+
+    let raceRunning = false;
+    let raceLapStartMs = 0;
+    let raceTimerInterval = null;
+    let eventSource = null;
+    const goalWasProvided = params.has("goal");
+
+    function startRaceTicker() {
+      if (raceTimerInterval) return;
+      raceTimerInterval = window.setInterval(() => {
+        if (!raceRunning || raceLapStartMs <= 0) return;
+        state.currentLapSeconds = (Date.now() - raceLapStartMs) / 1000;
+        el.currentLap.textContent = fmt(state.currentLapSeconds);
+      }, tickMs);
+    }
+
+    function stopRaceTicker() {
+      if (!raceTimerInterval) return;
+      clearInterval(raceTimerInterval);
+      raceTimerInterval = null;
+    }
+
+    function handleRaceStarted() {
+      state.laps = [];
+      state.idx = 0;
+      state.recentAnimating = false;
+      state.currentLapSeconds = 0;
+      raceLapStartMs = Date.now();
+      raceRunning = true;
+      renderAll();
+    }
+
+    function handleRaceStopped() {
+      raceRunning = false;
+    }
+
+    function handleRaceCleared() {
+      raceRunning = false;
+      raceLapStartMs = 0;
+      resetState();
+      el.currentLap.textContent = "0.00s";
+    }
+
+    function handleLapEventMs(lapMs) {
+      const lapSeconds = Number(lapMs) / 1000;
+      if (!Number.isFinite(lapSeconds) || lapSeconds <= 0) return;
+      if (!raceRunning) {
+        raceRunning = true;
+      }
+      completeLap(lapSeconds);
+      raceLapStartMs = Date.now();
+    }
+
+    async function loadInitialConfig() {
+      try {
+        const response = await fetch("/config");
+        if (!response.ok) return;
+        const cfg = await response.json();
+        if (!goalWasProvided && Number.isFinite(Number(cfg.maxLaps)) && Number(cfg.maxLaps) > 0) {
+          config.lapsGoal = Number(cfg.maxLaps);
+        }
+        if (config.rssi) {
+          if (Number.isFinite(Number(cfg.enterRssi))) rssiState.enterThreshold = Number(cfg.enterRssi);
+          if (Number.isFinite(Number(cfg.exitRssi))) rssiState.exitThreshold = Number(cfg.exitRssi);
+          renderRSSIStats();
+          updateRSSIChartOptions();
+        }
+        renderStats();
+      } catch (err) {
+        console.warn("[rev13] Failed to load config:", err);
+      }
+    }
+
+    function connectEventStream() {
+      if (!window.EventSource) return;
+      if (eventSource) {
+        try { eventSource.close(); } catch (e) {}
+      }
+      eventSource = new EventSource("/events");
+      eventSource.addEventListener("lap", (e) => handleLapEventMs(parseFloat(e.data)));
+      eventSource.addEventListener("raceState", (e) => {
+        if (e.data === "started") handleRaceStarted();
+        else if (e.data === "stopped") handleRaceStopped();
+        else if (e.data === "cleared") handleRaceCleared();
+      });
+      eventSource.addEventListener("rssi", (e) => {
+        if (!config.rssi) return;
+        pushRSSISample(parseFloat(e.data), Date.now());
+      });
+      eventSource.addEventListener("configUpdated", () => {
+        loadInitialConfig();
+      });
+    }
+
+    async function startRssiStream() {
+      if (!config.rssi) return;
+      try {
+        await fetch("/timer/rssiStart", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } });
+      } catch (err) {
+        console.warn("[rev13] Failed to start RSSI stream:", err);
+      }
+    }
+
+    function stopRssiStream() {
+      if (!config.rssi) return;
+      try {
+        fetch("/timer/rssiStop", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          keepalive: true
+        }).catch(() => {});
+      } catch (err) {}
+    }
+
+    function shutdownRealtime() {
+      if (eventSource) {
+        try { eventSource.close(); } catch (e) {}
+        eventSource = null;
+      }
+      stopRaceTicker();
+      stopRssiStream();
+    }
+
+    window.addEventListener("resize", updateRSSIChartOptions);
+
+    window.FPVOverlay = {
+      setData: ingestRaceData,
+      reset: resetState,
+      completeLap: (seconds) => completeLap(Number(seconds)),
+      setCurrentLap: (seconds) => {
+        state.currentLapSeconds = Number(seconds) || 0;
+        el.currentLap.textContent = fmt(state.currentLapSeconds);
+      },
+      setLayout: (name) => applyLayout(name),
+      startSim, stopSim,
+      pushRSSI: (value, ts) => pushRSSISample(value, ts),
+      setRSSIThresholds: ({ enter, exit }) => {
+        if (Number.isFinite(Number(enter))) rssiState.enterThreshold = Number(enter);
+        if (Number.isFinite(Number(exit))) rssiState.exitThreshold = Number(exit);
+        renderRSSIStats();
+        updateRSSIChartOptions();
+      }
+    };
+
+    applyLayout(config.layout);
+    resetState();
+    initRSSIChart();
+    if (config.sim) {
+      startSim();
+      if (config.rssi) startRSSISim();
+    } else {
+      loadInitialConfig();
+      connectEventStream();
+      startRaceTicker();
+      startRssiStream();
+      window.addEventListener("beforeunload", shutdownRealtime);
+      window.addEventListener("pagehide", shutdownRealtime);
+    }
+  </script>
+</body>
+</html>

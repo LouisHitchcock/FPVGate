@@ -704,6 +704,10 @@ EEPROM:\n\
     server.on("/vert-OSD", [this](AsyncWebServerRequest *request) {
         request->send(LittleFS, "/vert-osd.html", "text/html");
     });
+    // Handcam overlay route
+    server.on("/handcamOverlay", [this](AsyncWebServerRequest *request) {
+        request->send(LittleFS, "/handcamOverlay.html", "text/html");
+    });
 
     // Helper lambda for CORS response
     auto sendCorsResponse = [](AsyncWebServerRequest *request, const char* body) {

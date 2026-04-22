@@ -431,6 +431,8 @@
             "horizontal_desc": "Standard horizontal layout for 16:9 streams",
             "vertical": "Vertical OSD",
             "vertical_desc": "Vertical layout for portrait streams or side panels",
+            "handcam": "Handcam Overlay",
+            "handcam_desc": "Compact handcam-focused overlay with optional live RSSI panel",
             "open": "Open",
             "copy_url": "Copy URL",
             "obs_setup": "OBS Browser Source Setup",

@@ -6293,6 +6293,16 @@ function copyVerticalOSDUrl() {
   copyOSDUrl(osdUrl, event.target);
 }
 
+function openHandcamOverlay() {
+  const osdUrl = window.location.origin + "/handcamOverlay";
+  window.open(osdUrl, "_blank");
+}
+
+function copyHandcamOverlayUrl() {
+  const osdUrl = window.location.origin + "/handcamOverlay";
+  copyOSDUrl(osdUrl, event.target);
+}
+
 function copyOSDUrl(url, button) {
   navigator.clipboard
     .writeText(url)

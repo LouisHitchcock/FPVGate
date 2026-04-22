@@ -430,6 +430,8 @@
             "horizontal_desc": "适用于 16:9 直播的标准横向布局",
             "vertical": "纵向 OSD",
             "vertical_desc": "适用于纵向直播或侧边栏的纵向布局",
+            "handcam": "Handcam 叠加层",
+            "handcam_desc": "面向手持镜头的紧凑叠加层，可选实时 RSSI 面板",
             "open": "打开",
             "copy_url": "复制 URL",
             "obs_setup": "OBS 浏览器源设置",
