@@ -22,9 +22,15 @@
 
 ### Race Controls, Sync, and Timing UX
 - Added race countdown mode setting (`Less than 5` vs `10 Second Countdown`)
-- Added and stabilized max heat time behavior and related config migration handling
+- Added and stabilized **Heat Minutes** behavior (time-based auto-stop) and related config migration handling
 - Continued sync/race-flow hardening from the merged touchscreen branch
 - Preserved Gate 1 (holeshot) exclusion in race stats and race-history analytics
+
+### Heat Minutes (Time-Based Auto Stop)
+- Added a dedicated **Heat Minutes** race limit so a race can auto-stop by elapsed time, not just lap count
+- Value is persisted in config and migrated safely for existing installs
+- Works alongside max laps, giving events a predictable duration cap
+- Recommended sanity check after update: set a short Heat Minutes value and confirm race auto-stops on time
 
 ### Touchscreen/LCD System Work (Merged History)
 - Large StarForgeOS-derived touchscreen/LVGL integration and race-screen work was merged into this release range
@@ -66,6 +72,7 @@
    - Gate 1 should appear as holeshot.
    - Fastest/median/best-3 should ignore Gate 1.
    - Max laps auto-stop should trigger on real laps, not Gate 1.
+   - Heat Minutes should auto-stop race when time limit is reached.
 
 ### Web Flasher (Recommended)
 Visit https://fpvgate.xyz/flasher.html

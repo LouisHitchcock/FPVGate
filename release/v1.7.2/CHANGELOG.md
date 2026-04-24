@@ -7,6 +7,7 @@
 - **Full flash recommended** - Both firmware and filesystem changed across this range
 - **SD card package unchanged** - `SD_Card.zip` carried forward from v1.7.1
 - **Commit-range caveat** - `v1.7.1..HEAD` includes merged branch history with earlier author dates; this changelog explicitly reviews that full range
+- **Heat Minutes included** - time-based race auto-stop is part of this release and migrated for existing configs
 
 ### Holeshot Logic Status
 - **Validated as still correct** during release prep:
@@ -29,6 +30,7 @@
 - Handcam overlay page with live RSSI graph and OSD entry (`696082d`)
 - RSSI debug popout tooling in web UI (`58a0e1a`)
 - Race countdown mode setting (`Less than 5` or `10 Second Countdown`) (`b297d25`)
+- Heat Minutes (max heat time) time-based race auto-stop support with persisted config behavior
 - Runtime self-test capability detection with pass/fail/skip tri-state output (`fc683f6`)
 
 ### Changed
