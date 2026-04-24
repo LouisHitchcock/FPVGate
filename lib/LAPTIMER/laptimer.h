@@ -105,6 +105,7 @@ class LapTimer {
     bool enteredGate;         // True once we have crossed the enter threshold
     uint8_t enterHoldSamples; // Number of consecutive samples at/above enter
     uint32_t enterHoldStartMs;
+    bool gate1Armed;          // Gate 1 bootstrap has been initialized for current race
 
 
     // Receiver filter mode tracking

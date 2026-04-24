@@ -43,9 +43,14 @@ Project creator and lead developer
 - Adaptive SPI mutex timeouts to prevent SD card lockups
 - Debug message throttling for cleaner serial output
 - Auto-creation of SD card directory structure on startup
+- Start/stop race behavior parity between LCD and web race flows
+- SD/LCD coexistence reliability fixes and race-history load improvements
+- DMA RSSI pipeline and board pin/power fixes across Waveshare and related targets
+- Deep sleep, power-switch behavior, and gyro screen-flip integration work
+- Passive buzzer tone-system groundwork and related race-audio path updates
 
 **GitHub:** https://github.com/racefpv  
-**Integrated:** February 2026
+**Integrated:** February-April 2026 (ongoing merged contributions)
 
 ---
 

@@ -315,6 +315,14 @@ void Config::load(void) {
         modified = true;
     }
 
+    // Sanity: minLap stored in 0.1s units. Reject corrupt/out-of-range values.
+    // Valid range here is 1..200 => 0.1s..20.0s (UI currently exposes 1.0s..20.0s).
+    if (conf.minLap < 1 || conf.minLap > 200 || conf.minLap == 0xFF) {
+        DEBUG("Invalid minLap=%u; resetting to default 20 (2.0s)\n", conf.minLap);
+        conf.minLap = 20;
+        modified = true;
+    }
+
     // Sanity: RSSI thresholds. Anything below the slider minimum (50) is treated as
     // corrupt and restored to a sensible default so the UI never boots showing the min.
     if (conf.enterRssi < 50 || conf.enterRssi == 0xFF) {
@@ -527,9 +535,17 @@ void Config::fromJson(JsonObject source) {
         conf.channelIndex = source["channelIndex"];
         modified = true;
     }
-    if (!source["minLap"].isNull() && source["minLap"] != conf.minLap) {
-        conf.minLap = source["minLap"];
-        modified = true;
+    if (!source["minLap"].isNull()) {
+        int val = source["minLap"].as<int>();
+        // Stored as 0.1s units; keep within a sane range.
+        if (val >= 1 && val <= 200) {
+            if ((uint8_t)val != conf.minLap) {
+                conf.minLap = (uint8_t)val;
+                modified = true;
+            }
+        } else {
+            DEBUG("Rejected out-of-range minLap=%d\n", val);
+        }
     }
     if (!source["alarm"].isNull() && source["alarm"] != conf.alarm) {
         conf.alarm = source["alarm"];

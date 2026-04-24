@@ -46,6 +46,11 @@ static const int kMaxStepPerSample_Novacore = 20;  // More responsive for cleane
 
 // NEW: require N consecutive samples below exit to confirm "exit"
 static const uint8_t kExitConfirmSamples = 2;
+// Gate 1 only: allow a slightly lower effective threshold than enter when enter is set very high.
+static const uint8_t kGate1RelaxMargin = 4;      // effective Gate 1 threshold ~= exit + 4
+static const uint8_t kPeakMinAboveExit = 5;      // non-Gate-1 minimum peak-to-exit margin
+static const uint8_t kGate1PeakMinAboveExit = 3; // Gate 1 minimum peak-to-exit margin
+static const uint8_t kGate1HoldSamplesMin = 2;   // lower debounce for first crossing only
 
 void LapTimer::init(Config *config, RX5808 *rx5808, Buzzer *buzzer, Led *l, WebhookManager *webhook) {
     conf = config;
@@ -86,6 +91,7 @@ void LapTimer::init(Config *config, RX5808 *rx5808, Buzzer *buzzer, Led *l, Webh
     gateExited = true;
     enterHoldSamples = 0;
     enterHoldStartMs = 0;
+    gate1Armed = false;
 
 }
 
@@ -113,6 +119,7 @@ void LapTimer::start() {
     enteredGate = false;
     enterHoldSamples = 0;
     enterHoldStartMs = 0;
+    gate1Armed = false;
     prevAvgRssi = 0;
     lastRaceDebugPrintMs = 0;
 
@@ -146,6 +153,7 @@ void LapTimer::stop() {
     enteredGate = false;
     enterHoldSamples = 0;
     enterHoldStartMs = 0;
+    gate1Armed = false;
 
     totalDistanceTravelled = 0.0f;
     distanceRemaining = 0.0f;
@@ -323,7 +331,15 @@ void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
         const uint32_t now = millis();
         if (lastRaceDebugPrintMs == 0 || (now - lastRaceDebugPrintMs) >= kRaceDebugPeriodMs) {
             lastRaceDebugPrintMs = now;
-            const bool validPeak = (rssiPeak > 0) && (rssiPeak >= enter) && (rssiPeak > (exitT + 5));
+            const bool isGate1Dbg = (lapCount == 0 && !lapCountWraparound && gate1Armed);
+            uint8_t peakThreshold = enter;
+            const uint8_t gate1RelaxedPeak = (exitT >= (255 - kGate1RelaxMargin)) ? 255 : (uint8_t)(exitT + kGate1RelaxMargin);
+            if (isGate1Dbg && gate1RelaxedPeak < enter) {
+                peakThreshold = gate1RelaxedPeak;
+            }
+            const uint8_t minPeakMargin = isGate1Dbg ? kGate1PeakMinAboveExit : kPeakMinAboveExit;
+            const uint8_t minPeakAboveExit = (exitT >= (255 - minPeakMargin)) ? 255 : (uint8_t)(exitT + minPeakMargin);
+            const bool validPeak = (rssiPeak > 0) && (rssiPeak >= peakThreshold) && (rssiPeak > minPeakAboveExit);
 
             // Show whether we've *confirmed* exit (2 samples) below
             uint16_t prevIdx = (rssiCount + LAPTIMER_RSSI_HISTORY - 1) % LAPTIMER_RSSI_HISTORY;
@@ -354,8 +370,48 @@ void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
         case RUNNING: {
             bool isGate1 = (lapCount == 0 && !lapCountWraparound);
             bool minLapElapsed = (currentTimeMs - startTimeMs) > conf->getMinLapMs();
+            bool canCapture = false;
 
-            if (isGate1 || minLapElapsed) {
+            if (isGate1) {
+                if (!gate1Armed) {
+                    const uint8_t cur = rssi[rssiCount];
+                    const uint8_t enter = conf->getEnterRssi();
+                    const uint32_t now = millis();
+
+                    gate1Armed = true;
+
+                    // Bootstrap Gate 1 based on where we are at race start:
+                    // - If already in gate (>= enter), treat the first confirmed exit as Gate 1.
+                    // - If outside gate, use normal enter->peak->exit detection for Gate 1.
+                    if (cur >= enter) {
+                        const uint8_t exitT = conf->getExitRssi();
+                        uint8_t seedPeak = cur;
+                        // validPeak requires peak > (exit + margin), so ensure seeded peak satisfies that.
+                        const uint8_t minValidPeak = (exitT >= (255 - kGate1PeakMinAboveExit)) ? 255 : (uint8_t)(exitT + kGate1PeakMinAboveExit);
+                        if (seedPeak < minValidPeak) seedPeak = minValidPeak;
+                        enteredGate = true;
+                        gateExited = false;
+                        enterHoldSamples = kEnterHoldSamplesMin;
+                        enterHoldStartMs = now;
+                        rssiPeak = seedPeak;
+                        rssiPeakTimeMs = now;
+                        DEBUG("[Gate1] Armed in-gate bootstrap (cur=%u enter=%u seedPeak=%u)\n", cur, enter, seedPeak);
+                    } else {
+                        enteredGate = false;
+                        gateExited = true;
+                        enterHoldSamples = 0;
+                        enterHoldStartMs = 0;
+                        rssiPeak = 0;
+                        rssiPeakTimeMs = 0;
+                        DEBUG("[Gate1] Armed out-of-gate bootstrap (cur=%u enter=%u)\n", cur, enter);
+                    }
+                }
+                canCapture = gate1Armed;
+            } else {
+                canCapture = minLapElapsed;
+            }
+
+            if (canCapture) {
                 lapPeakCapture();
                 bool captured = lapPeakCaptured();
                 if (captured) {
@@ -388,14 +444,25 @@ void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
 void LapTimer::lapPeakCapture() {
     const uint8_t cur = rssi[rssiCount];
     const uint32_t now = millis();
+    const bool isGate1 = (lapCount == 0 && !lapCountWraparound && gate1Armed);
 
     bool entryCondition;
     bool noiseBlipExit;
+    uint8_t holdSamplesRequired;
 
     {
         const uint8_t enter = conf->getEnterRssi();
         const uint8_t exitT = conf->getExitRssi();
-        entryCondition = (cur >= enter);
+        uint8_t effectiveEnter = enter;
+        // Gate 1 only: if enter is much higher than exit, relax slightly so first crossing isn't lost.
+        const uint8_t gate1RelaxedEnter = (exitT >= (255 - kGate1RelaxMargin)) ? 255 : (uint8_t)(exitT + kGate1RelaxMargin);
+        if (isGate1 && gate1RelaxedEnter < enter) {
+            effectiveEnter = gate1RelaxedEnter;
+            holdSamplesRequired = kGate1HoldSamplesMin;
+        } else {
+            holdSamplesRequired = kEnterHoldSamplesMin;
+        }
+        entryCondition = (cur >= effectiveEnter);
         noiseBlipExit = (cur < exitT && rssiPeak == 0);
     }
 
@@ -411,7 +478,7 @@ void LapTimer::lapPeakCapture() {
             
             // Timeout: if gate stays entered for >3s, something is wrong - reset
             if ((now - enterHoldStartMs) > 3000) {
-                DEBUG("[Timeout] Gate entered for >500ms - ceiling drift detected, resetting\n");
+                DEBUG("[Timeout] Gate entered for >3000ms - ceiling drift detected, resetting\n");
                 enteredGate = false;
                 gateExited = true;
                 enterHoldSamples = 0;
@@ -422,7 +489,7 @@ void LapTimer::lapPeakCapture() {
             }
         }
 
-        if (enterHoldSamples >= kEnterHoldSamplesMin) {
+        if (enterHoldSamples >= holdSamplesRequired) {
             if (cur > rssiPeak) {
                 rssiPeak = cur;
                 rssiPeakTimeMs = now;
@@ -445,16 +512,24 @@ void LapTimer::lapPeakCapture() {
 }
 
 bool LapTimer::lapPeakCaptured() {
+    const bool isGate1 = (lapCount == 0 && !lapCountWraparound && gate1Armed);
     bool validPeak;
     bool droppedBelowExit;
 
     {
         const uint8_t enter = conf->getEnterRssi();
         const uint8_t exitT = conf->getExitRssi();
+        uint8_t peakThreshold = enter;
+        const uint8_t gate1RelaxedPeak = (exitT >= (255 - kGate1RelaxMargin)) ? 255 : (uint8_t)(exitT + kGate1RelaxMargin);
+        if (isGate1 && gate1RelaxedPeak < enter) {
+            peakThreshold = gate1RelaxedPeak;
+        }
+        const uint8_t minPeakMargin = isGate1 ? kGate1PeakMinAboveExit : kPeakMinAboveExit;
+        const uint8_t minPeakAboveExit = (exitT >= (255 - minPeakMargin)) ? 255 : (uint8_t)(exitT + minPeakMargin);
 
         validPeak = (rssiPeak > 0) &&
-                     (rssiPeak >= enter) &&
-                     (rssiPeak > (exitT + 5));
+                     (rssiPeak >= peakThreshold) &&
+                     (rssiPeak > minPeakAboveExit);
 
         if (kExitConfirmSamples <= 1) {
             droppedBelowExit = (rssi[rssiCount] < exitT);
