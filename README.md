@@ -4,7 +4,7 @@
 
 [![Website](https://img.shields.io/badge/Website-fpvgate.xyz-blue?style=for-the-badge&logo=google-chrome&logoColor=white)](https://fpvgate.xyz)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey?style=for-the-badge)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/XwammuWCCj)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/XwammuWCCj)
 [![Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/louishitchcock)
 [![Shop](https://img.shields.io/badge/Shop-Buy%20FPVGate%20AIO-green?style=for-the-badge&logo=shopify&logoColor=white)](https://fpvgate.xyz/shop.html)
 
