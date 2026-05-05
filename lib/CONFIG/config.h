@@ -136,6 +136,27 @@
 #define PIN_SD_MOSI 8          // D9 (GPIO8)
 #define PIN_SD_MISO 9          // D10 (GPIO9)
 
+// FPVGate Solo (based on XIAO ESP32S3)
+#elif defined(FPVGATE_SOLO)
+
+#define PIN_LED 21             // XIAO onboard user LED
+#define PIN_RGB_LED 44         // D7 - WS2812/NeoPixel signal
+#define NUM_LEDS 5
+#define PIN_VBAT 1             // D0 - battery sense
+#define VBAT_SCALE 2
+#define VBAT_ADD 2
+#define PIN_RX5808_RSSI 3      // D2
+#define PIN_RX5808_DATA 5      // D4
+#define PIN_RX5808_SELECT 6    // D5 (LE)
+#define PIN_RX5808_CLOCK 4     // D3
+#define PIN_BUZZER 43          // D6
+#define BUZZER_INVERTED false
+// SD Card SPI pins
+#define PIN_SD_CS 2            // D1
+#define PIN_SD_SCK 7           // D8
+#define PIN_SD_MOSI 8          // D9 (GPIO8)
+#define PIN_SD_MISO 9          // D10 (GPIO9)
+
 // XIAO ESP32S3 Plus
 #elif defined(XIAO_ESP32S3_PLUS)
 
@@ -213,7 +234,7 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
@@ -224,7 +245,7 @@
 #endif
 
 // Boards with built-in battery monitoring
-#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(SEEED_XIAO_ESP32S3) || defined(XIAO_ESP32S3_PLUS) || defined(ENABLE_BATTERY_TEST)
+#if defined(LILYGO_TENERGY_S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(SEEED_XIAO_ESP32S3) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS) || defined(ENABLE_BATTERY_TEST)
     #define HAS_BATTERY_MONITOR 1
 #endif
 

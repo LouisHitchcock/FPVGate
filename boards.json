@@ -6,6 +6,11 @@
       "expert_mode": 0
     },
     {
+      "value": "fpvgatesolo",
+      "label": "FPVGate Solo",
+      "expert_mode": 0
+    },
+    {
       "value": "esp32s3",
       "label": "ESP32-S3 DevKitC-1 (8MB Flash)",
       "expert_mode": 0
