@@ -493,7 +493,7 @@ void loop() {
     
     // Debug: Periodic "alive" message every 5 seconds with detailed memory stats
     static uint32_t lastAliveMs = 0;
-    if (currentTimeMs - lastAliveMs > 5000) {
+    if (!shouldSuppressDebugSerial() && currentTimeMs - lastAliveMs > 5000) {
         lastAliveMs = currentTimeMs;
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t minFreeHeap = ESP.getMinFreeHeap();

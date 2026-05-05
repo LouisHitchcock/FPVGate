@@ -1,7 +1,7 @@
 {
   "name": "fpvgate-desktop",
-  "version": "1.5.0",
-  "description": "FPVGate Lap Timer Desktop App - USB/WiFi connectivity with track management, distance tracking, race editing, and modern configuration UI",
+  "version": "1.7.2",
+  "description": "FPVGate Desktop - current FPVGate UI packaged for USB and WiFi desktop use",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -22,6 +22,7 @@
     "electron-packager": "^17.1.2"
   },
   "dependencies": {
+    "@serialport/parser-readline": "^12.0.0",
     "serialport": "^12.0.0"
   },
   "build": {
@@ -33,7 +34,24 @@
     "files": [
       "main.js",
       "preload.js",
-      "../data/**/*"
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../logo",
+        "to": "logo",
+        "filter": [
+          "WhiteLogo.png",
+          "BlackLogo.png"
+        ]
+      }
     ],
     "win": {
       "target": [

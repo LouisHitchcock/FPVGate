@@ -59,11 +59,16 @@ class USBTransport : public TransportInterface {
     void enableRssiStreaming(bool enable);
 
    private:
+    void writeJsonLine(const JsonDocument& doc);
     void processCommand(const char* cmdLine);
     void sendResponse(uint32_t id, const char* status);
     void sendResponse(uint32_t id, const char* status, const char* message);
+    void sendSessionOpenResponse(uint32_t id);
     void sendConfigResponse(uint32_t id);
     void sendStatusResponse(uint32_t id);
+    void sendConfigUpdatedEvent();
+    void sendVersionResponse(uint32_t id);
+    void resetSessionState();
     
     Config *conf;
     LapTimer *timer;
@@ -77,6 +82,7 @@ class USBTransport : public TransportInterface {
     TrackManager *trackManager;
     
     bool rssiStreamingEnabled;
+    bool sessionActive;
     uint32_t lastRssiSentMs;
     static const uint32_t RSSI_SEND_INTERVAL_MS = 200;
     

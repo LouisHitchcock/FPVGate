@@ -1395,6 +1395,42 @@ footer {
   color: var(--text-color);
 }
 
+.usb-connect-modal {
+  max-width: 520px;
+}
+
+.usb-connect-modal .config-item {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.usb-connect-modal .config-item > label:not(.switch) {
+  display: block;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.usb-connect-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.usb-connect-row select {
+  min-width: 0;
+}
+
+.usb-connect-status {
+  margin: 8px 0 16px 0;
+  line-height: 1.4;
+}
+
+.usb-connect-actions {
+  display: flex;
+  gap: 12px;
+}
+
 /* Settings Modal - Overlay Popup */
 .settings-modal {
   position: fixed;
@@ -2200,8 +2236,8 @@ footer {
   white-space: nowrap;
 }
 
-/* WiFi Icon */
-.wifi-icon {
+/* Connection Icon */
+.connection-icon {
   flex-shrink: 0;
   margin-right: 4px;
   filter: brightness(0) saturate(100%) invert(100%);

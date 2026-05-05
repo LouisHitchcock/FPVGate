@@ -36,9 +36,12 @@ class USBTransport {
             rssi: [],
             lap: [],
             raceState: [],
+            slaveLap: [],
+            configUpdated: [],
             disconnect: []
         };
         this.isElectron = typeof window.electronAPI !== 'undefined';
+        this.electronListenersBound = false;
     }
 
     /**
@@ -52,6 +55,7 @@ class USBTransport {
      * Connect to USB device
      */
     async connect(portPath = null) {
+        let openedElectronPort = false;
         try {
             if (this.isElectron) {
                 // Electron mode - use Node.js serialport
@@ -81,30 +85,12 @@ class USBTransport {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to connect');
                 }
-                
-                // Set up data listener
-                window.electronAPI.onSerialData((data) => {
-                    try {
-                        const msg = JSON.parse(data);
-                        this.handleMessage(msg);
-                    } catch (e) {
-                        // Not JSON, probably debug output
-                        console.log('[USB Debug]', data);
-                    }
-                });
-                
-                window.electronAPI.onSerialError((error) => {
-                    console.error('[USB] Error:', error);
-                    this.connected = false;
-                });
-                
-                window.electronAPI.onSerialDisconnected(() => {
-                    console.log('[USB] Disconnected');
-                    this.connected = false;
-                });
-                
+                openedElectronPort = true;
+
+                this.bindElectronListeners();
                 this.connected = true;
                 this.port = portPath;
+                await this.waitForDeviceReady();
                 console.log('[USB] Connected to', portPath);
                 return true;
                 
@@ -133,6 +119,13 @@ class USBTransport {
         } catch (error) {
             console.error('[USB] Connection error:', error);
             this.connected = false;
+            if (this.isElectron && openedElectronPort) {
+                try {
+                    await window.electronAPI.disconnectSerial();
+                } catch (disconnectError) {
+                    console.error('[USB] Disconnect after failed connect error:', disconnectError);
+                }
+            }
             throw error;
         }
     }
@@ -260,14 +253,134 @@ class USBTransport {
      * @param {string} method - HTTP method (GET, POST) - optional, defaults to POST
      * @param {object} data - Command data - optional
      */
+    normalizeCommand(cmd, method = 'POST', data = null) {
+        let normalizedMethod = method;
+        let normalizedData = data;
+
+        if (normalizedMethod && typeof normalizedMethod === 'object' && normalizedData === null) {
+            normalizedData = normalizedMethod;
+            normalizedMethod = 'POST';
+        }
+
+        let normalizedCmd = String(cmd || '').replace(/^\//, '');
+        normalizedMethod = String(normalizedMethod || 'POST').toUpperCase();
+
+        if (normalizedCmd === 'config') {
+            normalizedCmd = normalizedMethod === 'GET' ? 'config/get' : 'config/set';
+        } else if (normalizedCmd === 'timer/rssiStart') {
+            normalizedCmd = 'rssi/start';
+        } else if (normalizedCmd === 'timer/rssiStop') {
+            normalizedCmd = 'rssi/stop';
+        } else if (normalizedCmd === 'api/selftest') {
+            normalizedCmd = 'selftest';
+        }
+
+        return { cmd: normalizedCmd, data: normalizedData };
+    }
+
+    getCommandTimeoutMs(cmd) {
+        switch (cmd) {
+            case 'selftest':
+                return 180000;
+            case 'session/open':
+            case 'config/get':
+            case 'config/set':
+            case 'rssi/start':
+            case 'rssi/stop':
+                return 15000;
+            default:
+                return 8000;
+        }
+    }
+
+    bindElectronListeners() {
+        if (!this.isElectron || this.electronListenersBound) return;
+
+        window.electronAPI.onSerialData((data) => {
+            try {
+                const msg = JSON.parse(data);
+                this.handleMessage(msg);
+            } catch (e) {
+                // Not JSON, probably boot/debug output
+                console.log('[USB Debug]', data);
+            }
+        });
+
+        window.electronAPI.onSerialError((error) => {
+            console.error('[USB] Error:', error);
+            this.connected = false;
+        });
+
+        window.electronAPI.onSerialDisconnected(() => {
+            console.log('[USB] Disconnected');
+            this.connected = false;
+            this.eventHandlers.disconnect.forEach(handler => handler());
+        });
+
+        this.electronListenersBound = true;
+    }
+
+    async waitForDeviceReady() {
+        if (!this.isElectron) return;
+
+        const attempts = 10;
+        const initialDelayMs = 1500;
+        const retryDelayMs = 750;
+
+        await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
+
+        let lastError = null;
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                const session = await this.sendCommand('session/open', 'POST', {
+                    client: 'electron',
+                    protocol: 'usb-session-v1',
+                });
+                console.log('[USB] Device handshake OK', session);
+                return;
+            } catch (error) {
+                lastError = error;
+                console.warn(`[USB] Handshake attempt ${attempt}/${attempts} failed: ${error.message}`);
+                if (attempt < attempts) {
+                    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                }
+            }
+        }
+
+        throw new Error(`Device opened on ${this.port}, but did not respond to FPVGate commands${lastError ? `: ${lastError.message}` : ''}`);
+    }
+
     async sendCommand(cmd, method = 'POST', data = null) {
         if (!this.connected) {
             throw new Error('Not connected to USB device');
         }
 
+        if (this.isElectron) {
+            const normalizedElectron = this.normalizeCommand(cmd, method, data);
+            const electronTimeoutMs = this.getCommandTimeoutMs(normalizedElectron.cmd);
+            console.log('[USB] ->', JSON.stringify({
+                cmd: normalizedElectron.cmd,
+                data: normalizedElectron.data,
+                timeoutMs: electronTimeoutMs,
+            }));
+
+            const response = await window.electronAPI.sendSerialCommand(
+                normalizedElectron.cmd,
+                normalizedElectron.data,
+                electronTimeoutMs
+            );
+
+            if (!response || response.status !== 'OK') {
+                throw new Error((response && response.message) || 'Command failed');
+            }
+
+            return response.data || {};
+        }
+
+        const normalized = this.normalizeCommand(cmd, method, data);
         const id = this.commandId++;
-        const command = { cmd, id };
-        if (data) command.data = data;
+        const command = { cmd: normalized.cmd, id };
+        if (normalized.data !== null && normalized.data !== undefined) command.data = normalized.data;
 
         const json = JSON.stringify(command);
         console.log('[USB] →', json);
@@ -287,11 +400,11 @@ class USBTransport {
 
         // Return promise that resolves when response is received
         return new Promise((resolve, reject) => {
-            // Timeout after 5 seconds
+            const timeoutMs = this.getCommandTimeoutMs(normalized.cmd);
             const timeout = setTimeout(() => {
                 this.responseHandlers.delete(id);
                 reject(new Error('Command timeout'));
-            }, 5000);
+            }, timeoutMs);
 
             this.responseHandlers.set(id, (response) => {
                 clearTimeout(timeout);

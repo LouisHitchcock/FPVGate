@@ -2,6 +2,8 @@
 let transportManager = null;
 let currentConnectionMode = "auto"; // 'auto', 'wifi', 'usb'
 let usbConnected = false;
+let usbConnectInProgress = false;
+const isElectronApp = typeof window.electronAPI !== "undefined";
 let eventSource = null;
 let eventSourceReconnectTimer = null;
 let eventSourceReconnectAttempts = 0;
@@ -161,6 +163,43 @@ var rssiSeries = new TimeSeries();
 var rssiCrossingSeries = new TimeSeries();
 var maxRssiValue = enterRssi + 10;
 var minRssiValue = exitRssi - 10;
+function normalizeRssiSample(sample) {
+  if (typeof sample === "number") {
+    return Number.isFinite(sample) ? Math.round(sample) : null;
+  }
+
+  if (typeof sample === "string") {
+    const parsed = Number(sample);
+    return Number.isFinite(parsed) ? Math.round(parsed) : null;
+  }
+
+  if (sample && typeof sample === "object") {
+    const candidates = [sample.rssi, sample.value, sample.filtered, sample.current, sample.raw];
+    for (const candidate of candidates) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) {
+        return Math.round(parsed);
+      }
+    }
+  }
+
+  return null;
+}
+
+function enqueueRssiSample(sample, sourceLabel = "rssi") {
+  const normalized = normalizeRssiSample(sample);
+  if (normalized === null) {
+    console.warn(`[RSSI] Ignoring invalid ${sourceLabel} sample:`, sample);
+    return;
+  }
+
+  rssiBuffer.push(normalized);
+  if (rssiBuffer.length > 10) {
+    rssiBuffer.shift();
+  }
+
+  console.log(sourceLabel, normalized, "buffer size", rssiBuffer.length);
+}
 
 // Debug mode state
 var debugMode = localStorage.getItem('debugMode') === '1';
@@ -301,16 +340,19 @@ async function loadInitialSyncState() {
   }
 }
 
+function runDeferredStartupTasks() {
+  if (deferredStartupTasksRan) return;
+  deferredStartupTasksRan = true;
+  fetchVersion();
+  fetchThisDeviceAddress();
+  loadInitialSyncState();
+}
+
 // Add localized validation message for IP pattern
 document.addEventListener("DOMContentLoaded", () => {
-  // Fetch version on page load
-  fetchVersion();
-  
-  // Fetch this device's address for sync UI
-  fetchThisDeviceAddress();
-  
-  // Load initial sync state (for badge and race view)
-  loadInitialSyncState();
+  if (!isElectronApp) {
+    runDeferredStartupTasks();
+  }
   
   const webhookIP = document.getElementById("webhookIP");
   if (webhookIP) {
@@ -365,9 +407,230 @@ var audioEnabled = false;
 var speakObjsQueue = [];
 var lapFormat = "full"; // 'full', 'laptime', 'timeonly'
 var selectedVoice = "default";
+let availableUsbPorts = [];
+let selectedUsbPort = localStorage.getItem("selectedUsbPort") || "";
+const electronAutoConnectSessionKey = "electronAutoConnectPort";
+let deferredStartupTasksRan = false;
+let initialUiHydrationDone = false;
+let rssiStartPromise = null;
 
 // Initialize hybrid audio announcer
 const audioAnnouncer = new AudioAnnouncer();
+
+function formatUsbPortLabel(port) {
+  if (!port) return "";
+
+  const details = [];
+  if (port.manufacturer) details.push(port.manufacturer);
+  if (port.friendlyName && port.friendlyName !== port.manufacturer) details.push(port.friendlyName);
+  if (port.serialNumber) details.push(`#${port.serialNumber}`);
+
+  return details.length > 0 ? `${port.path} - ${details.join(" • ")}` : port.path;
+}
+
+function setUsbPortSelection(portPath) {
+  selectedUsbPort = portPath || "";
+
+  ["comPort", "startupComPort"].forEach((id) => {
+    const select = document.getElementById(id);
+    if (select) {
+      select.value = selectedUsbPort;
+    }
+  });
+
+  if (selectedUsbPort) {
+    localStorage.setItem("selectedUsbPort", selectedUsbPort);
+  } else {
+    localStorage.removeItem("selectedUsbPort");
+  }
+}
+
+function updateUsbConnectionModalStatus(message, isError = false) {
+  const statusEl = document.getElementById("startupComPortStatus");
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.style.color = isError ? "var(--error-color, #f44336)" : "var(--secondary-color)";
+}
+
+function getElectronPendingAutoConnectPort() {
+  if (!isElectronApp) return "";
+  return sessionStorage.getItem(electronAutoConnectSessionKey) || "";
+}
+
+function setElectronPendingAutoConnectPort(portPath) {
+  if (!isElectronApp) return;
+  if (portPath) {
+    sessionStorage.setItem(electronAutoConnectSessionKey, portPath);
+  } else {
+    sessionStorage.removeItem(electronAutoConnectSessionKey);
+  }
+}
+
+function isUsbConnectionModalOpen() {
+  const modal = document.getElementById("usbConnectionModal");
+  return Boolean(modal && modal.style.display === "flex");
+}
+
+function openUsbConnectionModal() {
+  const modal = document.getElementById("usbConnectionModal");
+  if (!modal) return;
+  modal.style.display = "flex";
+  updateUsbConnectionModalStatus(
+    usbConnected
+      ? `Connected to ${selectedUsbPort || (transportManager && transportManager.port) || "USB"}`
+      : "Choose a USB device and click Connect."
+  );
+  refreshComPorts();
+}
+
+function closeUsbConnectionModal() {
+  const modal = document.getElementById("usbConnectionModal");
+  if (modal) modal.style.display = "none";
+}
+
+function closeUsbConnectionModalOnBackdrop(event) {
+  const modal = document.getElementById("usbConnectionModal");
+  if (modal && event.target === modal) {
+    closeUsbConnectionModal();
+  }
+}
+
+function configureElectronDesktopMode() {
+  if (!isElectronApp) return;
+
+  currentConnectionMode = "usb";
+
+  const connectionStatusIcon = document.getElementById("connectionStatusIcon");
+  if (connectionStatusIcon) {
+    connectionStatusIcon.src = "usb-svg.svg";
+    connectionStatusIcon.alt = "USB";
+  }
+
+  const connectionModeSelect = document.getElementById("connectionMode");
+  if (connectionModeSelect) {
+    connectionModeSelect.value = "usb";
+    connectionModeSelect.disabled = true;
+  }
+
+  const usbButton = document.getElementById("usbConnectionButton");
+  if (usbButton) usbButton.style.display = "inline-flex";
+
+  const notice = document.getElementById("electronUsbOnlyNotice");
+  if (notice) notice.style.display = "block";
+
+  const connectionModeSection = document.getElementById("connectionModeSection");
+  if (connectionModeSection) connectionModeSection.style.display = "none";
+
+  const wifiConfigSection = document.getElementById("wifiConfigSection");
+  if (wifiConfigSection) wifiConfigSection.style.display = "none";
+
+  const comPortSection = document.getElementById("comPortSection");
+  if (comPortSection) comPortSection.style.display = "flex";
+
+  const comPortHint = document.getElementById("comPortHint");
+  if (comPortHint) comPortHint.style.display = "block";
+}
+
+function updateComPortControls() {
+  const comPortSelect = document.getElementById("comPort");
+  const connectBtn = document.getElementById("connectComPortButton");
+  const disconnectBtn = document.getElementById("disconnectComPortButton");
+  const refreshBtn = document.getElementById("refreshComPortsButton");
+  const startupComPortSelect = document.getElementById("startupComPort");
+  const startupConnectBtn = document.getElementById("startupConnectComPortButton");
+  const startupRefreshBtn = document.getElementById("startupRefreshComPortsButton");
+
+  if (!comPortSelect || !connectBtn || !disconnectBtn || !refreshBtn) return;
+
+  const hasPorts = availableUsbPorts.length > 0;
+  const hasSelection = Boolean(selectedUsbPort || comPortSelect.value);
+
+  comPortSelect.disabled = !hasPorts;
+  refreshBtn.disabled = false;
+  connectBtn.disabled = usbConnectInProgress || !hasSelection || (usbConnected && serialPortMatchesSelection());
+  disconnectBtn.disabled = usbConnectInProgress || !usbConnected;
+
+  if (startupComPortSelect) startupComPortSelect.disabled = !hasPorts || usbConnectInProgress;
+  if (startupRefreshBtn) startupRefreshBtn.disabled = usbConnectInProgress ? true : false;
+  if (startupConnectBtn) startupConnectBtn.disabled = usbConnectInProgress || !hasSelection;
+}
+
+function serialPortMatchesSelection() {
+  const comPortSelect = document.getElementById("comPort");
+  if (!comPortSelect) return false;
+  return usbConnected && comPortSelect.value && transportManager && transportManager.port === comPortSelect.value;
+}
+
+async function refreshComPorts() {
+  const comPortSelect = document.getElementById("comPort");
+  const startupComPortSelect = document.getElementById("startupComPort");
+  if (!comPortSelect) return [];
+
+  const hasUSB = typeof window.electronAPI !== "undefined" || "serial" in navigator;
+  if (!hasUSB || typeof window.electronAPI === "undefined") {
+    availableUsbPorts = [];
+    comPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.select_port")}</option>`;
+    if (startupComPortSelect) startupComPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.select_port")}</option>`;
+    updateComPortControls();
+    return [];
+  }
+
+  if (!transportManager) {
+    transportManager = new USBTransport();
+  }
+
+  try {
+    const ports = await transportManager.listPorts();
+    availableUsbPorts = ports;
+
+    [comPortSelect, startupComPortSelect].forEach((select) => {
+      if (select) select.innerHTML = "";
+    });
+
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = ports.length > 0
+      ? i18n.t("settings.wifi.select_port")
+      : i18n.t("settings.wifi.no_ports_found");
+    comPortSelect.appendChild(defaultOption);
+    if (startupComPortSelect) startupComPortSelect.appendChild(defaultOption.cloneNode(true));
+
+    ports.forEach((port) => {
+      [comPortSelect, startupComPortSelect].forEach((select) => {
+        if (!select) return;
+        const option = document.createElement("option");
+        option.value = port.path;
+        option.textContent = formatUsbPortLabel(port);
+        select.appendChild(option);
+      });
+    });
+
+    if (selectedUsbPort && ports.some((port) => port.path === selectedUsbPort)) {
+      setUsbPortSelection(selectedUsbPort);
+    } else if (usbConnected && transportManager.port && ports.some((port) => port.path === transportManager.port)) {
+      setUsbPortSelection(transportManager.port);
+    } else {
+      setUsbPortSelection("");
+    }
+  } catch (err) {
+    console.error("[USB] Failed to refresh COM ports:", err);
+    availableUsbPorts = [];
+    comPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.no_ports_found")}</option>`;
+    if (startupComPortSelect) startupComPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.no_ports_found")}</option>`;
+  }
+
+  if (isElectronApp && isUsbConnectionModalOpen() && !usbConnected) {
+    updateUsbConnectionModalStatus(
+      availableUsbPorts.length > 0
+        ? "Choose a USB device and click Connect."
+        : "No USB devices found. Connect your FPVGate and click Refresh.",
+      availableUsbPorts.length === 0
+    );
+  }
+
+  updateComPortControls();
+  return availableUsbPorts;
+}
 
 // Transport initialization functions
 async function initializeTransport() {
@@ -387,34 +650,56 @@ async function initializeTransport() {
   // Try USB first in auto/usb mode
   if (currentConnectionMode === "auto" || currentConnectionMode === "usb") {
     try {
-      console.log("[Init] Creating USBTransport...");
-      transportManager = new USBTransport();
-
-      // List available ports and auto-connect in auto mode
+      if (!transportManager) {
+        console.log("[Init] Creating USBTransport...");
+        transportManager = new USBTransport();
+      }
       console.log("[Init] Listing ports...");
-      const ports = await transportManager.listPorts();
+      const ports = await refreshComPorts();
       console.log("[Init] Found ports:", ports);
 
       if (ports.length > 0) {
-        // Populate COM port dropdown
-        const comPortSelect = document.getElementById("comPort");
-        comPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.port_option")}</option>`;
-        ports.forEach((port) => {
-          console.log("[Init] Adding port:", port.path, port.manufacturer);
-          const option = document.createElement("option");
-          option.value = port.path;
-          option.textContent = `${port.path}${port.manufacturer ? " - " + port.manufacturer : ""}`;
-          comPortSelect.appendChild(option);
-        });
+        if (isElectronApp && currentConnectionMode === "usb") {
+          const pendingElectronPort = getElectronPendingAutoConnectPort();
+          if (pendingElectronPort) {
+            setElectronPendingAutoConnectPort("");
+            const savedPort = ports.find((p) => p.path === pendingElectronPort);
+            if (savedPort) {
+              await connectUSB(savedPort.path);
+              return;
+            }
+          }
+
+          updateConnectionStatus("USB", false);
+          return;
+        }
+
+        if (currentConnectionMode === "usb" && selectedUsbPort) {
+          const savedPort = ports.find((p) => p.path === selectedUsbPort);
+          if (savedPort) {
+            await connectUSB(savedPort.path);
+            return;
+          }
+        }
 
         // Auto-connect to first FPVGate device in auto mode
         if (currentConnectionMode === "auto") {
-          // Try to find by manufacturer first
-          let fpvgatePort = ports.find((p) => p.manufacturer && (p.manufacturer.includes("Espressif") || p.manufacturer.includes("Silicon Labs")));
+          let fpvgatePort = null;
 
-          // If not found, look for COM12 specifically (common FPVGate port on Windows)
+          if (selectedUsbPort) {
+            fpvgatePort = ports.find((p) => p.path === selectedUsbPort) || null;
+          }
+
           if (!fpvgatePort) {
-            fpvgatePort = ports.find((p) => p.path === "COM12");
+            fpvgatePort = ports.find((p) =>
+              (p.manufacturer && (p.manufacturer.includes("Espressif") || p.manufacturer.includes("Silicon Labs"))) ||
+              (p.friendlyName && /usb|uart|cp210|ch340/i.test(p.friendlyName)) ||
+              (p.path && /^COM\d+$/i.test(p.path))
+            ) || null;
+          }
+
+          if (!fpvgatePort) {
+            fpvgatePort = ports[0];
           }
 
           console.log("[Init] FPVGate port found:", fpvgatePort);
@@ -442,23 +727,72 @@ async function initializeTransport() {
 }
 
 async function connectUSB(portPath) {
+  if (usbConnectInProgress) {
+    console.warn("[USB] Connection attempt already in progress");
+    return;
+  }
+
+  usbConnectInProgress = true;
+  if (isElectronApp) {
+    updateUsbConnectionModalStatus(`Connecting to ${portPath}...`);
+  }
+  updateComPortControls();
   try {
     await transportManager.connect(portPath);
     usbConnected = true;
+    rssiSending = false;
+    rssiStartPromise = null;
+    rssiBuffer.length = 0;
+    selectedUsbPort = portPath;
+    localStorage.setItem("selectedUsbPort", portPath);
     setupUSBEvents();
     updateConnectionStatus("USB", true);
+    if (isElectronApp) {
+      updateUsbConnectionModalStatus(`Connected to ${portPath}`);
+    }
 
     // Update COM port dropdown to show selected port
     const comPortSelect = document.getElementById("comPort");
-    comPortSelect.value = portPath;
+    if (comPortSelect) comPortSelect.value = portPath;
+    updateComPortControls();
 
     console.log("Connected to USB:", portPath);
   } catch (err) {
     console.error("Failed to connect USB:", err);
     usbConnected = false;
+    if (isElectronApp) {
+      updateUsbConnectionModalStatus(err.message || "Failed to connect to USB device.", true);
+    }
     updateConnectionStatus("USB", false);
+    updateComPortControls();
     throw err;
+  } finally {
+    usbConnectInProgress = false;
+    updateComPortControls();
   }
+}
+
+async function fetchConfigWithRetry(maxAttempts = 3) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (usbConnected && transportManager) {
+        return await transportManager.sendCommand("config", "GET");
+      }
+
+      const response = await fetch("/config");
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      console.warn(`[Config] Fetch attempt ${attempt}/${maxAttempts} failed: ${error.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
+    }
+  }
+
+  throw lastError || new Error("Failed to fetch config");
 }
 
 function setupWiFiEvents() {
@@ -541,11 +875,7 @@ function setupWiFiEvents() {
     eventSource.addEventListener(
       "rssi",
       function (e) {
-        rssiBuffer.push(e.data);
-        if (rssiBuffer.length > 10) {
-          rssiBuffer.shift();
-        }
-        console.log("rssi", e.data, "buffer size", rssiBuffer.length);
+        enqueueRssiSample(e.data, "WiFi rssi");
       },
       false
     );
@@ -1038,11 +1368,7 @@ function setupUSBEvents() {
   if (!transportManager) return;
 
   transportManager.on("rssi", (data) => {
-    rssiBuffer.push(data);
-    if (rssiBuffer.length > 10) {
-      rssiBuffer.shift();
-    }
-    console.log("USB rssi", data, "buffer size", rssiBuffer.length);
+    enqueueRssiSample(data, "USB rssi");
   });
 
   transportManager.on("lap", (data) => {
@@ -1051,10 +1377,29 @@ function setupUSBEvents() {
     console.log("USB lap raw:", data, " formatted:", lap);
   });
 
+  transportManager.on("raceState", (state) => {
+    console.log("USB raceState:", state);
+    handleRaceStateEvent(state);
+  });
+
+  transportManager.on("slaveLap", (data) => {
+    console.log("USB slaveLap:", data);
+    handleSlaveLapEvent(data);
+  });
+
+  transportManager.on("configUpdated", () => {
+    console.log("USB configUpdated");
+    refreshConfigFromDevice();
+  });
+
   transportManager.on("disconnect", () => {
     console.log("USB disconnected");
     usbConnected = false;
+    rssiSending = false;
+    rssiStartPromise = null;
+    rssiBuffer.length = 0;
     updateConnectionStatus("USB", false);
+    updateComPortControls();
 
     // Auto-fallback to WiFi if in auto mode
     if (currentConnectionMode === "auto") {
@@ -1125,16 +1470,24 @@ async function updateConnectionStatus(mode, connected) {
 }
 
 async function changeConnectionMode() {
+  if (isElectronApp) {
+    currentConnectionMode = "usb";
+    return;
+  }
+
   const modeSelect = document.getElementById("connectionMode");
   currentConnectionMode = modeSelect.value;
 
   const comPortSection = document.getElementById("comPortSection");
+  const comPortHint = document.getElementById("comPortHint");
 
   // Show COM port selector in USB mode
   if (currentConnectionMode === "usb") {
     comPortSection.style.display = "flex";
+    if (comPortHint) comPortHint.style.display = "block";
   } else {
     comPortSection.style.display = "none";
+    if (comPortHint) comPortHint.style.display = "none";
   }
 
   // Disconnect current connection
@@ -1145,35 +1498,74 @@ async function changeConnectionMode() {
   if (transportManager && usbConnected) {
     await transportManager.disconnect();
     usbConnected = false;
+    rssiSending = false;
+    rssiStartPromise = null;
+    rssiBuffer.length = 0;
   }
 
   // Reinitialize with new mode
   await initializeTransport();
 }
 
-async function selectComPort() {
-  const comPortSelect = document.getElementById("comPort");
-  const portPath = comPortSelect.value;
+async function selectComPort(sourceId = "comPort") {
+  const comPortSelect = document.getElementById(sourceId);
+  setUsbPortSelection(comPortSelect ? comPortSelect.value || "" : "");
+  updateComPortControls();
+}
 
-  if (!portPath) return;
+async function connectSelectedComPort(sourceId = "comPort") {
+  const comPortSelect = document.getElementById(sourceId);
+  const portPath = comPortSelect ? comPortSelect.value : selectedUsbPort;
 
-  // Disconnect if already connected
+  if (!portPath) {
+    updateUsbConnectionModalStatus("Select a USB device first.", true);
+    return;
+  }
+  setUsbPortSelection(portPath);
+
+  if (transportManager && usbConnected && transportManager.port === portPath) {
+    updateComPortControls();
+    closeUsbConnectionModal();
+    return;
+  }
+
   if (transportManager && usbConnected) {
     await transportManager.disconnect();
     usbConnected = false;
   }
 
-  // Connect to selected port
   if (!transportManager) {
     transportManager = new USBTransport();
   }
 
-  await connectUSB(portPath);
+  try {
+    await connectUSB(portPath);
+    closeUsbConnectionModal();
+    if (isElectronApp && !configLoaded) {
+      setElectronPendingAutoConnectPort(portPath);
+      window.location.reload();
+    }
+  } catch (error) {
+    updateUsbConnectionModalStatus(error.message || "Failed to connect to USB device.", true);
+  }
+}
+
+async function disconnectUsbDevice() {
+  if (transportManager && usbConnected) {
+    await transportManager.disconnect();
+  }
+  usbConnected = false;
+  rssiSending = false;
+  rssiStartPromise = null;
+  rssiBuffer.length = 0;
+  updateConnectionStatus("USB", false);
+  updateComPortControls();
 }
 
 onload = async function (e) {
   // Load dark mode preference
   loadDarkMode();
+  configureElectronDesktopMode();
 
   config.style.display = "none";
   race.style.display = "block";
@@ -1193,20 +1585,23 @@ onload = async function (e) {
   // Initialize transport (USB/WiFi)
   await initializeTransport();
 
+  if (isElectronApp && !usbConnected) {
+    openUsbConnectionModal();
+    return;
+  }
+
   // Fetch config using appropriate transport
   let configData;
   try {
-    if (usbConnected && transportManager) {
-      configData = await transportManager.sendCommand("config", "GET");
-    } else {
-      const response = await fetch("/config");
-      configData = await response.json();
-    }
+    configData = await fetchConfigWithRetry(usbConnected ? 5 : 1);
     console.log(configData);
   } catch (err) {
     console.error("[Script] Failed to fetch config:", err);
     // Set defaults if config fetch fails
     configData = {};
+  }
+  if (isElectronApp && usbConnected) {
+    runDeferredStartupTasks();
   }
   // Apply the authoritative slices of config to the UI FIRST, before the big
   // config-apply block below. Keeps hydration bulletproof - any later failure
@@ -1281,7 +1676,7 @@ onload = async function (e) {
     addLapButton.disabled = true;
     clearInterval(timerInterval);
     timer.innerHTML = i18n.t("race.timer_default");
-    clearLaps();
+    clearLaps(true);
     // Already created up-front; keep call site as a safety net in case the
     // early createRssiChart() above failed for any reason.
     if (!rssiChart) createRssiChart();
@@ -1501,12 +1896,14 @@ onload = async function (e) {
 
     // Mark config as loaded so saves from calibration tab work
     configLoaded = true;
+    initialUiHydrationDone = true;
   } catch (err) {
     // Surface any silent failure in the config-application block instead of
     // letting the async onload promise swallow it. The RSSI chart has already
     // been created above, so we still get a usable UI.
     console.error("[Script] onload config block failed:", err);
     configLoaded = true;
+    initialUiHydrationDone = true;
   } finally {
     _refreshingFromDevice = false;
   }
@@ -1519,25 +1916,19 @@ let batteryAlarmDismissTime = 0;
 const BATTERY_ALARM_HYSTERESIS = 0.1; // 0.1V hysteresis above threshold
 const BATTERY_ALARM_DISMISS_DURATION = 30000; // 30 seconds in milliseconds
 
+function normalizeConfigPayload(configData) {
+  if (configData && typeof configData === "object" && configData.data && typeof configData.data === "object") {
+    return configData.data;
+  }
+  return configData;
+}
+
 async function getBatteryVoltage() {
-  // Only fetch if battery monitoring is enabled
   const batteryToggle = document.getElementById("batteryMonitorToggle");
   const batteryIndicator = document.getElementById("batteryIndicator");
   const batteryVoltageHeaderText = document.getElementById("batteryVoltageHeaderText");
   const batteryIcon = document.getElementById("batteryIcon");
-  
-  if (!batteryToggle || !batteryToggle.checked) {
-    if (batteryVoltageDisplay) {
-      batteryVoltageDisplay.innerText = "--";
-      batteryVoltageDisplay.style.color = "";
-    }
-    // Hide battery indicator when monitoring disabled
-    if (batteryIndicator) {
-      batteryIndicator.style.display = "none";
-    }
-    return;
-  }
-  
+
   try {
     let configData = null;
     if (usbConnected && transportManager) {
@@ -1546,9 +1937,29 @@ async function getBatteryVoltage() {
       const resp = await fetch("/config");
       configData = await resp.json();
     }
+    configData = normalizeConfigPayload(configData);
+
+    const batteryMonitoringEnabled =
+      (batteryToggle && batteryToggle.checked) ||
+      (configData && configData.batteryAlarmEnabled === 1) ||
+      (configData && configData.batteryMonitoring === true);
+
+    if (!batteryMonitoringEnabled) {
+      if (batteryVoltageDisplay) {
+        batteryVoltageDisplay.innerText = "--";
+        batteryVoltageDisplay.style.color = "";
+      }
+      if (batteryIndicator) {
+        batteryIndicator.style.display = "none";
+      }
+      return;
+    }
 
     if (configData && configData.batteryVoltage !== undefined) {
-      const totalVoltage = configData.batteryVoltage;
+      const totalVoltage = Number(configData.batteryVoltage);
+      if (!Number.isFinite(totalVoltage)) {
+        throw new Error("Invalid batteryVoltage in config payload");
+      }
       const batteryCells = configData.batteryCells || 4;
       const perCellVoltage = totalVoltage / batteryCells;
       const alarmThreshold = configData.lowBatteryAlarmPerCell || 3.5;
@@ -1632,7 +2043,7 @@ async function getBatteryVoltage() {
       }
     }
   } catch (err) {
-    // Silently fail - battery monitoring is optional
+    console.warn("[Battery] Failed to refresh battery indicator:", err);
     if (batteryVoltageDisplay) {
       batteryVoltageDisplay.innerText = "--";
       batteryVoltageDisplay.style.color = "";
@@ -1690,14 +2101,17 @@ function addRssiPoint() {
   if (calibVisible || debugActive) {
     // Consume RSSI data from buffer
     if (rssiBuffer.length > 0) {
-      rssiValue = parseInt(rssiBuffer.shift());
-      if (crossing && rssiValue < exitRssi) {
-        crossing = false;
-      } else if (!crossing && rssiValue > enterRssi) {
-        crossing = true;
+      const sample = normalizeRssiSample(rssiBuffer.shift());
+      if (sample !== null) {
+        rssiValue = sample;
+        if (crossing && rssiValue < exitRssi) {
+          crossing = false;
+        } else if (!crossing && rssiValue > enterRssi) {
+          crossing = true;
+        }
+        maxRssiValue = Math.max(maxRssiValue, rssiValue);
+        minRssiValue = Math.min(minRssiValue, rssiValue);
       }
-      maxRssiValue = Math.max(maxRssiValue, rssiValue);
-      minRssiValue = Math.min(minRssiValue, rssiValue);
     }
 
     var now = Date.now();
@@ -1900,6 +2314,15 @@ function updateDebugOverlay() {
   }
 }
 
+async function waitForUsbUiReady(maxWaitMs = 3000) {
+  if (!isElectronApp || !usbConnected) return;
+
+  const startMs = Date.now();
+  while ((!configLoaded || _refreshingFromDevice || !initialUiHydrationDone) && (Date.now() - startMs) < maxWaitMs) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 // --- Debug RSSI Overlay Drag ---
 (function() {
   var dragHandle, overlay, offsetX, offsetY, dragging = false, moved = false;
@@ -1998,14 +2421,19 @@ function updateDebugOverlay() {
 })();
 
 function startRssiStreaming() {
-  if (rssiSending) return;
+  if (rssiSending) return Promise.resolve();
+  if (rssiStartPromise) return rssiStartPromise;
   if (usbConnected && transportManager) {
-    transportManager.sendCommand("timer/rssiStart", "POST")
+    rssiStartPromise = transportManager.sendCommand("timer/rssiStart", "POST")
       .then(function() { rssiSending = true; })
-      .catch(function(err) { console.error("Failed to start RSSI:", err); });
+      .catch(function(err) { console.error("Failed to start RSSI:", err); })
+      .finally(function() { rssiStartPromise = null; });
+    return rssiStartPromise;
   } else {
-    fetch("/timer/rssiStart", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
-      .then(function(r) { if (r.ok) rssiSending = true; });
+    rssiStartPromise = fetch("/timer/rssiStart", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
+      .then(function(r) { if (r.ok) rssiSending = true; })
+      .finally(function() { rssiStartPromise = null; });
+    return rssiStartPromise;
   }
 }
 
@@ -2043,12 +2471,22 @@ function openTab(evt, tabName) {
 
   // Refresh config from device when opening config or calib tabs
   // This ensures touchscreen-set values are always reflected in the web UI
-  if (tabName === "config" || tabName === "calib") {
+  if (tabName === "config") {
     refreshConfigFromDevice();
+  } else if (tabName === "calib") {
+    if (!isElectronApp || !usbConnected) {
+      refreshConfigFromDevice();
+    } else {
+      waitForUsbUiReady().then(() => {
+        if (!rssiSending) {
+          return startRssiStreaming();
+        }
+      });
+    }
   }
 
   // Start/stop RSSI streaming based on tab and debug mode
-  if (tabName === "calib" || (tabName === "race" && debugMode)) {
+  if ((tabName === "calib" && (!isElectronApp || !usbConnected)) || (tabName === "race" && debugMode)) {
     startRssiStreaming();
   } else if (rssiSending && !(tabName === "race" && debugMode)) {
     // Only stop if not needed by debug overlay on race tab
@@ -2103,6 +2541,70 @@ function autoSaveConfig() {
   }, 1000); // Wait 1 second after last change before saving
 }
 
+function getBandChannelSelection(preferCalibration = false) {
+  const primaryBandSelect = preferCalibration ? calibBandSelect : bandSelect;
+  const primaryChannelSelect = preferCalibration ? calibChannelSelect : channelSelect;
+  const fallbackBandSelect = preferCalibration ? bandSelect : calibBandSelect;
+  const fallbackChannelSelect = preferCalibration ? channelSelect : calibChannelSelect;
+
+  const readSelection = (targetBandSelect, targetChannelSelect) => {
+    if (!targetBandSelect || targetBandSelect.selectedIndex === -1) return null;
+    const selectedOption = targetBandSelect.options[targetBandSelect.selectedIndex];
+    if (!selectedOption || !selectedOption.dataset.bandIndex) return null;
+
+    const channelIndex = targetChannelSelect ? targetChannelSelect.selectedIndex : 0;
+    if (channelIndex < 0) return null;
+
+    const selectedFrequency = getSelectedFrequency(targetBandSelect, targetChannelSelect);
+    if (!selectedFrequency) return null;
+
+    return {
+      bandIndex: parseInt(selectedOption.dataset.bandIndex, 10),
+      channelIndex,
+      freq: selectedFrequency.value,
+    };
+  };
+
+  return readSelection(primaryBandSelect, primaryChannelSelect) ||
+    readSelection(fallbackBandSelect, fallbackChannelSelect);
+}
+
+async function pushBandChannelSelectionToDevice(preferCalibration = false) {
+  if (_refreshingFromDevice || !configLoaded) return;
+
+  clearTimeout(saveTimeout);
+
+  const selection = getBandChannelSelection(preferCalibration);
+  if (!selection) {
+    console.error("[Config] Failed to resolve band/channel selection for immediate tune");
+    return;
+  }
+
+  frequency = selection.freq;
+
+  try {
+    if (usbConnected && transportManager) {
+      await transportManager.sendCommand("config", "POST", selection);
+    } else {
+      const response = await fetch("/config", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(selection),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `HTTP ${response.status}`);
+      }
+    }
+    console.log("[Config] Tuned device to freq=" + selection.freq + " band=" + selection.bandIndex + " ch=" + selection.channelIndex);
+  } catch (error) {
+    console.error("[Config] Failed to tune device from calibration selector:", error);
+  }
+}
+
 async function saveConfig() {
   // Don't save until initial config has been loaded from device
   if (!configLoaded) {
@@ -2127,26 +2629,13 @@ async function saveConfig() {
   // Save all settings to device
   const receiverRadioSelect = document.getElementById("receiverRadio");
   
-  // Save band and channel indices along with frequency for accurate restoration
-  // Get the actual band index from the dataset
-  let selectedBandIndex = 0;
-  let selectedChannelIndex = 0;
-  if (bandSelect && bandSelect.selectedIndex !== -1) {
-    const selectedOption = bandSelect.options[bandSelect.selectedIndex];
-    if (selectedOption && selectedOption.dataset.bandIndex) {
-      selectedBandIndex = parseInt(selectedOption.dataset.bandIndex);
-    }
-    selectedChannelIndex = channelSelect ? channelSelect.selectedIndex : 0;
-  } else if (calibBandSelect && calibBandSelect.selectedIndex !== -1) {
-    // Fallback: bandSelect is in an invalid state (e.g. was corrupted by a stale
-    // openSettingsModal fetch). Use calibBandSelect which is always reliable.
-    const calibOption = calibBandSelect.options[calibBandSelect.selectedIndex];
-    if (calibOption && calibOption.dataset.bandIndex) {
-      selectedBandIndex = parseInt(calibOption.dataset.bandIndex);
-    }
-    selectedChannelIndex = calibChannelSelect ? calibChannelSelect.selectedIndex : 0;
-    console.warn('[Config] bandSelect was empty during save - used calibBandSelect as fallback');
-  } else {
+  // Save band, channel, and frequency from the same selector state so the
+  // device cannot receive mismatched values (for example old freq + new band).
+  const selectedBandChannel = getBandChannelSelection(false);
+  let selectedBandIndex = selectedBandChannel ? selectedBandChannel.bandIndex : 0;
+  let selectedChannelIndex = selectedBandChannel ? selectedBandChannel.channelIndex : 0;
+  let selectedFrequencyValue = selectedBandChannel ? selectedBandChannel.freq : null;
+  if (!selectedBandChannel) {
     // Last resort: fetch current values from device (e.g. touch UI / empty selectors)
     console.log("[Config] Band selector blank, fetching current freq from device");
     try {
@@ -2154,12 +2643,18 @@ async function saveConfig() {
       const devCfg = await resp.json();
       if (devCfg.bandIndex !== undefined) selectedBandIndex = devCfg.bandIndex;
       if (devCfg.channelIndex !== undefined) selectedChannelIndex = devCfg.channelIndex;
-      if (devCfg.freq !== undefined) frequency = devCfg.freq;
+      if (devCfg.freq !== undefined) selectedFrequencyValue = devCfg.freq;
     } catch (e) {
       console.error("[Config] Failed to fetch device config, skipping save");
       return;
     }
   }
+
+  if (selectedFrequencyValue == null) {
+    console.error("[Config] Failed to resolve frequency from current selector state, skipping save");
+    return;
+  }
+  frequency = selectedFrequencyValue;
   
   // Get battery settings
   const batteryTypeSelect = document.getElementById("batteryType");
@@ -2176,7 +2671,7 @@ async function saveConfig() {
   const customSecondaryColor = document.getElementById("customSecondaryColor");
   
   const configData = {
-    freq: frequency,
+    freq: selectedFrequencyValue,
     bandIndex: selectedBandIndex,
     channelIndex: selectedChannelIndex,
     minLap: parseInt(minLapInput.value * 10),
@@ -2347,7 +2842,9 @@ function onCalibSystemChange() {
   }
   
   populateCalibFreqOutput();
-  autoSaveConfig();
+  syncCalibToSettings();
+  populateFreqOutput();
+  pushBandChannelSelectionToDevice(true);
 }
 
 // Handle band selection change - update channels
@@ -2355,54 +2852,48 @@ function onBandChange() {
   updateChannelAvailability(bandSelect);
   populateFreqOutput();
   syncSettingsToCalib();
+  populateCalibFreqOutput();
   autoSaveConfig();
 }
 
 function onCalibBandChange() {
   updateChannelAvailability(calibBandSelect);
   populateCalibFreqOutput();
-  autoSaveConfig();
+  syncCalibToSettings();
+  populateFreqOutput();
+  pushBandChannelSelectionToDevice(true);
+}
+
+function getSelectedFrequency(targetBandSelect, targetChannelSelect) {
+  if (!targetBandSelect || !targetChannelSelect) return null;
+  if (targetBandSelect.selectedIndex === -1 || targetChannelSelect.selectedIndex === -1) return null;
+
+  const selectedOption = targetBandSelect.options[targetBandSelect.selectedIndex];
+  if (!selectedOption || !selectedOption.dataset.bandIndex) return null;
+
+  const bandIndex = parseInt(selectedOption.dataset.bandIndex, 10);
+  const channelIndex = targetChannelSelect.selectedIndex;
+  const bandFrequencies = freqLookup[bandIndex];
+  if (!bandFrequencies || bandFrequencies[channelIndex] === undefined) return null;
+
+  return {
+    band: selectedOption.value,
+    channelLabel: targetChannelSelect.options[channelIndex].value,
+    value: bandFrequencies[channelIndex],
+  };
 }
 
 function populateFreqOutput() {
-  if (!bandSelect || bandSelect.selectedIndex === -1) return;
-  const selectedOption = bandSelect.options[bandSelect.selectedIndex];
-  if (!selectedOption) return;
-  
-  const bandIndex = parseInt(selectedOption.dataset.bandIndex);
-  const band = selectedOption.value;
-  const chan = channelSelect.options[channelSelect.selectedIndex].value;
-  frequency = freqLookup[bandIndex][channelSelect.selectedIndex];
-  freqOutput.textContent = band + chan + " " + frequency;
+  const selected = getSelectedFrequency(bandSelect, channelSelect);
+  if (!selected) return;
+  frequency = selected.value;
+  freqOutput.textContent = selected.band + selected.channelLabel + " " + selected.value;
 }
 
 function populateCalibFreqOutput() {
-  if (!calibBandSelect || !calibChannelSelect || !calibFreqOutput) return;
-  if (calibBandSelect.selectedIndex === -1) return;
-  
-  const selectedOption = calibBandSelect.options[calibBandSelect.selectedIndex];
-  if (!selectedOption) return;
-  
-  const bandIndex = parseInt(selectedOption.dataset.bandIndex);
-  const band = selectedOption.value;
-  const chan = calibChannelSelect.options[calibChannelSelect.selectedIndex].value;
-  frequency = freqLookup[bandIndex][calibChannelSelect.selectedIndex];
-  calibFreqOutput.textContent = band + chan + " " + frequency + "MHz";
-  
-  // Sync to settings (without triggering another update)
-  if (systemSelect && bandSelect && channelSelect) {
-    // Ensure settings system matches calib system
-    if (systemSelect.value !== currentSystem) {
-      systemSelect.value = currentSystem;
-      populateBandsBySystem(currentSystem, bandSelect);
-    }
-    
-    // Sync band and channel by index (both selects have the same options in the same order)
-    bandSelect.selectedIndex = calibBandSelect.selectedIndex;
-    channelSelect.selectedIndex = calibChannelSelect.selectedIndex;
-    updateChannelAvailability(bandSelect);
-    populateFreqOutput();
-  }
+  const selected = getSelectedFrequency(calibBandSelect, calibChannelSelect);
+  if (!selected || !calibFreqOutput) return;
+  calibFreqOutput.textContent = selected.band + selected.channelLabel + " " + selected.value + "MHz";
 }
 
 // Sync settings band/channel changes to calibration tab
@@ -2421,6 +2912,27 @@ function syncSettingsToCalib() {
   // Sync channel
   if (calibChannelSelect && channelSelect) {
     calibChannelSelect.selectedIndex = channelSelect.selectedIndex;
+  }
+}
+
+function syncCalibToSettings() {
+  if (!calibBandSelect || !bandSelect) return;
+
+  if (calibSystemSelect && systemSelect && systemSelect.value !== calibSystemSelect.value) {
+    systemSelect.value = calibSystemSelect.value;
+    currentSystem = calibSystemSelect.value;
+    populateBandsBySystem(currentSystem, bandSelect);
+  }
+
+  if (bandSelect.options.length !== calibBandSelect.options.length) {
+    populateBandsBySystem(currentSystem, bandSelect);
+  }
+
+  bandSelect.selectedIndex = calibBandSelect.selectedIndex;
+  updateChannelAvailability(bandSelect);
+
+  if (channelSelect && calibChannelSelect) {
+    channelSelect.selectedIndex = calibChannelSelect.selectedIndex;
   }
 }
 
@@ -2453,7 +2965,9 @@ function initializeBandSelectors() {
   if (calibChannelSelect) {
     calibChannelSelect.addEventListener("change", function() {
       populateCalibFreqOutput();
-      autoSaveConfig();
+      syncCalibToSettings();
+      populateFreqOutput();
+      pushBandChannelSelectionToDevice(true);
     });
   }
 }
@@ -2893,6 +3407,15 @@ function toggleBatteryMonitor(enabled) {
   if (batterySection) {
     batterySection.style.display = enabled ? "block" : "none";
   }
+
+  if (enabled) {
+    getBatteryVoltage();
+  } else {
+    const batteryIndicator = document.getElementById("batteryIndicator");
+    if (batteryIndicator) {
+      batteryIndicator.style.display = "none";
+    }
+  }
 }
 
 // Battery type change handler
@@ -3080,6 +3603,8 @@ function updateLedBrightness(obj, value) {
   const brightness = parseInt(value);
   $(obj).parent().find("span").text(brightness);
 
+  if (_refreshingFromDevice) return;
+
   sendLedCommand("brightness", { brightness })
     .then((data) => console.log("LED brightness changed:", data))
     .catch((err) => console.error("Failed to change LED brightness:", err));
@@ -3088,6 +3613,8 @@ function updateLedBrightness(obj, value) {
 function updateLedSpeed(obj, value) {
   const speed = parseInt(value);
   $(obj).parent().find("span").text(speed);
+
+  if (_refreshingFromDevice) return;
 
   sendLedCommand("speed", { speed })
     .then((data) => console.log("LED speed changed:", data))
@@ -3477,7 +4004,7 @@ function stopRace() {
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
 
-function clearLaps() {
+function clearLaps(skipDeviceCommand = false) {
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
@@ -3517,6 +4044,10 @@ function clearLaps() {
   document.getElementById("statBest3").textContent = "--";
   document.getElementById("statBest3Laps").textContent = "";
   
+  if (skipDeviceCommand) {
+    return;
+  }
+
   // Broadcast clearLaps event to OSD and other clients
   if (usbConnected && transportManager) {
     transportManager
@@ -3862,6 +4393,11 @@ function renderSyncedTimersList() {
 
 // Fetch this device's IP address
 async function fetchThisDeviceAddress() {
+  if (isElectronApp) {
+    thisDeviceAddress = selectedUsbPort || 'USB';
+    console.log('[Sync] This device address:', thisDeviceAddress);
+    return thisDeviceAddress;
+  }
   try {
     const response = await fetch('/timer/ping');
     if (response.ok) {
@@ -7381,6 +7917,16 @@ function runSelfTest() {
     .then((data) => {
       // Hide loading
       loadingDiv.style.display = "none";
+      const tests = Array.isArray(data.tests)
+        ? data.tests
+        : Array.isArray(data.data?.tests)
+          ? data.data.tests
+          : [];
+
+      if (tests.length === 0) {
+        throw new Error(data.message || data.error || "No self-test results were returned");
+      }
+
       // Newer firmware reports an explicit status: "pass" | "fail" | "skip".
       // Fall back to the legacy boolean for older firmware.
       const statusOf = (test) => test.status || (test.passed ? "pass" : "fail");
@@ -7391,7 +7937,7 @@ function runSelfTest() {
       let skippedCount = 0;
       let failedCount = 0;
 
-      data.tests.forEach((test) => {
+      tests.forEach((test) => {
         const status = statusOf(test);
         const durationMs = test.duration != null ? test.duration : (test.duration_ms || 0);
 
@@ -7432,7 +7978,7 @@ function runSelfTest() {
       });
 
       // Add summary
-      const totalCount = data.tests.length;
+      const totalCount = tests.length;
       const summaryColor = anyFailed ? "#ff9f43" : "#4ade80";
       const summaryTitle = anyFailed
         ? i18n.t("settings.diagnostics.some_failed")
@@ -8438,6 +8984,11 @@ function testWebhook() {
 
 // Load tracks when settings modal opens
 function openSettingsModal() {
+  if (isElectronApp && !usbConnected) {
+    openUsbConnectionModal();
+    return;
+  }
+
   const modal = document.getElementById("settingsModal");
   if (modal) {
     modal.classList.add("active");
@@ -8445,8 +8996,12 @@ function openSettingsModal() {
     // Load full config to populate all settings
     _refreshingFromDevice = true;
     clearTimeout(saveTimeout);
-    fetch("/config")
-      .then((response) => response.json())
+    const configPromise =
+      usbConnected && transportManager
+        ? transportManager.sendCommand("config", "GET")
+        : fetch("/config").then((response) => response.json());
+
+    configPromise
       .then((config) => {
         // When band selectors look invalid, sync band/channel from device (touch / stale DOM).
         // If band DOM looks healthy, keep current selection so an unsaved local change is not

@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FPVGate Lap Timer</title>
     <link rel="icon" type="image/svg+xml" href="logo-white.svg" id="favicon" />
-    <link rel="stylesheet" type="text/css" href="style.css" />
-    <link rel="stylesheet" type="text/css" href="calib-styles.css" />
-    <script src="jquery-3.7.1.min.js"></script>
-    <script src="i18n.js"></script>
-    <script src="audio-announcer.js"></script>
-    <script src="smoothie.js"></script>
-    <script src="usb-transport.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css?v=1.7.2" />
+    <link rel="stylesheet" type="text/css" href="calib-styles.css?v=1.7.2" />
+    <script src="jquery-3.7.1.min.js?v=1.7.2"></script>
+    <script src="i18n.js?v=1.7.2"></script>
+    <script src="audio-announcer.js?v=1.7.2"></script>
+    <script src="smoothie.js?v=1.7.2"></script>
+    <script src="usb-transport.js?v=1.7.2"></script>
   </head>
 
   <body>
@@ -22,6 +22,7 @@
           <h1>FPVGate</h1>
         </div>
         <div class="header-right">
+          <button id="usbConnectionButton" onclick="openUsbConnectionModal()" style="display: none; padding: 8px 14px; background-color: var(--accent-color); font-size: 13px;">USB</button>
           <div id="personalModeRaceBanner" class="personal-mode-indicator" style="display: none;" data-i18n="race.personal_mode_short">PERSONAL</div>
           <div id="masterModeRaceBanner" class="master-mode-indicator" style="display: none;" data-i18n="race.master_mode_short">MASTER</div>
           <div id="slaveModeRaceBanner" class="slave-mode-indicator" style="display: none;" data-i18n="race.slave_mode_short">SLAVE</div>
@@ -31,7 +32,7 @@
             <span id="batteryVoltageHeaderText">--</span>
           </div>
           <div id="connectionIndicator" class="connection-indicator">
-            <img class="wifi-icon" src="wifi-svg.svg" width="16" height="16" alt="WiFi" />
+            <img id="connectionStatusIcon" class="connection-icon" src="wifi-svg.svg" width="16" height="16" alt="WiFi" />
             <div class="status-dot connected"></div>
             <div class="connection-info" id="connectionInfo">
               <div class="connection-mode" data-i18n="conn.wifi_connected">WiFi Connected</div>
@@ -888,6 +889,11 @@
             <div id="settings-wifi" class="settings-section">
               <h2 data-i18n="settings.wifi.title">WiFi & Connection</h2>
 
+              <div id="electronUsbOnlyNotice" style="display: none; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px;">
+                The Electron app uses USB only. Choose your FPVGate device here or from the USB button in the header.
+              </div>
+
+              <div id="connectionModeSection">
               <h3 style="margin-top: 0" data-i18n="settings.wifi.mode">Connection Mode</h3>
               <div class="config-item">
                 <label for="connectionMode" data-i18n="settings.wifi.mode">Connection Mode:</label>
@@ -898,15 +904,23 @@
                 </select>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.wifi.mode_tip">Auto mode detects USB connection, falls back to WiFi</div>
+              </div>
 
               <div class="config-item" id="comPortSection" style="display: none">
                 <label for="comPort" data-i18n="settings.wifi.com_port">COM Port:</label>
-                <select id="comPort" onchange="selectComPort()">
-                  <option value="" data-i18n="settings.wifi.select_port">Select a port...</option>
-                </select>
+                <div style="flex: 1; display: flex; gap: 8px; align-items: center;">
+                  <select id="comPort" onchange="selectComPort()" style="flex: 1;">
+                    <option value="" data-i18n="settings.wifi.select_port">Select a port...</option>
+                  </select>
+                  <button type="button" id="refreshComPortsButton" onclick="refreshComPorts()" style="padding: 8px 12px; background-color: var(--secondary-color);" data-i18n="settings.wifi.refresh_ports">Refresh</button>
+                  <button type="button" id="connectComPortButton" onclick="connectSelectedComPort()" style="padding: 8px 12px;" data-i18n="settings.wifi.connect_port">Connect</button>
+                  <button type="button" id="disconnectComPortButton" onclick="disconnectUsbDevice()" style="padding: 8px 12px; background-color: #b94a48;" data-i18n="settings.wifi.disconnect_port">Disconnect</button>
+                </div>
               </div>
+              <div id="comPortHint" style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.wifi.port_picker_tip">Select the USB device you want to use, then click Connect.</div>
               <div id="comPortStatus" style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px; display: none" data-i18n="race.disconnected">Status: Disconnected</div>
 
+              <div id="wifiConfigSection">
               <h3 data-i18n="settings.wifi.title">WiFi Configuration</h3>
               <div class="config-item">
                 <label for="ssid" data-i18n="settings.wifi.ssid">WiFi SSID:</label>
@@ -1021,6 +1035,7 @@
                 <button onclick="resetWiFiSettings()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="settings.wifi.reset">Reset</button>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-top: 8px" data-i18n="settings.wifi.restart_note">Note: Device will restart after applying WiFi settings</div>
+              </div>
             </div>
 
             <!-- Webhooks Section -->
@@ -1476,7 +1491,32 @@
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <div id="usbConnectionModal" class="modal" style="display: none" onclick="closeUsbConnectionModalOnBackdrop(event)">
+      <div class="modal-content usb-connect-modal">
+        <h3>Connect FPVGate over USB</h3>
+        <p style="margin-top: 0; color: var(--secondary-color); font-size: 14px;">
+          The Electron app uses USB only. Select the device you want to connect to before continuing.
+        </p>
+        <div class="config-item">
+          <label for="startupComPort">USB Device:</label>
+          <div class="usb-connect-row">
+            <select id="startupComPort" onchange="selectComPort('startupComPort')" style="flex: 1;">
+              <option value="">Select a port...</option>
+            </select>
+            <button type="button" id="startupRefreshComPortsButton" onclick="refreshComPorts()" style="padding: 8px 12px; background-color: var(--secondary-color);">Refresh</button>
+          </div>
+        </div>
+        <div id="startupComPortStatus" class="usb-connect-status" style="font-size: 13px; color: var(--secondary-color);">
+          Choose a USB device and click Connect.
+        </div>
+        <div class="usb-connect-actions">
+          <button type="button" id="startupConnectComPortButton" onclick="connectSelectedComPort('startupComPort')" style="flex: 1;">Connect</button>
+          <button type="button" onclick="closeUsbConnectionModal()" style="flex: 1; background-color: var(--secondary-color);">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js?v=1.7.2"></script>
   </body>
 </html>
 

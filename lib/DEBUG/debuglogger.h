@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <vector>
 
+#include "../SERIAL/serial_guard.h"
+
 #define DEBUG_BUFFER_SIZE 100
 
 class DebugLogger {
@@ -33,8 +35,11 @@ public:
         }
         buffer.push_back(entry);
         
-        // Also print to serial
-        Serial.printf("[%lu] %s", entry.timestamp, entry.message);
+        if (!shouldSuppressDebugSerial()) {
+            serialOutputLock();
+            Serial.printf("[%lu] %s", entry.timestamp, entry.message);
+            serialOutputUnlock();
+        }
     }
     
     const std::vector<LogEntry>& getBuffer() const {

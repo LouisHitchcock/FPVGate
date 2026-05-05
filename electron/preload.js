@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Write to serial port
   writeSerial: (data) => ipcRenderer.invoke('write-serial', data),
+
+  // Send a structured serial command via the main-process command queue
+  sendSerialCommand: (cmd, data, timeoutMs) => ipcRenderer.invoke('send-serial-command', { cmd, data, timeoutMs }),
   
   // Get serial connection status
   serialStatus: () => ipcRenderer.invoke('serial-status'),

@@ -1482,6 +1482,7 @@ uint8_t Config::getNovaEmaAlpha() { return conf.novaEmaAlpha; }
 uint8_t Config::getNovaStepMax() { return conf.novaStepMax; }
 
 uint8_t Config::getAnnouncerType() { return conf.announcerType; }
+uint8_t Config::getAnnouncerRate() { return conf.announcerRate; }
 
 uint8_t Config::getSpeakerEnabled() { return conf.speakerEnabled; }
 void Config::setSpeakerEnabled(uint8_t enabled) {

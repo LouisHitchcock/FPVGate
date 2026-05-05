@@ -118,7 +118,7 @@
 #elif defined(FPVGATE_AIO)
 #define PIN_LED 21             // XIAO onboard user LED
 #define PIN_RGB_LED 44         // D7 - NeoPixel signal
-#define NUM_LEDS 2
+#define NUM_LEDS 3
 #define PIN_RGB_LED 44         // D7 - NeoPixel signal
 #define PIN_VBAT 1             // D0 - BATSENSE
 #define VBAT_SCALE 2
@@ -381,6 +381,7 @@ class Config {
     uint8_t getEnterRssi();
     uint8_t getExitRssi();
     uint8_t getAnnouncerType();
+    uint8_t getAnnouncerRate();
     uint8_t getAutoThresholdEnabled();
     uint8_t getAutoThresholdOffset();
     uint8_t getMaxLaps();
