@@ -666,33 +666,45 @@ button.active {
 
 .racebuttons {
   display: flex;
-  justify-content: space-around;
-}
-.race-notes-section {
-  margin-top: 12px;
-  padding: 12px;
-  background-color: var(--tabcontent-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-.race-notes-section label {
-  display: block;
-  margin-bottom: 8px;
-  font-weight: bold;
-  color: var(--text-color);
+.racebuttons > button {
+  margin: 2px 4px;
 }
 
-.race-notes-section textarea {
-  width: 100%;
-  min-height: 72px;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background-color: var(--background-color);
-  color: var(--text-color);
-  font-family: inherit;
-  resize: vertical;
+.race-notes-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.race-notes-inline button {
+  margin: 2px 4px;
+}
+
+.secondary-button {
+  background-color: var(--secondary-color);
+}
+
+.secondary-button:hover {
+  background-color: var(--accent-color);
+}
+
+.race-notes-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--secondary-color);
+}
+
+.race-notes-indicator::before {
+  content: "●";
+  color: var(--primary-color);
+  font-size: 10px;
 }
 
 .race-countdown-overlay {
@@ -1562,6 +1574,61 @@ footer {
   overflow: hidden;
 }
 
+.race-notes-modal-container {
+  flex-direction: column;
+  width: 92%;
+  max-width: 900px;
+}
+
+.race-notes-modal-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.race-notes-modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--text-color);
+}
+
+.race-notes-modal-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+
+.race-notes-modal-content label {
+  font-weight: bold;
+}
+
+.race-notes-modal-content textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 220px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 12px;
+  resize: none;
+}
+
+.race-notes-modal-footer {
+  border-top: 1px solid var(--border-color);
+  padding: 16px 20px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .settings-content {
   flex: 1;
   overflow-y: auto;
@@ -1850,10 +1917,15 @@ footer {
     flex-direction: column;
     gap: 12px;
   }
+
+  .race-notes-inline {
+    width: 100%;
+    align-items: stretch;
+  }
   
   .racebuttons button {
     width: 100%;
-    margin: 0; /* Remove default button margin */
+    margin: 2px 0;
     padding: 16px 12px;
     font-size: 16px;
   }

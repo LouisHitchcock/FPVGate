@@ -28,6 +28,10 @@
         "clear_laps": "Clear Laps",
         "notes": "Race Notes:",
         "notes_placeholder": "Optional notes for this race...",
+        "notes_button": "Race Notes",
+        "notes_saved": "Notes saved",
+        "notes_modal_title": "Race Notes",
+        "notes_save_button": "Save Notes",
         "connection_lost": "Connection lost",
         "usb_details": "Direct serial connection<br>Zero latency",
         "wifi_ap_details": "SSID: {ssid}<br>IP: {ip}<br>Connected Clients: {clients}",
@@ -428,7 +432,9 @@
             "filter_restore_defaults": "Restore Defaults",
             "appearance": "Appearance",
             "language": "Language:",
-            "theme": "Theme:"
+            "theme": "Theme:",
+            "notes_auto_open": "Open Race Notes on Race End:",
+            "notes_auto_open_tip": "Automatically open race notes when a race is stopped."
         },
         "osd": {
             "title": "On Screen Displays",

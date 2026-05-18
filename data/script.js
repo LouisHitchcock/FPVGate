@@ -28,6 +28,7 @@ const enterRssiSpan = document.getElementById("enterSpan");
 const exitRssiSpan = document.getElementById("exitSpan");
 const pilotNameInput = document.getElementById("pname");
 const raceNotesInput = document.getElementById("raceNotesInput");
+const raceNotesIndicator = document.getElementById("raceNotesIndicator");
 const ssidInput = document.getElementById("ssid");
 const pwdInput = document.getElementById("pwd");
 const minLapInput = document.getElementById("minLap");
@@ -110,6 +111,9 @@ var maxLaps = 0;
 // startRace().
 var maxHeatTime30s = 0;
 var heatTimeoutId = null;
+var currentRaceSessionTimestamp = null;
+var pendingRaceSavePromise = null;
+var openRaceNotesOnRaceEnd = localStorage.getItem("openRaceNotesOnRaceEnd") === "1";
 
 // Track data for current race
 var currentTrackId = 0;
@@ -641,6 +645,8 @@ function resetLapDisplay() {
   if (raceNotesInput) {
     raceNotesInput.value = "";
   }
+  updateRaceNotesIndicator();
+  currentRaceSessionTimestamp = null;
   
   // Clear lap analysis
   const analysisContent = document.getElementById("analysisContent");
@@ -1178,6 +1184,7 @@ async function selectComPort() {
 onload = async function (e) {
   // Load dark mode preference
   loadDarkMode();
+  syncOpenRaceNotesOnRaceEndToggle();
 
   config.style.display = "none";
   race.style.display = "block";
@@ -1286,6 +1293,7 @@ onload = async function (e) {
     clearInterval(timerInterval);
     timer.innerHTML = i18n.t("race.timer_default");
     clearLaps();
+    updateRaceNotesIndicator();
     // Already created up-front; keep call site as a safety net in case the
     // early createRssiChart() above failed for any reason.
     if (!rssiChart) createRssiChart();
@@ -2024,6 +2032,109 @@ function stopRssiStreaming() {
       .then(function(r) { if (r.ok) rssiSending = false; });
   }
 }
+function updateRaceNotesIndicator() {
+  if (!raceNotesIndicator || !raceNotesInput) return;
+  const hasNotes = raceNotesInput.value.trim().length > 0;
+  raceNotesIndicator.style.display = hasNotes ? "inline-flex" : "none";
+}
+
+function syncOpenRaceNotesOnRaceEndToggle() {
+  const notesToggle = document.getElementById("openRaceNotesOnRaceEnd");
+  if (notesToggle) {
+    notesToggle.checked = openRaceNotesOnRaceEnd;
+  }
+}
+
+function toggleOpenRaceNotesOnRaceEnd(enabled) {
+  openRaceNotesOnRaceEnd = !!enabled;
+  localStorage.setItem("openRaceNotesOnRaceEnd", openRaceNotesOnRaceEnd ? "1" : "0");
+  syncOpenRaceNotesOnRaceEndToggle();
+}
+
+function updateSavedRaceNotes(timestamp, notes) {
+  const existingRace = raceHistoryData.find((race) => race.timestamp === timestamp) || {};
+  const formData = new URLSearchParams();
+  formData.append("timestamp", String(timestamp));
+  formData.append("name", existingRace.name || "");
+  formData.append("tag", existingRace.tag || "");
+  formData.append("notes", notes);
+  if (typeof existingRace.totalDistance === "number") {
+    formData.append("totalDistance", existingRace.totalDistance);
+  }
+  return fetch("/races/update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: formData,
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (!data || data.status !== "OK") {
+        throw new Error("Race update failed");
+      }
+      return true;
+    });
+}
+
+function saveRaceNotes() {
+  if (!raceNotesInput) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  const notes = raceNotesInput.value.trim();
+  updateRaceNotesIndicator();
+
+  const raceInProgress = stopRaceButton && !stopRaceButton.disabled;
+  if (raceInProgress) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  const timestampPromise = currentRaceSessionTimestamp ? Promise.resolve(currentRaceSessionTimestamp) : pendingRaceSavePromise;
+  if (!timestampPromise) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  timestampPromise
+    .then((timestamp) => {
+      if (!timestamp) {
+        return false;
+      }
+      return updateSavedRaceNotes(timestamp, notes);
+    })
+    .then((saved) => {
+      if (saved) {
+        loadRaceHistory();
+      }
+      closeRaceNotesModal();
+    })
+    .catch((error) => {
+      console.error("Error saving race notes:", error);
+      alert(i18n.t("messages.race_update_error"));
+    });
+}
+
+function openRaceNotesModal() {
+  const modal = document.getElementById("raceNotesModal");
+  if (!modal) return;
+  modal.classList.add("active");
+  if (raceNotesInput) {
+    setTimeout(() => raceNotesInput.focus(), 50);
+  }
+}
+
+function closeRaceNotesModal() {
+  const modal = document.getElementById("raceNotesModal");
+  if (!modal) return;
+  modal.classList.remove("active");
+}
+
+if (raceNotesInput) {
+  raceNotesInput.addEventListener("input", updateRaceNotesIndicator);
+}
 
 function openTab(evt, tabName) {
   // Declare all variables
@@ -2062,6 +2173,11 @@ function openTab(evt, tabName) {
 
   // Update debug overlay visibility
   updateDebugOverlay();
+
+  // Notes modal only applies to race tab
+  if (tabName !== "race") {
+    closeRaceNotesModal();
+  }
 
   // Load race history when opening history tab
   if (tabName === "history") {
@@ -3316,6 +3432,7 @@ async function startRace() {
   const raceCountdownNumberEl = document.getElementById("raceCountdownNumber");
 
   updateLapCounter();
+  currentRaceSessionTimestamp = null;
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
 
@@ -3464,9 +3581,16 @@ function stopRace() {
   // Stop distance polling
   stopDistancePolling();
 
+  const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
   // Auto-save race if there are laps
   if (lapTimes.length > 0) {
-    saveCurrentRace();
+    saveCurrentRace().then(() => {
+      if (shouldOpenRaceNotes) {
+        openRaceNotesModal();
+      }
+    });
+  } else if (shouldOpenRaceNotes) {
+    openRaceNotesModal();
   }
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
@@ -3492,9 +3616,9 @@ function clearLaps() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  // Auto-save race if there are laps before clearing
-  if (lapTimes.length > 0) {
-    saveCurrentRace();
+  // Auto-save race if there are laps before clearing (only if it wasn't already saved on stopRace)
+  if (lapTimes.length > 0 && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+    saveCurrentRace({ setAsCurrentSession: false });
   }
 
   var tableHeaderRowCount = 1;
@@ -3508,6 +3632,8 @@ function clearLaps() {
   if (raceNotesInput) {
     raceNotesInput.value = "";
   }
+  updateRaceNotesIndicator();
+  currentRaceSessionTimestamp = null;
   
   // Reset current lap timer display
   currentLapStartMs = 0;
@@ -4947,8 +5073,11 @@ function escapeHtml(input) {
     .replace(/'/g, "&#39;");
 }
 
-function saveCurrentRace() {
-  if (lapTimes.length === 0) return;
+function saveCurrentRace(options = {}) {
+  const { setAsCurrentSession = true } = options;
+  if (lapTimes.length === 0) return Promise.resolve(null);
+  if (currentRaceSessionTimestamp && setAsCurrentSession) return Promise.resolve(currentRaceSessionTimestamp);
+  if (pendingRaceSavePromise) return pendingRaceSavePromise;
 
   // Calculate stats (excluding Gate 1)
   const validLaps = lapTimes.slice(1);
@@ -4980,8 +5109,9 @@ function saveCurrentRace() {
     console.warn(`Did you select a track before starting the race? currentTrackId=${currentTrackId}`);
   }
 
+  const raceTimestamp = Math.floor(Date.now() / 1000);
   const raceData = {
-    timestamp: Math.floor(Date.now() / 1000),
+    timestamp: raceTimestamp,
     lapTimes: lapTimes.map((t) => Math.round(t * 1000)), // Convert to milliseconds
     fastestLap: Math.round(fastest * 1000),
     medianLap: Math.round(median * 1000),
@@ -5040,7 +5170,7 @@ function saveCurrentRace() {
     console.log(`[Race] Saving multi-pilot race with ${pilots.length} pilots`);
   }
 
-  fetch("/races/save", {
+  pendingRaceSavePromise = fetch("/races/save", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -5050,10 +5180,25 @@ function saveCurrentRace() {
   })
     .then((response) => response.json())
     .then((data) => {
+      if (!data || data.status !== "OK") {
+        throw new Error("Race save failed");
+      }
       console.log("Race saved:", data);
+      if (setAsCurrentSession) {
+        currentRaceSessionTimestamp = raceTimestamp;
+      }
       loadRaceHistory();
+      return raceTimestamp;
     })
-    .catch((error) => console.error("Error saving race:", error));
+    .catch((error) => {
+      console.error("Error saving race:", error);
+      return null;
+    })
+    .finally(() => {
+      pendingRaceSavePromise = null;
+    });
+
+  return pendingRaceSavePromise;
 }
 
 function loadRaceHistory() {
@@ -7344,19 +7489,25 @@ function resetWiFiSettings() {
 
 // Settings Modal Functions
 // (openSettingsModal is defined later with full config loading)
+// Race Notes Modal Functions
+// (openRaceNotesModal/closeRaceNotesModal are defined above)
 
 function closeSettingsModal() {
   const modal = document.getElementById("settingsModal");
   if (modal) {
-    modal.classList.remove("active");
+  modal.classList.remove("active");
   }
 }
 
 // Close modal when clicking on the overlay background
 document.addEventListener("click", function (event) {
   const modal = document.getElementById("settingsModal");
+    const notesModal = document.getElementById("raceNotesModal");
   if (modal && event.target === modal) {
     closeSettingsModal();
+  }
+  if (notesModal && event.target === notesModal) {
+    closeRaceNotesModal();
   }
 });
 
@@ -7393,8 +7544,13 @@ function switchSettingsSection(ev, sectionName) {
 document.addEventListener("keydown", function (event) {
   if (event.key === "Escape") {
     const modal = document.getElementById("settingsModal");
+    const notesModal = document.getElementById("raceNotesModal");
     if (modal && modal.classList.contains("active")) {
       closeSettingsModal();
+      return;
+    }
+    if (notesModal && notesModal.classList.contains("active")) {
+      closeRaceNotesModal();
     }
   }
 });
@@ -8474,9 +8630,11 @@ function testWebhook() {
 
 // Load tracks when settings modal opens
 function openSettingsModal() {
+  closeRaceNotesModal();
   const modal = document.getElementById("settingsModal");
   if (modal) {
-    modal.classList.add("active");
+  modal.classList.add("active");
+    syncOpenRaceNotesOnRaceEndToggle();
 
     // Load full config to populate all settings
     _refreshingFromDevice = true;

@@ -63,10 +63,10 @@
           <button id="stopRaceButton" onclick="stopRace()" disabled data-i18n="race.stop_race">Stop Race</button>
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
-        </div>
-        <div class="race-notes-section">
-          <label for="raceNotesInput" data-i18n="race.notes">Race Notes:</label>
-          <textarea id="raceNotesInput" rows="3" maxlength="300" placeholder="Optional notes for this race..." data-i18n-placeholder="race.notes_placeholder"></textarea>
+          <div class="race-notes-inline">
+            <button id="raceNotesButton" class="secondary-button" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
+            <span id="raceNotesIndicator" class="race-notes-indicator" style="display: none" data-i18n="race.notes_saved">Notes saved</span>
+          </div>
         </div>
         <div id="raceCountdownOverlay" class="race-countdown-overlay" style="display: none;" aria-hidden="true">
           <span id="raceCountdownNumber">10</span>
@@ -453,6 +453,23 @@
             <button onclick="rerecordCalibration()" style="flex: 1; background-color: var(--accent-color, #2980b9)" data-i18n="calib.rerecord">Re-record</button>
             <button onclick="closeCalibrationWizard()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="history.close">Close</button>
           </div>
+        </div>
+      </div>
+    </div>
+    <!-- Race Notes Modal -->
+    <div id="raceNotesModal" class="settings-modal">
+      <div class="settings-modal-container race-notes-modal-container">
+        <div class="race-notes-modal-header">
+          <h2 data-i18n="race.notes_modal_title">Race Notes</h2>
+          <button class="settings-close-button" onclick="closeRaceNotesModal()">✕</button>
+        </div>
+        <div class="race-notes-modal-content">
+          <label for="raceNotesInput" data-i18n="race.notes">Race Notes:</label>
+          <textarea id="raceNotesInput" maxlength="300" placeholder="Optional notes for this race..." data-i18n-placeholder="race.notes_placeholder"></textarea>
+        </div>
+        <div class="race-notes-modal-footer">
+          <button onclick="saveRaceNotes()" data-i18n="race.notes_save_button">Save Notes</button>
+          <button onclick="closeRaceNotesModal()" data-i18n="history.close">Close</button>
         </div>
       </div>
     </div>
@@ -1096,6 +1113,16 @@
             <!-- System Section -->
             <div id="settings-system" class="settings-section">
               <h2 data-i18n="settings.system.title">System Settings</h2>
+              <div class="config-item">
+                <label for="openRaceNotesOnRaceEnd" data-i18n="settings.system.notes_auto_open">Open Race Notes on Race End:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="openRaceNotesOnRaceEnd" onchange="toggleOpenRaceNotesOnRaceEnd(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.system.notes_auto_open_tip">Automatically open race notes when a race is stopped.</div>
 
               <h3 style="margin-top: 0" data-i18n="settings.system.receiver_radio">Receiver Radio</h3>
               <div class="config-item">

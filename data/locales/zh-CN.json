@@ -28,6 +28,10 @@
         "clear_laps": "清除圈数",
         "notes": "比赛备注:",
         "notes_placeholder": "这场比赛的可选备注...",
+        "notes_button": "比赛备注",
+        "notes_saved": "备注已保存",
+        "notes_modal_title": "比赛备注",
+        "notes_save_button": "保存备注",
         "connection_lost": "连接已断开",
         "usb_details": "USB 串口直连<br>零延迟",
         "wifi_ap_details": "热点名称: {ssid}<br>IP地址: {ip}<br>已连接客户端: {clients}",
@@ -427,7 +431,9 @@
             "filter_restore_defaults": "恢复默认值",
             "appearance": "外观",
             "language": "语言:",
-            "theme": "主题:"
+            "theme": "主题:",
+            "notes_auto_open": "比赛结束时打开比赛备注:",
+            "notes_auto_open_tip": "当比赛停止时自动打开比赛备注。"
         },
         "osd": {
             "title": "屏幕显示",

@@ -28,6 +28,10 @@
         "clear_laps": "Effacer Tours",
         "notes": "Notes de Course:",
         "notes_placeholder": "Notes optionnelles pour cette course...",
+        "notes_button": "Notes de Course",
+        "notes_saved": "Notes enregistrées",
+        "notes_modal_title": "Notes de Course",
+        "notes_save_button": "Enregistrer les notes",
         "connection_lost": "Connexion perdue",
         "usb_details": "Connexion série directe<br>Latence zéro",
         "wifi_ap_details": "SSID: {ssid}<br>IP: {ip}<br>Clients connectés: {clients}",
@@ -427,7 +431,9 @@
             "filter_restore_defaults": "Restaurer les Valeurs par Defaut",
             "appearance": "Apparence",
             "language": "Langue:",
-            "theme": "Thème:"
+            "theme": "Thème:",
+            "notes_auto_open": "Ouvrir les notes de course à la fin de la course :",
+            "notes_auto_open_tip": "Ouvre automatiquement les notes de course lorsqu'une course est arrêtée."
         },
         "osd": {
             "title": "Affichages à l'écran",

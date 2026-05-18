@@ -28,6 +28,10 @@
         "clear_laps": "Limpiar Vueltas",
         "notes": "Notas de la Carrera:",
         "notes_placeholder": "Notas opcionales para esta carrera...",
+        "notes_button": "Notas de Carrera",
+        "notes_saved": "Notas guardadas",
+        "notes_modal_title": "Notas de Carrera",
+        "notes_save_button": "Guardar notas",
         "connection_lost": "Conexión perdida",
         "usb_details": "Conexión serie directa<br>Latencia cero",
         "wifi_ap_details": "SSID: {ssid}<br>IP: {ip}<br>Clientes conectados: {clients}",
@@ -427,7 +431,9 @@
             "filter_restore_defaults": "Restaurar Valores Predeterminados",
             "appearance": "Apariencia",
             "language": "Idioma:",
-            "theme": "Tema:"
+            "theme": "Tema:",
+            "notes_auto_open": "Abrir notas de carrera al terminar la carrera:",
+            "notes_auto_open_tip": "Abre automáticamente las notas de carrera cuando se detiene una carrera."
         },
         "osd": {
             "title": "Pantallas en Vivo",

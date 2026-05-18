@@ -28,6 +28,10 @@
         "clear_laps": "Runden Löschen",
         "notes": "Rennnotizen:",
         "notes_placeholder": "Optionale Notizen für dieses Rennen...",
+        "notes_button": "Rennnotizen",
+        "notes_saved": "Notizen gespeichert",
+        "notes_modal_title": "Rennnotizen",
+        "notes_save_button": "Notizen speichern",
         "connection_lost": "Verbindung verloren",
         "usb_details": "Direkte Serielle Verbindung<br>Null Latenz",
         "wifi_ap_details": "SSID: {ssid}<br>IP: {ip}<br>Verbundene Clients: {clients}",
@@ -427,7 +431,9 @@
             "filter_restore_defaults": "Standardwerte Wiederherstellen",
             "appearance": "Aussehen",
             "language": "Sprache:",
-            "theme": "Thema:"
+            "theme": "Thema:",
+            "notes_auto_open": "Rennnotizen bei Rennende öffnen:",
+            "notes_auto_open_tip": "Öffnet Rennnotizen automatisch, wenn ein Rennen gestoppt wird."
         },
         "osd": {
             "title": "Bildschirmanzeigen",
