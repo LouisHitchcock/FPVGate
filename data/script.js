@@ -657,11 +657,7 @@ function resetLapDisplay() {
   // Clear race analysis
   const raceAnalysisContent = document.getElementById("raceAnalysisContent");
   if (raceAnalysisContent) {
-    raceAnalysisContent.innerHTML = '<p class="no-data">Complete at least 2 laps to see race analysis</p>';
-  }
-  const raceAnalysisLegend = document.getElementById("raceAnalysisLegend");
-  if (raceAnalysisLegend) {
-    raceAnalysisLegend.innerHTML = '';
+    raceAnalysisContent.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
   }
   
   // Clear remote pilots data
@@ -1185,6 +1181,7 @@ onload = async function (e) {
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
+  syncRaceAnalyticsToggleUI();
 
   config.style.display = "none";
   race.style.display = "block";
@@ -4704,12 +4701,49 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
     </div>
   `;
 }
+function renderFastest3ConsecPanel(stats) {
+  if (!stats || stats.fastest3ConsecValue == null) {
+    return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
+  }
+  return `
+    <div class="stats-boxes" style="max-width: 420px; margin: 0 auto;">
+      <div class="stat-box">
+        <div class="stat-label">Fastest 3 Consecutive</div>
+        <div class="stat-value">${stats.fastest3ConsecValue.toFixed(2)}s</div>
+        <div class="stat-sublabel">${stats.fastest3ConsecLaps}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAlwaysOnRaceStats(stats) {
+  const best3El = document.getElementById("raceAlwaysBest3");
+  const medianEl = document.getElementById("raceAlwaysMedian");
+  if (!best3El || !medianEl) return;
+
+  if (!stats) {
+    best3El.textContent = "--";
+    medianEl.textContent = "--";
+    return;
+  }
+
+  best3El.textContent = stats.best3Value == null ? "--" : `${stats.best3Value.toFixed(2)}s`;
+  medianEl.textContent = `${stats.median.toFixed(2)}s`;
+}
 
 // ============================================
-// Race Analysis (Multi-Pilot Sync Modes)
+// Race Analysis (Multi-Pilot + Personal Tabbed Analytics)
 // ============================================
-
-let currentRaceAnalysisMode = "lapTimes";
+const MAX_ENABLED_RACE_ANALYTICS = 3;
+const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsDisplaySettings";
+const RACE_ANALYTICS_DEFAULTS = {
+  fastestLap: true,
+  fastest3Consec: true,
+  lapTimes: true,
+  consistency: true,
+};
+let raceAnalyticsDisplaySettings = loadRaceAnalyticsDisplaySettings();
+let currentRaceAnalyticsTab = "fastestLap";
 
 // Pilot color palette for charts
 const pilotColors = [
@@ -4717,39 +4751,187 @@ const pilotColors = [
   "#FF9F40", "#7CFC00", "#FF69B4", "#00CED1", "#FFD700"
 ];
 
-function switchRaceAnalysisMode(mode) {
-  currentRaceAnalysisMode = mode;
-  // Update tab styling
-  const tabs = document.querySelectorAll("#raceAnalysis .analysis-tab");
-  tabs.forEach((tab, idx) => {
-    tab.classList.toggle("active", (mode === "lapTimes" && idx === 0) || (mode === "consistency" && idx === 1));
-  });
-  // Re-render analysis
+function loadRaceAnalyticsDisplaySettings() {
+  try {
+    const raw = localStorage.getItem(RACE_ANALYTICS_STORAGE_KEY);
+    if (!raw) return { ...RACE_ANALYTICS_DEFAULTS };
+    const parsed = JSON.parse(raw);
+    return {
+      fastestLap: parsed.fastestLap !== false,
+      fastest3Consec: parsed.fastest3Consec !== false,
+      lapTimes: parsed.lapTimes !== false,
+      consistency: parsed.consistency !== false,
+    };
+  } catch (err) {
+    console.warn("[RaceAnalysis] Failed to parse display settings, using defaults:", err);
+    return { ...RACE_ANALYTICS_DEFAULTS };
+  }
+}
+
+function saveRaceAnalyticsDisplaySettings() {
+  localStorage.setItem(RACE_ANALYTICS_STORAGE_KEY, JSON.stringify(raceAnalyticsDisplaySettings));
+}
+
+function getEnabledRaceAnalyticsCount() {
+  return Object.values(raceAnalyticsDisplaySettings).filter(Boolean).length;
+}
+
+function getEnabledRaceAnalyticsTabs() {
+  const order = ["fastestLap", "fastest3Consec", "lapTimes", "consistency"];
+  return order.filter((key) => !!raceAnalyticsDisplaySettings[key]);
+}
+
+function getRaceAnalyticsTabLabel(tabKey) {
+  if (tabKey === "fastestLap") return "Fastest Lap";
+  if (tabKey === "fastest3Consec") return "Fastest 3 Consecutive";
+  if (tabKey === "lapTimes") return "Lap Times";
+  if (tabKey === "consistency") return "Consistency";
+  return tabKey;
+}
+
+function syncRaceAnalyticsToggleUI() {
+  const fastestLapToggle = document.getElementById("raceAnalyticsToggleFastestLap");
+  if (fastestLapToggle) fastestLapToggle.checked = !!raceAnalyticsDisplaySettings.fastestLap;
+  const fastest3ConsecToggle = document.getElementById("raceAnalyticsToggleFastest3Consec");
+  if (fastest3ConsecToggle) fastest3ConsecToggle.checked = !!raceAnalyticsDisplaySettings.fastest3Consec;
+  const lapToggle = document.getElementById("raceAnalyticsToggleLapTimes");
+  if (lapToggle) lapToggle.checked = !!raceAnalyticsDisplaySettings.lapTimes;
+  const consistencyToggle = document.getElementById("raceAnalyticsToggleConsistency");
+  if (consistencyToggle) consistencyToggle.checked = !!raceAnalyticsDisplaySettings.consistency;
+}
+
+function toggleRaceAnalyticsPanel(panelKey, enabled) {
+  if (!(panelKey in RACE_ANALYTICS_DEFAULTS)) return;
+
+  const alreadyEnabled = !!raceAnalyticsDisplaySettings[panelKey];
+  if (enabled && !alreadyEnabled && getEnabledRaceAnalyticsCount() >= MAX_ENABLED_RACE_ANALYTICS) {
+    alert(`You can enable up to ${MAX_ENABLED_RACE_ANALYTICS} analytics panels at once.`);
+    syncRaceAnalyticsToggleUI();
+    return;
+  }
+
+  raceAnalyticsDisplaySettings[panelKey] = enabled;
+  if (!raceAnalyticsDisplaySettings[currentRaceAnalyticsTab]) {
+    const fallback = getEnabledRaceAnalyticsTabs()[0];
+    currentRaceAnalyticsTab = fallback || "fastestLap";
+  }
+  saveRaceAnalyticsDisplaySettings();
+  syncRaceAnalyticsToggleUI();
+  updateAnalysisSectionVisibility();
   updateRaceAnalysisView();
 }
 
+function switchRaceAnalyticsTab(tabKey) {
+  if (!raceAnalyticsDisplaySettings[tabKey]) return;
+  currentRaceAnalyticsTab = tabKey;
+  updateRaceAnalysisView();
+}
+function computeRaceStats() {
+  const validLaps = lapTimes.slice(1);
+  if (validLaps.length === 0) {
+    return null;
+  }
+
+  const fastest = Math.min(...validLaps);
+  const fastestIndex = validLaps.indexOf(fastest) + 1;
+
+  let fastest3ConsecValue = null;
+  let fastest3ConsecLaps = null;
+  if (validLaps.length >= 3) {
+    let best = Infinity;
+    let bestStart = -1;
+    for (let i = 0; i <= validLaps.length - 3; i++) {
+      const total = validLaps[i] + validLaps[i + 1] + validLaps[i + 2];
+      if (total < best) {
+        best = total;
+        bestStart = i + 1;
+      }
+    }
+    fastest3ConsecValue = best;
+    fastest3ConsecLaps = `L${bestStart}-L${bestStart + 1}-L${bestStart + 2}`;
+  }
+
+  const sorted = [...validLaps].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+
+  let best3Value = null;
+  let best3Laps = null;
+  if (validLaps.length >= 3) {
+    const top3 = validLaps
+      .map((time, idx) => ({ time, idx: idx + 1 }))
+      .sort((a, b) => a.time - b.time)
+      .slice(0, 3);
+    best3Value = top3.reduce((s, l) => s + l.time, 0);
+    best3Laps = top3.map((l) => `L${l.idx}`).sort().join(", ");
+  }
+  return {
+    fastest,
+    fastestIndex,
+    fastest3ConsecValue,
+    fastest3ConsecLaps,
+    best3Value,
+    best3Laps,
+    median,
+  };
+}
+
+function renderFastestLapPanel(stats) {
+  if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
+
+  return `
+    <div class="stats-boxes" style="max-width: 360px; margin: 0 auto;">
+      <div class="stat-box">
+        <div class="stat-label">Fastest Lap</div>
+        <div class="stat-value">${stats.fastest.toFixed(2)}s</div>
+        <div class="stat-sublabel">Lap ${stats.fastestIndex}</div>
+      </div>
+    </div>
+  `;
+}
+
 function updateRaceAnalysisView() {
-  // Collect all pilots' data
-  const pilots = collectAllPilotsData();
-  
-  if (pilots.length === 0 || pilots.every(p => p.lapTimes.length < 2)) {
-    document.getElementById("raceAnalysisContent").innerHTML = '<p class="no-data">Complete at least 2 laps to see race analysis</p>';
-    document.getElementById("raceAnalysisLegend").innerHTML = '';
+  const tabsContainer = document.getElementById("raceAnalyticsTabs");
+  const contentContainer = document.getElementById("raceAnalysisContent");
+  const emptyMessage = document.getElementById("raceAnalysisEmptyMessage");
+  const enabledTabs = getEnabledRaceAnalyticsTabs();
+  const stats = computeRaceStats();
+
+  renderAlwaysOnRaceStats(stats);
+
+  if (emptyMessage) emptyMessage.style.display = enabledTabs.length > 0 ? "none" : "block";
+  if (!tabsContainer || !contentContainer) return;
+
+  if (enabledTabs.length === 0) {
+    tabsContainer.innerHTML = "";
+    contentContainer.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
     return;
   }
-  
-  // Render the appropriate chart
-  switch (currentRaceAnalysisMode) {
-    case "lapTimes":
-      renderLapTimesChart(pilots);
-      break;
-    case "consistency":
-      renderConsistencyChart(pilots);
-      break;
+
+  if (!enabledTabs.includes(currentRaceAnalyticsTab)) {
+    currentRaceAnalyticsTab = enabledTabs[0];
   }
-  
-  // Render legend
-  renderRaceAnalysisLegend(pilots);
+
+  tabsContainer.innerHTML = enabledTabs
+    .map((tabKey) => `<button class="analysis-tab ${tabKey === currentRaceAnalyticsTab ? "active" : ""}" onclick="switchRaceAnalyticsTab('${tabKey}')">${getRaceAnalyticsTabLabel(tabKey)}</button>`)
+    .join("");
+  if (currentRaceAnalyticsTab === "fastestLap") {
+    contentContainer.innerHTML = renderFastestLapPanel(stats);
+    return;
+  }
+  if (currentRaceAnalyticsTab === "fastest3Consec") {
+    contentContainer.innerHTML = renderFastest3ConsecPanel(stats);
+    return;
+  }
+
+  const pilots = collectAllPilotsData();
+  if (currentRaceAnalyticsTab === "lapTimes") {
+    renderLapTimesChart(pilots, "raceAnalysisContent");
+    return;
+  }
+  if (currentRaceAnalyticsTab === "consistency") {
+    renderConsistencyChart(pilots, "raceAnalysisContent");
+  }
 }
 
 function collectAllPilotsData() {
@@ -4782,8 +4964,9 @@ function collectAllPilotsData() {
   return pilots;
 }
 
-function renderLapTimesChart(pilots) {
-  const container = document.getElementById("raceAnalysisContent");
+function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
   
   // Find max laps and time range
   let maxLaps = 0;
@@ -4892,8 +5075,9 @@ function renderLapTimesChart(pilots) {
   container.innerHTML = svg;
 }
 
-function renderConsistencyChart(pilots) {
-  const container = document.getElementById("raceAnalysisContent");
+function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
   
   // Calculate box plot statistics for each pilot
   const pilotStats = pilots.map(pilot => {
@@ -5023,40 +5207,26 @@ function renderConsistencyChart(pilots) {
   container.innerHTML = svg;
 }
 
-function renderRaceAnalysisLegend(pilots) {
-  const legend = document.getElementById("raceAnalysisLegend");
-  let html = '';
-  
-  pilots.forEach(pilot => {
-    const validLaps = pilot.lapTimes.slice(1);
-    const lapCount = validLaps.length;
-    const fastest = lapCount > 0 ? Math.min(...validLaps).toFixed(2) : '--';
-    html += `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background-color: var(--bg-secondary); border-radius: 4px; border-left: 4px solid ${pilot.color};">
-        <span style="font-weight: bold;">${pilot.name}${pilot.isLocal ? ' *' : ''}</span>
-        <span style="color: var(--secondary-color); font-size: 12px;">${lapCount} laps, best: ${fastest}s</span>
-      </div>
-    `;
-  });
-  
-  legend.innerHTML = html;
-}
 
 // Toggle between Lap Analysis and Race Analysis based on sync mode
 function updateAnalysisSectionVisibility() {
   const lapAnalysis = document.getElementById("lapAnalysis");
   const raceAnalysis = document.getElementById("raceAnalysis");
-  
-  if (raceSyncMode === 1 || raceSyncMode === 2) {
-    // Sync mode - show Race Analysis
+  const anyAnalyticsEnabled =
+    !!raceAnalyticsDisplaySettings.fastestLap ||
+    !!raceAnalyticsDisplaySettings.fastest3Consec ||
+    !!raceAnalyticsDisplaySettings.lapTimes ||
+    !!raceAnalyticsDisplaySettings.consistency;
+
+  if (anyAnalyticsEnabled) {
+    // Show Race Analysis panels selected via toggles in both personal and sync modes.
     if (lapAnalysis) lapAnalysis.style.display = "none";
     if (raceAnalysis) raceAnalysis.style.display = "block";
     updateRaceAnalysisView();
   } else {
-    // Personal mode - show Lap Analysis
-    if (lapAnalysis) lapAnalysis.style.display = "block";
+    // All toggles off => no analytics content shown.
+    if (lapAnalysis) lapAnalysis.style.display = "none";
     if (raceAnalysis) raceAnalysis.style.display = "none";
-    updateAnalysisView();
   }
 }
 
