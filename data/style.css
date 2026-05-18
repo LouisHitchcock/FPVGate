@@ -668,6 +668,32 @@ button.active {
   display: flex;
   justify-content: space-around;
 }
+.race-notes-section {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: var(--tabcontent-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.race-notes-section label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+.race-notes-section textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  font-family: inherit;
+  resize: vertical;
+}
 
 .race-countdown-overlay {
   position: fixed;
@@ -1129,6 +1155,33 @@ footer {
   font-size: 14px;
   color: var(--text-color);
   margin-bottom: 4px;
+}
+
+.race-notes-preview {
+  font-size: 13px;
+  color: var(--secondary-color);
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+.race-details-notes {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--tabcontent-bg);
+}
+
+.race-details-notes h4 {
+  margin: 0 0 6px 0;
+  color: var(--primary-color);
+  font-size: 14px;
+}
+
+.race-details-notes-text {
+  white-space: pre-wrap;
+  color: var(--text-color);
+  font-size: 14px;
 }
 
 .race-tag {

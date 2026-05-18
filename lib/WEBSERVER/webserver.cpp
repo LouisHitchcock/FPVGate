@@ -1269,6 +1269,7 @@ EEPROM:\n\
         race.frequency = jsonObj["frequency"] | 0;
         race.band = jsonObj["band"] | "";
         race.channel = jsonObj["channel"] | 0;
+        race.notes = jsonObj["notes"] | "";
         
         DEBUG("Parsing race save: trackId=%u\n", (uint32_t)(jsonObj["trackId"] | 0));
         race.trackId = jsonObj["trackId"] | 0;
@@ -1345,7 +1346,8 @@ EEPROM:\n\
             if (request->hasParam("totalDistance", true)) {
                 totalDistance = request->getParam("totalDistance", true)->value().toFloat();
             }
-            bool success = history->updateRace(timestamp, name, tag, totalDistance);
+            String notes = request->hasParam("notes", true) ? request->getParam("notes", true)->value() : "";
+            bool success = history->updateRace(timestamp, name, tag, totalDistance, notes);
             request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
         } else {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
@@ -1397,6 +1399,7 @@ EEPROM:\n\
                     raceObj["frequency"] = race.frequency;
                     raceObj["band"] = race.band;
                     raceObj["channel"] = race.channel;
+                    raceObj["notes"] = race.notes;
                     raceObj["syncMode"] = race.syncMode;
                     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {

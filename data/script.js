@@ -27,6 +27,7 @@ const exitRssiInput = document.getElementById("exit");
 const enterRssiSpan = document.getElementById("enterSpan");
 const exitRssiSpan = document.getElementById("exitSpan");
 const pilotNameInput = document.getElementById("pname");
+const raceNotesInput = document.getElementById("raceNotesInput");
 const ssidInput = document.getElementById("ssid");
 const pwdInput = document.getElementById("pwd");
 const minLapInput = document.getElementById("minLap");
@@ -637,6 +638,9 @@ function resetLapDisplay() {
   lapNo = -1;
   lapTimes = [];
   updateLapCounter();
+  if (raceNotesInput) {
+    raceNotesInput.value = "";
+  }
   
   // Clear lap analysis
   const analysisContent = document.getElementById("analysisContent");
@@ -3501,6 +3505,9 @@ function clearLaps() {
   lapNo = -1;
   lapTimes = [];
   updateLapCounter();
+  if (raceNotesInput) {
+    raceNotesInput.value = "";
+  }
   
   // Reset current lap timer display
   currentLapStartMs = 0;
@@ -4931,6 +4938,15 @@ function updateAnalysisSectionVisibility() {
 let raceHistoryData = [];
 let currentDetailRace = null;
 
+function escapeHtml(input) {
+  return String(input || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function saveCurrentRace() {
   if (lapTimes.length === 0) return;
 
@@ -4951,6 +4967,7 @@ function saveCurrentRace() {
   const pilotCallsign = document.getElementById("pcallsign")?.value || "";
   const bandValue = bandSelect.options[bandSelect.selectedIndex].value;
   const channelValue = parseInt(channelSelect.options[channelSelect.selectedIndex].value);
+  const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
 
   // Calculate total race distance: track length per lap × number of laps
   let totalRaceDistance = 0;
@@ -4974,6 +4991,7 @@ function saveCurrentRace() {
     frequency: frequency,
     band: bandValue,
     channel: channelValue,
+    notes: notes,
     trackId: currentTrackId || 0,
     trackName: currentTrackName || "",
     totalDistance: totalRaceDistance,
@@ -5071,6 +5089,8 @@ function renderRaceHistory() {
     const freqDisplay = race.frequency ? `${race.band}${race.channel} (${race.frequency}MHz)` : "";
     const trackDisplay = race.trackName ? race.trackName : "";
     const distanceDisplay = race.totalDistance ? `${race.totalDistance.toFixed(1)}m` : "";
+    const notes = (race.notes || "").trim();
+    const notesPreview = notes.length > 140 ? notes.substring(0, 137) + "..." : notes;
     
     // Multi-pilot race detection
     const isMultiPilot = race.pilots && race.pilots.length > 1;
@@ -5103,6 +5123,7 @@ function renderRaceHistory() {
             ${pilotsDisplay}
             ${freqDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_channel", { n: freqDisplay }) + "</div>" : ""}
             ${trackDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_track", { n: trackDisplay + (distanceDisplay ? " (" + distanceDisplay + ")" : "") }) + "</div>" : ""}
+            ${notesPreview ? '<div class="race-notes-preview">' + i18n.t("history.item_notes", { n: escapeHtml(notesPreview) }) + "</div>" : ""}
           </div>
         </div>
         <div class="race-item-stats">
@@ -5239,12 +5260,24 @@ function viewRaceDetails(index) {
   const medianEl = document.getElementById("detailMedian");
   const best3El = document.getElementById("detailBest3");
   const totalTimeEl = document.getElementById("detailTotalTime");
+  const notesContainerEl = document.getElementById("raceDetailsNotes");
+  const notesTextEl = document.getElementById("raceDetailsNotesText");
 
   if (titleEl) titleEl.textContent = i18n.t("history.details_title_with_date", { date: dateStr });
   if (fastestEl) fastestEl.textContent = (race.fastestLap / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (medianEl) medianEl.textContent = (race.medianLap / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (best3El) best3El.textContent = (race.best3LapsTotal / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (totalTimeEl) totalTimeEl.textContent = totalTime.toFixed(2) + i18n.t("race.table.seconds_short");
+  if (notesContainerEl && notesTextEl) {
+    const notes = (race.notes || "").trim();
+    if (notes) {
+      notesTextEl.textContent = notes;
+      notesContainerEl.style.display = "block";
+    } else {
+      notesTextEl.textContent = "";
+      notesContainerEl.style.display = "none";
+    }
+  }
 
   // Render the race timeline
   renderRaceTimeline(race);
@@ -5603,7 +5636,7 @@ function updateRaceDetailTabs() {
       <button class="analysis-tab active" onclick="switchDetailMode('history')" data-i18n="analysis.tab_history">Lap History</button>
       <button class="analysis-tab" onclick="switchDetailMode('fastestRound')" data-i18n="analysis.tab_fastest">Fastest Round (3 Laps)</button>
     `;
-    i18n.apply();
+    i18n.translatePage();
   }
 }
 
@@ -6035,6 +6068,7 @@ function openEditModal(index) {
   document.getElementById("raceName").value = race.name || "";
   document.getElementById("raceTag").value = race.tag || "";
   document.getElementById("raceDistance").value = race.totalDistance || 0;
+  document.getElementById("raceEditNotes").value = race.notes || "";
 
   // Populate lap times for marshalling mode
   renderEditLapsList(race.lapTimes);
@@ -6122,6 +6156,7 @@ function saveRaceEdit() {
   const name = document.getElementById("raceName").value;
   const tag = document.getElementById("raceTag").value;
   const distance = parseFloat(document.getElementById("raceDistance").value) || 0;
+  const notes = document.getElementById("raceEditNotes").value.trim();
 
   // Collect updated lap times from inputs
   const lapInputs = document.querySelectorAll('#editLapsList input[type="number"]');
@@ -6156,6 +6191,7 @@ function saveRaceEdit() {
   formData.append("name", name);
   formData.append("tag", tag);
   formData.append("totalDistance", distance);
+  formData.append("notes", notes);
 
   fetch("/races/update", {
     method: "POST",

@@ -153,6 +153,10 @@ static PowerManager powerManager;  // Optional deep sleep toggle switch
 
 static TaskHandle_t xTimerTask = NULL;
 static bool sdInitAttempted = false;
+static uint32_t sdLastInitAttemptMs = 0;
+static uint8_t sdInitAttempts = 0;
+static constexpr uint8_t SD_INIT_MAX_ATTEMPTS = 5;
+static constexpr uint32_t SD_INIT_RETRY_INTERVAL_MS = 10000;
 
 static void parallelTask(void *pvArgs) {
     for (;;) {
@@ -177,6 +181,58 @@ static void parallelTask(void *pvArgs) {
 static void initParallelTask() {
     disableCore0WDT();
     xTaskCreatePinnedToCore(parallelTask, "parallelTask", 8192, NULL, 0, &xTimerTask, 0);
+}
+
+static void onSdCardReady() {
+    // Ensure SD has required directories (they were created on LittleFS at boot, before SD mounted)
+    DEBUG("Creating SD folders: /races, /tracks, /tracks/images\n");
+    storage.mkdir("/races");
+    storage.mkdir("/tracks");
+    storage.mkdir("/tracks/images");
+    DEBUG("SD folders ready\n");
+
+#ifdef HAS_I2S_AUDIO
+    // Initialize speaker audio (requires SD card)
+    audioAnnouncer.init(&config, &storage);
+#endif
+    
+    // Try to restore config from SD backup if EEPROM was invalid
+    // (This handles the case where config was reset to defaults during boot)
+    DEBUG("Checking for config backup on SD card...\n");
+    if (config.loadFromSD()) {
+        DEBUG("Config restored from SD backup after SD mount\n");
+        // Re-check WiFi mode - if SSID was restored, switch to STA
+        ws.recheckWifiMode();
+    }
+    
+    // Migrate sounds from LittleFS to SD card
+    if (storage.migrateSoundsToSD()) {
+        DEBUG("Sound files migrated successfully!\n");
+        DEBUG("Recommend: delete /sounds from LittleFS to reclaim space\n");
+    }
+    
+    // Reload race history from SD card
+    if (raceHistory.loadRaces()) {
+        DEBUG("Race history reloaded from SD card, %d races available\n", raceHistory.getRaceCount());
+    } else {
+        DEBUG("Race history reload from SD card failed\n");
+    }
+    
+    // Reload tracks from SD card
+    if (trackManager.loadTracks()) {
+        DEBUG("Tracks reloaded from SD card, %d tracks available\n", trackManager.getTrackCount());
+        
+        // Reload selected track if tracks are enabled
+        if (config.getTracksEnabled() && config.getSelectedTrackId() != 0) {
+            Track* selectedTrack = trackManager.getTrackById(config.getSelectedTrackId());
+            if (selectedTrack) {
+                timer.setTrack(selectedTrack);
+                DEBUG("Selected track reloaded: %s\n", selectedTrack->name.c_str());
+            }
+        }
+    } else {
+        DEBUG("Tracks reload from SD card failed\n");
+    }
 }
 
 void setup() {
@@ -792,64 +848,35 @@ void loop() {
     
     // Initialize SD card after boot (deferred to prevent watchdog timeout)
     // At 2s; "Booting" overlay is shown until this block finishes, then user can interact
-    if (!sdInitAttempted && currentTimeMs > 2000) {
+    // Retry automatically because SD initialization can fail transiently at boot.
+    bool shouldAttemptInitialSdInit = !sdInitAttempted && currentTimeMs > 2000;
+    bool shouldAttemptSdRetry =
+        sdInitAttempted &&
+        !storage.isSDAvailable() &&
+        sdInitAttempts < SD_INIT_MAX_ATTEMPTS &&
+        (currentTimeMs - sdLastInitAttemptMs) >= SD_INIT_RETRY_INTERVAL_MS;
+
+    if (shouldAttemptInitialSdInit || shouldAttemptSdRetry) {
         sdInitAttempted = true;
-        DEBUG("\n=== Deferred SD card initialization ===\n");
+        sdLastInitAttemptMs = currentTimeMs;
+        sdInitAttempts++;
+
+        if (sdInitAttempts == 1) {
+            DEBUG("\n=== Deferred SD card initialization ===\n");
+        } else {
+            DEBUG("\n=== Deferred SD card re-initialization (attempt %u/%u) ===\n", sdInitAttempts, SD_INIT_MAX_ATTEMPTS);
+        }
         
         if (storage.initSDDeferred()) {
             DEBUG("SD card ready!\n");
-            
-            // Ensure SD has required directories (they were created on LittleFS at boot, before SD mounted)
-            DEBUG("Creating SD folders: /races, /tracks, /tracks/images\n");
-            storage.mkdir("/races");
-            storage.mkdir("/tracks");
-            storage.mkdir("/tracks/images");
-            DEBUG("SD folders ready\n");
-
-#ifdef HAS_I2S_AUDIO
-            // Initialize speaker audio (requires SD card)
-            audioAnnouncer.init(&config, &storage);
-#endif
-            
-            // Try to restore config from SD backup if EEPROM was invalid
-            // (This handles the case where config was reset to defaults during boot)
-            DEBUG("Checking for config backup on SD card...\n");
-            if (config.loadFromSD()) {
-                DEBUG("Config restored from SD backup after SD mount\n");
-                // Re-check WiFi mode - if SSID was restored, switch to STA
-                ws.recheckWifiMode();
-            }
-            
-            // Migrate sounds from LittleFS to SD card
-            if (storage.migrateSoundsToSD()) {
-                DEBUG("Sound files migrated successfully!\n");
-                DEBUG("Recommend: delete /sounds from LittleFS to reclaim space\n");
-            }
-            
-            // Reload race history from SD card
-            if (raceHistory.loadRaces()) {
-                DEBUG("Race history reloaded from SD card, %d races available\n", raceHistory.getRaceCount());
-            } else {
-                DEBUG("Race history reload from SD card failed\n");
-            }
-            
-            // Reload tracks from SD card
-            if (trackManager.loadTracks()) {
-                DEBUG("Tracks reloaded from SD card, %d tracks available\n", trackManager.getTrackCount());
-                
-                // Reload selected track if tracks are enabled
-                if (config.getTracksEnabled() && config.getSelectedTrackId() != 0) {
-                    Track* selectedTrack = trackManager.getTrackById(config.getSelectedTrackId());
-                    if (selectedTrack) {
-                        timer.setTrack(selectedTrack);
-                        DEBUG("Selected track reloaded: %s\n", selectedTrack->name.c_str());
-                    }
-                }
-            } else {
-                DEBUG("Tracks reload from SD card failed\n");
-            }
+            onSdCardReady();
         } else {
             DEBUG("SD card not available - using LittleFS only\n");
+            if (sdInitAttempts < SD_INIT_MAX_ATTEMPTS) {
+                DEBUG("Will retry SD card initialization in %u seconds\n", SD_INIT_RETRY_INTERVAL_MS / 1000);
+            } else {
+                DEBUG("SD card init retries exhausted - staying on LittleFS\n");
+            }
         }
     }
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)

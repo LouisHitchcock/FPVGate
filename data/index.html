@@ -64,6 +64,10 @@
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
         </div>
+        <div class="race-notes-section">
+          <label for="raceNotesInput" data-i18n="race.notes">Race Notes:</label>
+          <textarea id="raceNotesInput" rows="3" maxlength="300" placeholder="Optional notes for this race..." data-i18n-placeholder="race.notes_placeholder"></textarea>
+        </div>
         <div id="raceCountdownOverlay" class="race-countdown-overlay" style="display: none;" aria-hidden="true">
           <span id="raceCountdownNumber">10</span>
         </div>
@@ -165,6 +169,10 @@
         <div id="raceDetails" class="race-details" style="display: none">
           <button onclick="closeRaceDetails()" class="close-button" data-i18n="history.close">Close</button>
           <h3 id="raceDetailsTitle"></h3>
+          <div id="raceDetailsNotes" class="race-details-notes" style="display: none">
+            <h4 data-i18n="history.notes">Notes</h4>
+            <div id="raceDetailsNotesText" class="race-details-notes-text"></div>
+          </div>
 
           <!-- Race Timeline -->
           <div class="race-timeline">
@@ -323,6 +331,10 @@
         <div class="config-item">
           <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
           <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
+        </div>
+        <div class="config-item" style="align-items: flex-start">
+          <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
+          <textarea id="raceEditNotes" maxlength="300" rows="3" placeholder="Optional notes about this race..." style="flex: 1; padding: 8px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--primary-color); font-family: inherit; resize: vertical" data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
         </div>
 
         <h4 style="margin-top: 24px; margin-bottom: 12px" data-i18n="history.edit_lap_times">Lap Times</h4>
