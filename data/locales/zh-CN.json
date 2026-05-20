@@ -229,11 +229,14 @@
                 "timeonly": "仅时间"
             },
             "voice_options": {
-                "eleven_sarah": "ElevenLabs (Sarah - 活力)",
-                "eleven_rachel": "ElevenLabs (Rachel - 冷静)",
-                "eleven_adam": "ElevenLabs (Adam - 深沉男声)",
-                "eleven_antoni": "ElevenLabs (Antoni - 男声)",
-                "eleven_matilda": "ElevenLabs (Matilda - 温暖女声)",
+                "eleven_sarah": "Sarah - 活力, en",
+                "eleven_rachel": "Rachel - 冷静, en",
+                "eleven_adam": "Adam - 深沉男声, en",
+                "eleven_antoni": "Antoni - 男声, en",
+                "eleven_matilda": "Matilda - 温暖女声, en",
+                "eleven_german_pack": "德语语音包, de",
+                "eleven_spanish_pack": "西班牙语语音包, es",
+                "eleven_french_pack": "法语语音包, fr",
                 "webspeech": "Web Speech（浏览器TTS）"
             },
             "examples": "示例: \"Louis 第 5 圈, 12.34\" / \"第 5 圈, 12.34\" / \"12.34\""

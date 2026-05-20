@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Upload sounds directory to ESP32-S3 SD card via web interface
-This script uploads all MP3 files from data_full/sounds to the ESP32's SD card
+Upload a canonical voice folder to ESP32-S3 SD card via web interface.
+This script uploads all MP3 files from SD_Card/voice_default_en to the ESP32 SD card.
 """
 
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Configuration
 ESP32_IP = "192.168.4.1"  # Default FPVGate AP IP
-SOUNDS_DIR = Path("data_full/sounds")
+SOUNDS_DIR = Path("SD_Card/voice_default_en")
 UPLOAD_URL = f"http://{ESP32_IP}/upload"
 
 def wait_for_esp32(timeout=30):
@@ -35,7 +35,7 @@ def upload_sounds():
     
     if not SOUNDS_DIR.exists():
         print(f"❌ Error: {SOUNDS_DIR} directory not found!")
-        print("Make sure data_full/sounds exists with MP3 files")
+        print("Make sure SD_Card/voice_default_en exists with MP3 files")
         return False
     
     # Get list of MP3 files
@@ -53,7 +53,7 @@ def upload_sounds():
     
     for i, mp3_file in enumerate(mp3_files, 1):
         filename = mp3_file.name
-        remote_path = f"/sounds/{filename}"
+        remote_path = f"/voice_default_en/{filename}"
         
         print(f"[{i}/{len(mp3_files)}] Uploading: {filename} ({mp3_file.stat().st_size // 1024} KB)...", end=" ")
         

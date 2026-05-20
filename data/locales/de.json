@@ -229,11 +229,14 @@
                 "timeonly": "Nur Zeit"
             },
             "voice_options": {
-                "eleven_sarah": "ElevenLabs (Sarah - Energisch)",
-                "eleven_rachel": "ElevenLabs (Rachel - Ruhig)",
-                "eleven_adam": "ElevenLabs (Adam - Tiefe Männerstimme)",
-                "eleven_antoni": "ElevenLabs (Antoni - Männlich)",
-                "eleven_matilda": "ElevenLabs (Matilda - Warme Frauenstimme)",
+                "eleven_sarah": "Sarah - Energisch, en",
+                "eleven_rachel": "Rachel - Ruhig, en",
+                "eleven_adam": "Adam - Tiefe Männerstimme, en",
+                "eleven_antoni": "Antoni - Männlich, en",
+                "eleven_matilda": "Matilda - Warme Frauenstimme, en",
+                "eleven_german_pack": "Deutsch-Paket, de",
+                "eleven_spanish_pack": "Spanisch-Paket, es",
+                "eleven_french_pack": "Französisch-Paket, fr",
                 "webspeech": "Web Speech (Browser TTS)"
             },
             "examples": "Beispiele: \"Louis Runde 5, 12.34\" / \"Runde 5, 12.34\" / \"12.34\""

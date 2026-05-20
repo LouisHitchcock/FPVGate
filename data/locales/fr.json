@@ -229,11 +229,14 @@
                 "timeonly": "Temps Seulement"
             },
             "voice_options": {
-                "eleven_sarah": "ElevenLabs (Sarah - Énergique)",
-                "eleven_rachel": "ElevenLabs (Rachel - Calme)",
-                "eleven_adam": "ElevenLabs (Adam - Voix Grave)",
-                "eleven_antoni": "ElevenLabs (Antoni - Masculin)",
-                "eleven_matilda": "ElevenLabs (Matilda - Féminine Chaleureuse)",
+                "eleven_sarah": "Sarah - Énergique, en",
+                "eleven_rachel": "Rachel - Calme, en",
+                "eleven_adam": "Adam - Voix Grave, en",
+                "eleven_antoni": "Antoni - Masculin, en",
+                "eleven_matilda": "Matilda - Féminine Chaleureuse, en",
+                "eleven_german_pack": "Pack Allemand, de",
+                "eleven_spanish_pack": "Pack Espagnol, es",
+                "eleven_french_pack": "Pack Français, fr",
                 "webspeech": "Web Speech (TTS du Navigateur)"
             },
             "examples": "Exemples: \"Louis Tour 5, 12.34\" / \"Tour 5, 12.34\" / \"12.34\""

@@ -370,6 +370,23 @@ var audioEnabled = false;
 var speakObjsQueue = [];
 var lapFormat = "full"; // 'full', 'laptime', 'timeonly'
 var selectedVoice = "default";
+const legacyVoiceAliases = {
+  piper: "default",
+  german: "de",
+  spanish: "es",
+  french: "fr",
+  voice_de: "de",
+  voice_es: "es",
+  voice_fr: "fr",
+};
+
+function normalizeVoiceSelectionValue(value) {
+  const normalized = legacyVoiceAliases[value] || value || "default";
+  const voiceSelect = document.getElementById("voiceSelect");
+  if (!voiceSelect) return normalized;
+  const optionValues = Array.from(voiceSelect.options).map((option) => option.value);
+  return optionValues.includes(normalized) ? normalized : "default";
+}
 
 // Initialize hybrid audio announcer
 const audioAnnouncer = new AudioAnnouncer();
@@ -1309,11 +1326,12 @@ onload = async function (e) {
 
     // Load lap format and voice selection from device config
     lapFormat = configData.lapFormat || "full";
-    selectedVoice = configData.selectedVoice || "default";
+    selectedVoice = normalizeVoiceSelectionValue(configData.selectedVoice || "default");
     const lapFormatSelect = document.getElementById("lapFormatSelect");
     const voiceSelect = document.getElementById("voiceSelect");
     if (lapFormatSelect) lapFormatSelect.value = lapFormat;
     if (voiceSelect) voiceSelect.value = selectedVoice;
+    if (audioAnnouncer) audioAnnouncer.setVoice(selectedVoice);
 
     // Load speaker setting from device config
     const speakerSection = document.getElementById("speakerSection");
@@ -2234,6 +2252,11 @@ async function saveConfig() {
   const themeSelect = document.getElementById("themeSelect");
   const voiceSelect = document.getElementById("voiceSelect");
   const lapFormatSelect = document.getElementById("lapFormatSelect");
+  const normalizedSelectedVoice = normalizeVoiceSelectionValue(
+    voiceSelect ? voiceSelect.value : selectedVoice
+  );
+  selectedVoice = normalizedSelectedVoice;
+  if (voiceSelect) voiceSelect.value = normalizedSelectedVoice;
 
   // Convert hex color to integer
   let pilotColorInt = 0x0080ff; // default
@@ -2323,7 +2346,7 @@ async function saveConfig() {
     customTextColor: customTextColor ? customTextColor.value : "#B0BEC5",
     customMenuColor: customMenuColor ? customMenuColor.value : "#37474F",
     customSecondaryColor: customSecondaryColor ? customSecondaryColor.value : "#607D8B",
-    selectedVoice: voiceSelect ? voiceSelect.value : "default",
+    selectedVoice: normalizedSelectedVoice,
     lapFormat: lapFormatSelect ? lapFormatSelect.value : "full",
     ssid: ssidInput.value,
     pwd: pwdInput.value,
@@ -2952,7 +2975,8 @@ function saveLapFormat() {
 function saveVoiceSelection() {
   const voiceSelect = document.getElementById("voiceSelect");
   if (voiceSelect) {
-    selectedVoice = voiceSelect.value;
+    selectedVoice = normalizeVoiceSelectionValue(voiceSelect.value);
+    voiceSelect.value = selectedVoice;
     console.log("Voice selection saved:", selectedVoice);
 
     // Update audioAnnouncer voice (this clears cache and updates voice directory)
@@ -6691,8 +6715,8 @@ function downloadConfig() {
         theme: localStorage.getItem("theme") || "oceanic",
         // Audio settings
         audioEnabled: audioEnabled,
-        lapFormat: localStorage.getItem("lapFormat") || "full",
-        selectedVoice: localStorage.getItem("selectedVoice") || "default",
+        lapFormat: document.getElementById("lapFormatSelect")?.value || lapFormat || "full",
+        selectedVoice: normalizeVoiceSelectionValue(document.getElementById("voiceSelect")?.value || selectedVoice || "default"),
         ttsEngine: localStorage.getItem("ttsEngine") || "webspeech",
         // Pilot frontend settings
         pilotCallsign: localStorage.getItem("pilotCallsign") || "",
@@ -6793,7 +6817,7 @@ function importConfig(input) {
             localStorage.setItem("lapFormat", config.lapFormat);
           }
           if (config.selectedVoice) {
-            localStorage.setItem("selectedVoice", config.selectedVoice);
+            localStorage.setItem("selectedVoice", normalizeVoiceSelectionValue(config.selectedVoice));
           }
           if (config.ttsEngine) {
             localStorage.setItem("ttsEngine", config.ttsEngine);
@@ -8990,9 +9014,10 @@ function openSettingsModal() {
         // Voice and lap format settings
         const voiceSelect = document.getElementById("voiceSelect");
         const lapFormatSelect = document.getElementById("lapFormatSelect");
-        if (voiceSelect && config.selectedVoice) {
-          voiceSelect.value = config.selectedVoice;
-          selectedVoice = config.selectedVoice;
+        if (voiceSelect) {
+          selectedVoice = normalizeVoiceSelectionValue(config.selectedVoice || "default");
+          voiceSelect.value = selectedVoice;
+          if (audioAnnouncer) audioAnnouncer.setVoice(selectedVoice);
         }
         if (lapFormatSelect && config.lapFormat) {
           lapFormatSelect.value = config.lapFormat;

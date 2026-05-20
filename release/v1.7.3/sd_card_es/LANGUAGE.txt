@@ -1,3 +1,0 @@
-language=es
-label=Spanish
-locale=es

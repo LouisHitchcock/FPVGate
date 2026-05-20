@@ -8,7 +8,7 @@ from typing import Dict
 from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 
-OUTPUT_DIR = Path("data/sounds")
+OUTPUT_DIR = Path("SD_Card/voice_default_en")
 PILOT_NAME = "Louis"
 PHONETIC_NAME = "Louie"
 VOICE_ID = 'EXAVITQu4vr4xnSDxMaL'

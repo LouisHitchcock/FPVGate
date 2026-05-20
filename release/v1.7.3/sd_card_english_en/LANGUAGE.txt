@@ -1,0 +1,4 @@
+language=en
+label=English
+locale=en
+voice_dir=voice_default_en

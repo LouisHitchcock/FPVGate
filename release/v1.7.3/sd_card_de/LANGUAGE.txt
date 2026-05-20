@@ -1,3 +1,0 @@
-language=de
-label=German
-locale=de

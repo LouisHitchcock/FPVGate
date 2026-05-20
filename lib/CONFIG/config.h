@@ -310,7 +310,7 @@ typedef struct {
     char pilotPhonetic[21];    // Phonetic pronunciation
     uint32_t pilotColor;       // Pilot color (0xRRGGBB)
     char theme[21];            // UI theme name
-    char selectedVoice[21];    // Voice selection (default, rachel, piper, etc)
+    char selectedVoice[21];    // Voice selection (default, rachel, de/es/fr, etc)
     char lapFormat[11];        // Lap announcement format (full, laptime, timeonly)
     char ssid[33];
     char password[33];

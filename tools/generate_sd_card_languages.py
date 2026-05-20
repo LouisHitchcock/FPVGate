@@ -2,10 +2,10 @@
 """Generate language-specific SD card voice folders with ElevenLabs.
 
 This script creates:
-- SD_Card/voice_en
-- SD_Card/voice_fr
-- SD_Card/voice_es
-- SD_Card/voice_de
+- SD_Card/voice_default_en
+- SD_Card/voice_french_fr
+- SD_Card/voice_spanish_es
+- SD_Card/voice_german_de
 
 Each folder contains localized announcements generated from ElevenLabs using
 language-specific phrases.
@@ -38,10 +38,10 @@ VOICE_SETTINGS = VoiceSettings(
 
 # Pick one ElevenLabs voice per language. These are the existing voices in the repo.
 LANGUAGE_TO_VOICE = {
-    "en": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_en", "note": "default voice"},
-    "fr": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_fr", "note": "fallback voice for free-plan generation"},
-    "es": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_es", "note": "fallback voice for free-plan generation"},
-    "de": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_de", "note": "fallback voice for free-plan generation"},
+    "en": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_default_en", "note": "default English voice"},
+    "fr": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_french_fr", "note": "fallback voice for free-plan generation"},
+    "es": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_spanish_es", "note": "fallback voice for free-plan generation"},
+    "de": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "voice_name": "Sarah", "folder": "voice_german_de", "note": "fallback voice for free-plan generation"},
 }
 
 TOP_NAMES = [
@@ -53,6 +53,115 @@ TOP_NAMES = [
     "Steve", "Thomas", "Tim", "Tom", "Tony", "Tyler", "Will", "Zach",
     "Emma", "Sarah",
 ]
+
+def number_to_words(number: int, language: str = "en") -> str:
+    if number < 0 or number > 99:
+        raise ValueError("number_to_words only supports 0-99")
+
+    language = language.lower()
+
+    if language == "en":
+        units = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        teens = {
+            10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen", 14: "fourteen",
+            15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen",
+        }
+        tens = {20: "twenty", 30: "thirty", 40: "forty", 50: "fifty", 60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety"}
+
+        if number < 10:
+            return units[number]
+        if number < 20:
+            return teens[number]
+        ten, unit = divmod(number, 10)
+        return tens[ten * 10] if unit == 0 else f"{tens[ten * 10]}-{units[unit]}"
+
+    if language == "fr":
+        units = {
+            0: "zéro", 1: "un", 2: "deux", 3: "trois", 4: "quatre",
+            5: "cinq", 6: "six", 7: "sept", 8: "huit", 9: "neuf",
+        }
+        teens = {
+            10: "dix", 11: "onze", 12: "douze", 13: "treize", 14: "quatorze",
+            15: "quinze", 16: "seize", 17: "dix-sept", 18: "dix-huit", 19: "dix-neuf",
+        }
+        tens = {20: "vingt", 30: "trente", 40: "quarante", 50: "cinquante", 60: "soixante"}
+
+        if number < 10:
+            return units[number]
+        if number < 20:
+            return teens[number]
+        if number < 70:
+            ten = (number // 10) * 10
+            unit = number % 10
+            if unit == 0:
+                return tens[ten]
+            if unit == 1:
+                return f"{tens[ten]} et un"
+            return f"{tens[ten]}-{units[unit]}"
+        if number < 80:
+            remainder = number - 60
+            if remainder == 11:
+                return "soixante et onze"
+            return f"soixante-{teens[remainder]}"
+        if number == 80:
+            return "quatre-vingts"
+        remainder = number - 80
+        if remainder == 1:
+            return "quatre-vingt-un"
+        if remainder < 10:
+            return f"quatre-vingt-{units[remainder]}"
+        return f"quatre-vingt-{teens[remainder]}"
+
+    if language == "es":
+        units = {
+            0: "cero", 1: "uno", 2: "dos", 3: "tres", 4: "cuatro",
+            5: "cinco", 6: "seis", 7: "siete", 8: "ocho", 9: "nueve",
+        }
+        teens = {
+            10: "diez", 11: "once", 12: "doce", 13: "trece", 14: "catorce",
+            15: "quince", 16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve",
+        }
+        twenties = {
+            20: "veinte", 21: "veintiuno", 22: "veintidós", 23: "veintitrés", 24: "veinticuatro",
+            25: "veinticinco", 26: "veintiséis", 27: "veintisiete", 28: "veintiocho", 29: "veintinueve",
+        }
+        tens = {30: "treinta", 40: "cuarenta", 50: "cincuenta", 60: "sesenta", 70: "setenta", 80: "ochenta", 90: "noventa"}
+
+        if number < 10:
+            return units[number]
+        if number < 20:
+            return teens[number]
+        if number < 30:
+            return twenties[number]
+        ten = (number // 10) * 10
+        unit = number % 10
+        if unit == 0:
+            return tens[ten]
+        return f"{tens[ten]} y {units[unit]}"
+
+    if language == "de":
+        units = {
+            0: "null", 1: "eins", 2: "zwei", 3: "drei", 4: "vier",
+            5: "fünf", 6: "sechs", 7: "sieben", 8: "acht", 9: "neun",
+        }
+        teens = {
+            10: "zehn", 11: "elf", 12: "zwölf", 13: "dreizehn", 14: "vierzehn",
+            15: "fünfzehn", 16: "sechzehn", 17: "siebzehn", 18: "achtzehn", 19: "neunzehn",
+        }
+        tens = {20: "zwanzig", 30: "dreißig", 40: "vierzig", 50: "fünfzig", 60: "sechzig", 70: "siebzig", 80: "achtzig", 90: "neunzig"}
+
+        if number < 10:
+            return units[number]
+        if number < 20:
+            return teens[number]
+        ten = (number // 10) * 10
+        unit = number % 10
+        if unit == 0:
+            return tens[ten]
+        unit_word = "ein" if unit == 1 else units[unit]
+        return f"{unit_word}und{tens[ten]}"
+
+    return number_to_words(number, "en")
 
 PROFILE = {
     "en": {
@@ -81,13 +190,13 @@ PROFILE = {
         "gate_1": "Porte 1",
         "lap": "Tour",
         "laps": "tours",
-        "two_laps": "2 tours",
-        "three_laps": "3 tours",
+        "two_laps": "deux tours",
+        "three_laps": "trois tours",
         "point": "virgule",
         "test_sound": "Test du son pour le pilote",
         "name_suffix_lap": " tour",
-        "name_suffix_2laps": " 2 tours",
-        "name_suffix_3laps": " 3 tours",
+        "name_suffix_2laps": " deux tours",
+        "name_suffix_3laps": " trois tours",
         "lap_template": "Tour {n}",
         "name_template": "{name} tour",
     },
@@ -99,13 +208,13 @@ PROFILE = {
         "gate_1": "Puerta 1",
         "lap": "Vuelta",
         "laps": "vueltas",
-        "two_laps": "2 vueltas",
-        "three_laps": "3 vueltas",
+        "two_laps": "dos vueltas",
+        "three_laps": "tres vueltas",
         "point": "punto",
         "test_sound": "Probando sonido para el piloto",
         "name_suffix_lap": " vuelta",
-        "name_suffix_2laps": " 2 vueltas",
-        "name_suffix_3laps": " 3 vueltas",
+        "name_suffix_2laps": " dos vueltas",
+        "name_suffix_3laps": " tres vueltas",
         "lap_template": "Vuelta {n}",
         "name_template": "{name} vuelta",
     },
@@ -117,13 +226,13 @@ PROFILE = {
         "gate_1": "Tor 1",
         "lap": "Runde",
         "laps": "Runden",
-        "two_laps": "2 Runden",
-        "three_laps": "3 Runden",
+        "two_laps": "zwei Runden",
+        "three_laps": "drei Runden",
         "point": "Komma",
         "test_sound": "Tonprüfung für Piloten",
         "name_suffix_lap": " runde",
-        "name_suffix_2laps": " 2 runden",
-        "name_suffix_3laps": " 3 runden",
+        "name_suffix_2laps": " zwei runden",
+        "name_suffix_3laps": " drei runden",
         "lap_template": "Runde {n}",
         "name_template": "{name} runde",
     },
@@ -146,9 +255,9 @@ def get_phrases(language: str) -> Dict[str, str]:
         f"{PILOT_NAME.lower()}_lap.mp3": f"{PHONETIC_NAME}{profile['name_suffix_lap']}",
         f"{PILOT_NAME.lower()}_2laps.mp3": f"{PHONETIC_NAME}{profile['name_suffix_2laps']}",
         f"{PILOT_NAME.lower()}_3laps.mp3": f"{PHONETIC_NAME}{profile['name_suffix_3laps']}",
-        **{f"num_{i}.mp3": str(i) for i in range(100)},
+        **{f"num_{i}.mp3": number_to_words(i, language) for i in range(100)},
         "point.mp3": profile["point"],
-        **{f"lap_{i}.mp3": profile["lap_template"].format(n=i) for i in range(1, 51)},
+        **{f"lap_{i}.mp3": f"{profile['lap']} {number_to_words(i, language)}" for i in range(1, 51)},
         **{f"{name.lower()}_lap.mp3": profile["name_template"].format(name=name) for name in TOP_NAMES},
     }
     return phrases
@@ -202,6 +311,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--languages", nargs="+", default=["en", "fr", "es", "de"])
     args = parser.parse_args()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:

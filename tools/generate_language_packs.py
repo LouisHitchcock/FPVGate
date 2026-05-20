@@ -27,29 +27,37 @@ LANGUAGE_PACKS = {
     "en": {
         "label": "English",
         "locale": "en",
-        "source_dir": "voice_en",
-        "zip_name": "SD_Card_en.zip",
+        "source_dirs": ["voice_default_en", "voice_en"],
+        "voice_dir": "voice_default_en",
+        "stage_dir": "sd_card_english_en",
+        "zip_name": "SD_Card_english_en.zip",
         "description": "English voice pack",
     },
     "fr": {
         "label": "French",
         "locale": "fr",
-        "source_dir": "voice_fr",
-        "zip_name": "SD_Card_fr.zip",
+        "source_dirs": ["voice_french_fr", "voice_fr"],
+        "voice_dir": "voice_french_fr",
+        "stage_dir": "sd_card_french_fr",
+        "zip_name": "SD_Card_french_fr.zip",
         "description": "French voice pack",
     },
     "es": {
         "label": "Spanish",
         "locale": "es",
-        "source_dir": "voice_es",
-        "zip_name": "SD_Card_es.zip",
+        "source_dirs": ["voice_spanish_es", "voice_es"],
+        "voice_dir": "voice_spanish_es",
+        "stage_dir": "sd_card_spanish_es",
+        "zip_name": "SD_Card_spanish_es.zip",
         "description": "Spanish voice pack",
     },
     "de": {
         "label": "German",
         "locale": "de",
-        "source_dir": "voice_de",
-        "zip_name": "SD_Card_de.zip",
+        "source_dirs": ["voice_german_de", "voice_de"],
+        "voice_dir": "voice_german_de",
+        "stage_dir": "sd_card_german_de",
+        "zip_name": "SD_Card_german_de.zip",
         "description": "German voice pack",
     },
 }
@@ -76,20 +84,32 @@ def make_zip(source_dir: Path, zip_path: Path) -> int:
     return count
 
 
+def resolve_source_dir(voice_root: Path, source_dirs: list[str]) -> Path:
+    for source_dir in source_dirs:
+        candidate = voice_root / source_dir
+        if candidate.exists():
+            return candidate
+    candidates = ", ".join(source_dirs)
+    raise FileNotFoundError(f"Missing source directory. Checked: {candidates}")
+
+
 def build_language_pack(lang: str, voice_root: Path, output_root: Path) -> tuple[Path, Path, int]:
     if lang not in LANGUAGE_PACKS:
         raise KeyError(f"Unsupported language code: {lang}")
 
     pack = LANGUAGE_PACKS[lang]
-    source_dir = voice_root / pack["source_dir"]
-    stage_dir = output_root / f"sd_card_{lang}"
-    stage_voice_dir = stage_dir / pack["source_dir"]
+    source_dir = resolve_source_dir(voice_root, pack["source_dirs"])
+    stage_dir = output_root / pack["stage_dir"]
+    stage_voice_dir = stage_dir / pack["voice_dir"]
 
     copied_files = copy_tree(source_dir, stage_voice_dir)
 
     # Stamp the pack with a tiny manifest so the ZIP identifies its language.
     manifest = stage_dir / "LANGUAGE.txt"
-    manifest.write_text(f"language={lang}\nlabel={pack['label']}\nlocale={pack['locale']}\n", encoding="utf-8")
+    manifest.write_text(
+        f"language={lang}\nlabel={pack['label']}\nlocale={pack['locale']}\nvoice_dir={pack['voice_dir']}\n",
+        encoding="utf-8"
+    )
 
     zip_path = output_root / pack["zip_name"]
     zipped_files = make_zip(stage_dir, zip_path)
@@ -109,7 +129,7 @@ def parse_args() -> argparse.Namespace:
         "--voice-root",
         type=Path,
         default=DEFAULT_VOICE_SOURCE,
-        help="Root folder containing voice asset directories (default: ./data)",
+        help="Root folder containing voice asset directories (default: ./SD_Card)",
     )
     parser.add_argument(
         "--output-root",

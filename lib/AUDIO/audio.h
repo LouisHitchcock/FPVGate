@@ -68,7 +68,7 @@ class AudioAnnouncer {
     float lapHistory[LAP_HISTORY_SIZE];  // Recent lap times in seconds
     uint8_t lapHistoryCount = 0;
 
-    // Voice directory (e.g. "sounds_matilda")
+    // Voice directory (e.g. "voice_matilda_en")
     char voiceDir[32];
 
     // Queue management

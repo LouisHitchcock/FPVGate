@@ -230,11 +230,14 @@
                 "timeonly": "Time Only"
             },
             "voice_options": {
-                "eleven_sarah": "ElevenLabs (Sarah - Energetic)",
-                "eleven_rachel": "ElevenLabs (Rachel - Calm)",
-                "eleven_adam": "ElevenLabs (Adam - Deep Male)",
-                "eleven_antoni": "ElevenLabs (Antoni - Male)",
-                "eleven_matilda": "ElevenLabs (Matilda - Warm Female)",
+                "eleven_sarah": "Sarah - Energetic, en",
+                "eleven_rachel": "Rachel - Calm, en",
+                "eleven_adam": "Adam - Deep Male, en",
+                "eleven_antoni": "Antoni - Male, en",
+                "eleven_matilda": "Matilda - Warm Female, en",
+                "eleven_german_pack": "German Pack, de",
+                "eleven_spanish_pack": "Spanish Pack, es",
+                "eleven_french_pack": "French Pack, fr",
                 "webspeech": "Web Speech (Browser TTS)"
             },
             "examples": "Examples: \"Louis Lap 5, 12.34\" / \"Lap 5, 12.34\" / \"12.34\""
