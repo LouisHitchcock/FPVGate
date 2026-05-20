@@ -427,19 +427,22 @@
             <button onclick="rerecordCalibration()" style="display: block; margin-top: 8px; padding: 6px 14px; font-size: 12px; background-color: var(--primary-color); color: #fff; border: none; border-radius: 4px; cursor: pointer" data-i18n="calib.rerecord">Re-record Flight Data</button>
           </div>
           <div class="wizard-results-box">
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_enter_rssi">Enter RSSI:</label>
-              <span id="calculatedEnterRssi" class="result-value">--</span>
+              <input type="number" id="calculatedEnterRssi" class="result-value-input" min="50" max="255" step="1" inputmode="numeric" />
             </div>
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_exit_rssi">Exit RSSI:</label>
-              <span id="calculatedExitRssi" class="result-value">--</span>
+              <input type="number" id="calculatedExitRssi" class="result-value-input" min="50" max="255" step="1" inputmode="numeric" />
             </div>
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_min_lap">Min Lap Time:</label>
-              <span id="calculatedMinLap" class="result-value">--</span>
+              <div class="result-value-input-wrap">
+                <input type="number" id="calculatedMinLap" class="result-value-input result-value-input-minlap" min="1" max="20" step="0.1" inputmode="decimal" />
+                <span class="result-value-unit">s</span>
+              </div>
             </div>
-            <div class="result-item" style="font-size: 12px; color: var(--secondary-color)">
+            <div class="result-item result-item-meta">
               <label data-i18n="calib.wizard_peaks_detected">Peaks Detected:</label>
               <span id="calculatedPeakCount">--</span>
               &nbsp;|&nbsp;

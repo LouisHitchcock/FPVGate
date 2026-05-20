@@ -7068,19 +7068,98 @@ function showResults() {
   document.getElementById("wizardManualMarking").style.display = "none";
   document.getElementById("wizardResults").style.display = "block";
   wizardState.phase = "results";
+  setupWizardResultInputHandlers();
 
   updateResultsDisplay();
   drawResultsChart();
   setupIgnoreRegionHandlers();
 }
 
+function clampWizardResultValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function applyWizardResultInputEdits() {
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
+
+  if (enterInput) {
+    var enterVal = parseInt(enterInput.value, 10);
+    if (!isNaN(enterVal)) {
+      wizardState.calculatedEnter = clampWizardResultValue(Math.round(enterVal), 50, 255);
+    }
+  }
+
+  if (exitInput) {
+    var exitVal = parseInt(exitInput.value, 10);
+    if (!isNaN(exitVal)) {
+      wizardState.calculatedExit = clampWizardResultValue(Math.round(exitVal), 50, 255);
+    }
+  }
+
+  if (minLapInput) {
+    var minLapSeconds = parseFloat(minLapInput.value);
+    if (!isNaN(minLapSeconds)) {
+      wizardState.calculatedMinLap = clampWizardResultValue(Math.round(minLapSeconds * 1000), 1000, 20000);
+    }
+  }
+}
+
+function setupWizardResultInputHandlers() {
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
+
+  function onInputChanged() {
+    applyWizardResultInputEdits();
+    drawResultsChart();
+  }
+
+  function onInputBlur() {
+    applyWizardResultInputEdits();
+    updateResultsDisplay();
+    drawResultsChart();
+  }
+
+  if (enterInput && !enterInput.dataset.bound) {
+    enterInput.addEventListener("input", onInputChanged);
+    enterInput.addEventListener("blur", onInputBlur);
+    enterInput.dataset.bound = "1";
+  }
+
+  if (exitInput && !exitInput.dataset.bound) {
+    exitInput.addEventListener("input", onInputChanged);
+    exitInput.addEventListener("blur", onInputBlur);
+    exitInput.dataset.bound = "1";
+  }
+
+  if (minLapInput && !minLapInput.dataset.bound) {
+    minLapInput.addEventListener("input", onInputChanged);
+    minLapInput.addEventListener("blur", onInputBlur);
+    minLapInput.dataset.bound = "1";
+  }
+}
+
 function updateResultsDisplay() {
   var activePeaks = getActivePeaks();
   var tooFew = activePeaks.length < 3;
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
 
-  document.getElementById("calculatedEnterRssi").textContent = tooFew ? "--" : wizardState.calculatedEnter;
-  document.getElementById("calculatedExitRssi").textContent = tooFew ? "--" : wizardState.calculatedExit;
-  document.getElementById("calculatedMinLap").textContent = tooFew ? "--" : (wizardState.calculatedMinLap / 1000).toFixed(1) + "s";
+  if (enterInput) {
+    enterInput.value = tooFew ? "" : wizardState.calculatedEnter;
+    enterInput.disabled = tooFew;
+  }
+  if (exitInput) {
+    exitInput.value = tooFew ? "" : wizardState.calculatedExit;
+    exitInput.disabled = tooFew;
+  }
+  if (minLapInput) {
+    minLapInput.value = tooFew ? "" : (wizardState.calculatedMinLap / 1000).toFixed(1);
+    minLapInput.disabled = tooFew;
+  }
   document.getElementById("calculatedPeakCount").textContent = activePeaks.length;
   document.getElementById("calculatedNoiseCeiling").textContent = wizardState.noiseCeiling;
   document.getElementById("calculatedAvgPeak").textContent = tooFew ? "--" : Math.round(wizardState.avgPeak);
@@ -7461,6 +7540,7 @@ function calculateThresholdsManual() {
 }
 
 function applyCalculatedThresholds() {
+  applyWizardResultInputEdits();
   enterRssiInput.value = wizardState.calculatedEnter;
   exitRssiInput.value = wizardState.calculatedExit;
   updateEnterRssi(enterRssiInput, wizardState.calculatedEnter);

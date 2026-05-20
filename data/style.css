@@ -417,6 +417,8 @@ nav {
   border-radius: 4px;
   font-size: 11px;
   font-weight: bold;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.2px;
   color: white;
   letter-spacing: 0.5px;
 }
@@ -652,6 +654,17 @@ button:hover {
 
 button:disabled {
   cursor: not-allowed;
+}
+
+.result-value-input::-webkit-outer-spin-button,
+.result-value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.result-value-input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 button.active {
@@ -1754,6 +1767,17 @@ footer {
   border-bottom: 1px solid var(--border-color);
 }
 
+.result-item-editable {
+  min-height: 54px;
+  padding: 10px 0;
+  gap: 12px;
+}
+
+.result-item-editable label {
+  flex: 1;
+  padding-right: 10px;
+}
+
 .result-item:last-child {
   border-bottom: none;
 }
@@ -1767,6 +1791,73 @@ footer {
   font-size: 20px;
   font-weight: bold;
   color: var(--primary-color);
+  line-height: 1;
+}
+
+.result-item-meta {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--secondary-color);
+  line-height: 1.6;
+}
+
+.result-item-meta label {
+  font-weight: 600;
+  color: var(--secondary-color);
+}
+
+.result-value-input-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 142px;
+}
+
+.result-value-input {
+  width: 112px;
+  height: 38px;
+  padding: 6px 10px;
+  font-size: 20px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.2px;
+  text-align: right;
+  color: var(--primary-color);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.result-value-input-minlap {
+  width: 92px;
+}
+
+.result-value-input:hover {
+  border-color: var(--secondary-color);
+}
+
+.result-value-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px rgba(0, 150, 136, 0.22);
+}
+
+.result-value-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.result-value-unit {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--primary-color);
+  line-height: 1;
 }
 
 #wizardChart {
