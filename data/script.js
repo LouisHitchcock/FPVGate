@@ -4764,7 +4764,7 @@ const RACE_ANALYTICS_DEFAULTS = {
   fastestLap: true,
   fastest3Consec: true,
   lapTimes: true,
-  consistency: true,
+  consistency: false,
 };
 let raceAnalyticsDisplaySettings = loadRaceAnalyticsDisplaySettings();
 let currentRaceAnalyticsTab = "fastestLap";

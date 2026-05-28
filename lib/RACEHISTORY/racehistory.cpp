@@ -220,6 +220,10 @@ bool RaceHistory::deleteRace(uint32_t timestamp) {
 }
 
 bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance, const String& notes) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in updateRace!\n");
+        return false;
+    }
     // Update in-memory race
     RaceSession* targetRace = nullptr;
     for (auto& race : races) {
@@ -279,6 +283,10 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
 }
 
 bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in updateLaps!\n");
+        return false;
+    }
     // Validate lap times
     if (newLapTimes.empty()) {
         DEBUG("Cannot update race with empty lap times\n");
