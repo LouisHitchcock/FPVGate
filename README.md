@@ -74,10 +74,9 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 - Auto-migration from flash to SD
 - Cross-device race history (accessible from all connected devices)
 - Config backup/restore
-- Multi-voice audio library (4 voice packs)
+- Multi-voice audio library (5 voice packs)
 
 **Webhooks & Integration**
-- HTTP webhook support for external LED controllers
 - Configurable triggers (race start/stop, laps)
 - Gate LED control with granular event settings
 - Network-based device integration
@@ -255,14 +254,21 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Version:** v1.7.0
+**Current Version:** v1.7.3
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Stable - actively maintained
 
 ### Recent Updates
 
-**v1.7.0 (Latest Release - March 20, 2026)**
+**v1.7.3 (Latest Release - June 13, 2026)**
+- **Race Notes** — Add/edit notes per race with auto-open-on-stop option
+- **Configurable Race Analytics** — Independent toggle for Fastest Lap, Fastest 3 Consecutive, Lap Times, and Consistency panels
+- **Multilingual Voice Packs** — German, Spanish, French ElevenLabs voices with canonical `voice_*` structure
+- **Editable Calibration Results** — Fine-tune RSSI thresholds and Min Lap Time after running the wizard
+- **FPVGate Solo** — New lightweight board target
+
+**v1.7.0 (March 20, 2026)**
 - **RotorHazard Integration** - Bidirectional race control, NTP clock sync, lap submission, companion RH plugin
 - **I2S Speaker Audio (MAX98357A)** - Hardware speaker output for race announcements
 - **New Boards** - FPVGate AIO V4, XIAO ESP32S3 Plus

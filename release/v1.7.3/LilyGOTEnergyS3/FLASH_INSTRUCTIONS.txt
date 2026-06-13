@@ -1,0 +1,15 @@
+FPVGate v1.7.3 - LilyGOTEnergyS3 (8MB)
+=====================================
+
+Flash using esptool (replace COM3 with your port):
+
+  esptool.py --chip auto --port COM3 write_flash -z 
+    0x0 bootloader.bin 
+    0x8000 partitions.bin 
+    0x10000 firmware.bin 
+    0x410000 littlefs.bin
+
+Or use PlatformIO:
+
+  pio run -e LilyGOTEnergyS3 -t upload
+  pio run -e LilyGOTEnergyS3 -t uploadfs

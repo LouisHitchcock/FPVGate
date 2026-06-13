@@ -1,4 +1,0 @@
-language=fr
-label=French
-locale=fr
-voice_dir=voice_french_fr

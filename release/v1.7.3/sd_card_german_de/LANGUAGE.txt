@@ -1,4 +1,0 @@
-language=de
-label=German
-locale=de
-voice_dir=voice_german_de

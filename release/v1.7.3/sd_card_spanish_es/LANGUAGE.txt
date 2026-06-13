@@ -1,4 +1,0 @@
-language=es
-label=Spanish
-locale=es
-voice_dir=voice_spanish_es

@@ -1,0 +1,15 @@
+FPVGate v1.7.3 - ESP32S3SuperMini (4MB)
+=====================================
+
+Flash using esptool (replace COM3 with your port):
+
+  esptool.py --chip auto --port COM3 write_flash -z 
+    0x0 bootloader.bin 
+    0x8000 partitions.bin 
+    0x10000 firmware.bin 
+    0x290000 littlefs.bin
+
+Or use PlatformIO:
+
+  pio run -e ESP32S3SuperMini -t upload
+  pio run -e ESP32S3SuperMini -t uploadfs
