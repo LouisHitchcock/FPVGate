@@ -27,6 +27,8 @@ const exitRssiInput = document.getElementById("exit");
 const enterRssiSpan = document.getElementById("enterSpan");
 const exitRssiSpan = document.getElementById("exitSpan");
 const pilotNameInput = document.getElementById("pname");
+const raceNotesInput = document.getElementById("raceNotesInput");
+const raceNotesIndicator = document.getElementById("raceNotesIndicator");
 const ssidInput = document.getElementById("ssid");
 const pwdInput = document.getElementById("pwd");
 const minLapInput = document.getElementById("minLap");
@@ -109,6 +111,9 @@ var maxLaps = 0;
 // startRace().
 var maxHeatTime30s = 0;
 var heatTimeoutId = null;
+var currentRaceSessionTimestamp = null;
+var pendingRaceSavePromise = null;
+var openRaceNotesOnRaceEnd = localStorage.getItem("openRaceNotesOnRaceEnd") === "1";
 
 // Track data for current race
 var currentTrackId = 0;
@@ -365,6 +370,23 @@ var audioEnabled = false;
 var speakObjsQueue = [];
 var lapFormat = "full"; // 'full', 'laptime', 'timeonly'
 var selectedVoice = "default";
+const legacyVoiceAliases = {
+  piper: "default",
+  german: "de",
+  spanish: "es",
+  french: "fr",
+  voice_de: "de",
+  voice_es: "es",
+  voice_fr: "fr",
+};
+
+function normalizeVoiceSelectionValue(value) {
+  const normalized = legacyVoiceAliases[value] || value || "default";
+  const voiceSelect = document.getElementById("voiceSelect");
+  if (!voiceSelect) return normalized;
+  const optionValues = Array.from(voiceSelect.options).map((option) => option.value);
+  return optionValues.includes(normalized) ? normalized : "default";
+}
 
 // Initialize hybrid audio announcer
 const audioAnnouncer = new AudioAnnouncer();
@@ -637,6 +659,11 @@ function resetLapDisplay() {
   lapNo = -1;
   lapTimes = [];
   updateLapCounter();
+  if (raceNotesInput) {
+    raceNotesInput.value = "";
+  }
+  updateRaceNotesIndicator();
+  currentRaceSessionTimestamp = null;
   
   // Clear lap analysis
   const analysisContent = document.getElementById("analysisContent");
@@ -647,11 +674,7 @@ function resetLapDisplay() {
   // Clear race analysis
   const raceAnalysisContent = document.getElementById("raceAnalysisContent");
   if (raceAnalysisContent) {
-    raceAnalysisContent.innerHTML = '<p class="no-data">Complete at least 2 laps to see race analysis</p>';
-  }
-  const raceAnalysisLegend = document.getElementById("raceAnalysisLegend");
-  if (raceAnalysisLegend) {
-    raceAnalysisLegend.innerHTML = '';
+    raceAnalysisContent.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
   }
   
   // Clear remote pilots data
@@ -1174,6 +1197,8 @@ async function selectComPort() {
 onload = async function (e) {
   // Load dark mode preference
   loadDarkMode();
+  syncOpenRaceNotesOnRaceEndToggle();
+  syncRaceAnalyticsToggleUI();
 
   config.style.display = "none";
   race.style.display = "block";
@@ -1282,6 +1307,7 @@ onload = async function (e) {
     clearInterval(timerInterval);
     timer.innerHTML = i18n.t("race.timer_default");
     clearLaps();
+    updateRaceNotesIndicator();
     // Already created up-front; keep call site as a safety net in case the
     // early createRssiChart() above failed for any reason.
     if (!rssiChart) createRssiChart();
@@ -1300,11 +1326,12 @@ onload = async function (e) {
 
     // Load lap format and voice selection from device config
     lapFormat = configData.lapFormat || "full";
-    selectedVoice = configData.selectedVoice || "default";
+    selectedVoice = normalizeVoiceSelectionValue(configData.selectedVoice || "default");
     const lapFormatSelect = document.getElementById("lapFormatSelect");
     const voiceSelect = document.getElementById("voiceSelect");
     if (lapFormatSelect) lapFormatSelect.value = lapFormat;
     if (voiceSelect) voiceSelect.value = selectedVoice;
+    if (audioAnnouncer) audioAnnouncer.setVoice(selectedVoice);
 
     // Load speaker setting from device config
     const speakerSection = document.getElementById("speakerSection");
@@ -2020,6 +2047,109 @@ function stopRssiStreaming() {
       .then(function(r) { if (r.ok) rssiSending = false; });
   }
 }
+function updateRaceNotesIndicator() {
+  if (!raceNotesIndicator || !raceNotesInput) return;
+  const hasNotes = raceNotesInput.value.trim().length > 0;
+  raceNotesIndicator.style.display = hasNotes ? "inline-flex" : "none";
+}
+
+function syncOpenRaceNotesOnRaceEndToggle() {
+  const notesToggle = document.getElementById("openRaceNotesOnRaceEnd");
+  if (notesToggle) {
+    notesToggle.checked = openRaceNotesOnRaceEnd;
+  }
+}
+
+function toggleOpenRaceNotesOnRaceEnd(enabled) {
+  openRaceNotesOnRaceEnd = !!enabled;
+  localStorage.setItem("openRaceNotesOnRaceEnd", openRaceNotesOnRaceEnd ? "1" : "0");
+  syncOpenRaceNotesOnRaceEndToggle();
+}
+
+function updateSavedRaceNotes(timestamp, notes) {
+  const existingRace = raceHistoryData.find((race) => race.timestamp === timestamp) || {};
+  const formData = new URLSearchParams();
+  formData.append("timestamp", String(timestamp));
+  formData.append("name", existingRace.name || "");
+  formData.append("tag", existingRace.tag || "");
+  formData.append("notes", notes);
+  if (typeof existingRace.totalDistance === "number") {
+    formData.append("totalDistance", existingRace.totalDistance);
+  }
+  return fetch("/races/update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: formData,
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      if (!data || data.status !== "OK") {
+        throw new Error("Race update failed");
+      }
+      return true;
+    });
+}
+
+function saveRaceNotes() {
+  if (!raceNotesInput) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  const notes = raceNotesInput.value.trim();
+  updateRaceNotesIndicator();
+
+  const raceInProgress = stopRaceButton && !stopRaceButton.disabled;
+  if (raceInProgress) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  const timestampPromise = currentRaceSessionTimestamp ? Promise.resolve(currentRaceSessionTimestamp) : pendingRaceSavePromise;
+  if (!timestampPromise) {
+    closeRaceNotesModal();
+    return;
+  }
+
+  timestampPromise
+    .then((timestamp) => {
+      if (!timestamp) {
+        return false;
+      }
+      return updateSavedRaceNotes(timestamp, notes);
+    })
+    .then((saved) => {
+      if (saved) {
+        loadRaceHistory();
+      }
+      closeRaceNotesModal();
+    })
+    .catch((error) => {
+      console.error("Error saving race notes:", error);
+      alert(i18n.t("messages.race_update_error"));
+    });
+}
+
+function openRaceNotesModal() {
+  const modal = document.getElementById("raceNotesModal");
+  if (!modal) return;
+  modal.classList.add("active");
+  if (raceNotesInput) {
+    setTimeout(() => raceNotesInput.focus(), 50);
+  }
+}
+
+function closeRaceNotesModal() {
+  const modal = document.getElementById("raceNotesModal");
+  if (!modal) return;
+  modal.classList.remove("active");
+}
+
+if (raceNotesInput) {
+  raceNotesInput.addEventListener("input", updateRaceNotesIndicator);
+}
 
 function openTab(evt, tabName) {
   // Declare all variables
@@ -2058,6 +2188,11 @@ function openTab(evt, tabName) {
 
   // Update debug overlay visibility
   updateDebugOverlay();
+
+  // Notes modal only applies to race tab
+  if (tabName !== "race") {
+    closeRaceNotesModal();
+  }
 
   // Load race history when opening history tab
   if (tabName === "history") {
@@ -2117,6 +2252,11 @@ async function saveConfig() {
   const themeSelect = document.getElementById("themeSelect");
   const voiceSelect = document.getElementById("voiceSelect");
   const lapFormatSelect = document.getElementById("lapFormatSelect");
+  const normalizedSelectedVoice = normalizeVoiceSelectionValue(
+    voiceSelect ? voiceSelect.value : selectedVoice
+  );
+  selectedVoice = normalizedSelectedVoice;
+  if (voiceSelect) voiceSelect.value = normalizedSelectedVoice;
 
   // Convert hex color to integer
   let pilotColorInt = 0x0080ff; // default
@@ -2206,7 +2346,7 @@ async function saveConfig() {
     customTextColor: customTextColor ? customTextColor.value : "#B0BEC5",
     customMenuColor: customMenuColor ? customMenuColor.value : "#37474F",
     customSecondaryColor: customSecondaryColor ? customSecondaryColor.value : "#607D8B",
-    selectedVoice: voiceSelect ? voiceSelect.value : "default",
+    selectedVoice: normalizedSelectedVoice,
     lapFormat: lapFormatSelect ? lapFormatSelect.value : "full",
     ssid: ssidInput.value,
     pwd: pwdInput.value,
@@ -2835,7 +2975,8 @@ function saveLapFormat() {
 function saveVoiceSelection() {
   const voiceSelect = document.getElementById("voiceSelect");
   if (voiceSelect) {
-    selectedVoice = voiceSelect.value;
+    selectedVoice = normalizeVoiceSelectionValue(voiceSelect.value);
+    voiceSelect.value = selectedVoice;
     console.log("Voice selection saved:", selectedVoice);
 
     // Update audioAnnouncer voice (this clears cache and updates voice directory)
@@ -3312,6 +3453,7 @@ async function startRace() {
   const raceCountdownNumberEl = document.getElementById("raceCountdownNumber");
 
   updateLapCounter();
+  currentRaceSessionTimestamp = null;
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
 
@@ -3460,9 +3602,16 @@ function stopRace() {
   // Stop distance polling
   stopDistancePolling();
 
+  const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
   // Auto-save race if there are laps
   if (lapTimes.length > 0) {
-    saveCurrentRace();
+    saveCurrentRace().then(() => {
+      if (shouldOpenRaceNotes) {
+        openRaceNotesModal();
+      }
+    });
+  } else if (shouldOpenRaceNotes) {
+    openRaceNotesModal();
   }
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
@@ -3488,9 +3637,9 @@ function clearLaps() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  // Auto-save race if there are laps before clearing
-  if (lapTimes.length > 0) {
-    saveCurrentRace();
+  // Auto-save race if there are laps before clearing (only if it wasn't already saved on stopRace)
+  if (lapTimes.length > 0 && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+    saveCurrentRace({ setAsCurrentSession: false });
   }
 
   var tableHeaderRowCount = 1;
@@ -3501,6 +3650,11 @@ function clearLaps() {
   lapNo = -1;
   lapTimes = [];
   updateLapCounter();
+  if (raceNotesInput) {
+    raceNotesInput.value = "";
+  }
+  updateRaceNotesIndicator();
+  currentRaceSessionTimestamp = null;
   
   // Reset current lap timer display
   currentLapStartMs = 0;
@@ -4571,12 +4725,49 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
     </div>
   `;
 }
+function renderFastest3ConsecPanel(stats) {
+  if (!stats || stats.fastest3ConsecValue == null) {
+    return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
+  }
+  return `
+    <div class="stats-boxes" style="max-width: 420px; margin: 0 auto;">
+      <div class="stat-box">
+        <div class="stat-label">Fastest 3 Consecutive</div>
+        <div class="stat-value">${stats.fastest3ConsecValue.toFixed(2)}s</div>
+        <div class="stat-sublabel">${stats.fastest3ConsecLaps}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAlwaysOnRaceStats(stats) {
+  const best3El = document.getElementById("raceAlwaysBest3");
+  const medianEl = document.getElementById("raceAlwaysMedian");
+  if (!best3El || !medianEl) return;
+
+  if (!stats) {
+    best3El.textContent = "--";
+    medianEl.textContent = "--";
+    return;
+  }
+
+  best3El.textContent = stats.best3Value == null ? "--" : `${stats.best3Value.toFixed(2)}s`;
+  medianEl.textContent = `${stats.median.toFixed(2)}s`;
+}
 
 // ============================================
-// Race Analysis (Multi-Pilot Sync Modes)
+// Race Analysis (Multi-Pilot + Personal Tabbed Analytics)
 // ============================================
-
-let currentRaceAnalysisMode = "lapTimes";
+const MAX_ENABLED_RACE_ANALYTICS = 3;
+const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsDisplaySettings";
+const RACE_ANALYTICS_DEFAULTS = {
+  fastestLap: true,
+  fastest3Consec: true,
+  lapTimes: true,
+  consistency: false,
+};
+let raceAnalyticsDisplaySettings = loadRaceAnalyticsDisplaySettings();
+let currentRaceAnalyticsTab = "fastestLap";
 
 // Pilot color palette for charts
 const pilotColors = [
@@ -4584,39 +4775,187 @@ const pilotColors = [
   "#FF9F40", "#7CFC00", "#FF69B4", "#00CED1", "#FFD700"
 ];
 
-function switchRaceAnalysisMode(mode) {
-  currentRaceAnalysisMode = mode;
-  // Update tab styling
-  const tabs = document.querySelectorAll("#raceAnalysis .analysis-tab");
-  tabs.forEach((tab, idx) => {
-    tab.classList.toggle("active", (mode === "lapTimes" && idx === 0) || (mode === "consistency" && idx === 1));
-  });
-  // Re-render analysis
+function loadRaceAnalyticsDisplaySettings() {
+  try {
+    const raw = localStorage.getItem(RACE_ANALYTICS_STORAGE_KEY);
+    if (!raw) return { ...RACE_ANALYTICS_DEFAULTS };
+    const parsed = JSON.parse(raw);
+    return {
+      fastestLap: parsed.fastestLap !== false,
+      fastest3Consec: parsed.fastest3Consec !== false,
+      lapTimes: parsed.lapTimes !== false,
+      consistency: parsed.consistency !== false,
+    };
+  } catch (err) {
+    console.warn("[RaceAnalysis] Failed to parse display settings, using defaults:", err);
+    return { ...RACE_ANALYTICS_DEFAULTS };
+  }
+}
+
+function saveRaceAnalyticsDisplaySettings() {
+  localStorage.setItem(RACE_ANALYTICS_STORAGE_KEY, JSON.stringify(raceAnalyticsDisplaySettings));
+}
+
+function getEnabledRaceAnalyticsCount() {
+  return Object.values(raceAnalyticsDisplaySettings).filter(Boolean).length;
+}
+
+function getEnabledRaceAnalyticsTabs() {
+  const order = ["fastestLap", "fastest3Consec", "lapTimes", "consistency"];
+  return order.filter((key) => !!raceAnalyticsDisplaySettings[key]);
+}
+
+function getRaceAnalyticsTabLabel(tabKey) {
+  if (tabKey === "fastestLap") return "Fastest Lap";
+  if (tabKey === "fastest3Consec") return "Fastest 3 Consecutive";
+  if (tabKey === "lapTimes") return "Lap Times";
+  if (tabKey === "consistency") return "Consistency";
+  return tabKey;
+}
+
+function syncRaceAnalyticsToggleUI() {
+  const fastestLapToggle = document.getElementById("raceAnalyticsToggleFastestLap");
+  if (fastestLapToggle) fastestLapToggle.checked = !!raceAnalyticsDisplaySettings.fastestLap;
+  const fastest3ConsecToggle = document.getElementById("raceAnalyticsToggleFastest3Consec");
+  if (fastest3ConsecToggle) fastest3ConsecToggle.checked = !!raceAnalyticsDisplaySettings.fastest3Consec;
+  const lapToggle = document.getElementById("raceAnalyticsToggleLapTimes");
+  if (lapToggle) lapToggle.checked = !!raceAnalyticsDisplaySettings.lapTimes;
+  const consistencyToggle = document.getElementById("raceAnalyticsToggleConsistency");
+  if (consistencyToggle) consistencyToggle.checked = !!raceAnalyticsDisplaySettings.consistency;
+}
+
+function toggleRaceAnalyticsPanel(panelKey, enabled) {
+  if (!(panelKey in RACE_ANALYTICS_DEFAULTS)) return;
+
+  const alreadyEnabled = !!raceAnalyticsDisplaySettings[panelKey];
+  if (enabled && !alreadyEnabled && getEnabledRaceAnalyticsCount() >= MAX_ENABLED_RACE_ANALYTICS) {
+    alert(`You can enable up to ${MAX_ENABLED_RACE_ANALYTICS} analytics panels at once.`);
+    syncRaceAnalyticsToggleUI();
+    return;
+  }
+
+  raceAnalyticsDisplaySettings[panelKey] = enabled;
+  if (!raceAnalyticsDisplaySettings[currentRaceAnalyticsTab]) {
+    const fallback = getEnabledRaceAnalyticsTabs()[0];
+    currentRaceAnalyticsTab = fallback || "fastestLap";
+  }
+  saveRaceAnalyticsDisplaySettings();
+  syncRaceAnalyticsToggleUI();
+  updateAnalysisSectionVisibility();
   updateRaceAnalysisView();
 }
 
+function switchRaceAnalyticsTab(tabKey) {
+  if (!raceAnalyticsDisplaySettings[tabKey]) return;
+  currentRaceAnalyticsTab = tabKey;
+  updateRaceAnalysisView();
+}
+function computeRaceStats() {
+  const validLaps = lapTimes.slice(1);
+  if (validLaps.length === 0) {
+    return null;
+  }
+
+  const fastest = Math.min(...validLaps);
+  const fastestIndex = validLaps.indexOf(fastest) + 1;
+
+  let fastest3ConsecValue = null;
+  let fastest3ConsecLaps = null;
+  if (validLaps.length >= 3) {
+    let best = Infinity;
+    let bestStart = -1;
+    for (let i = 0; i <= validLaps.length - 3; i++) {
+      const total = validLaps[i] + validLaps[i + 1] + validLaps[i + 2];
+      if (total < best) {
+        best = total;
+        bestStart = i + 1;
+      }
+    }
+    fastest3ConsecValue = best;
+    fastest3ConsecLaps = `L${bestStart}-L${bestStart + 1}-L${bestStart + 2}`;
+  }
+
+  const sorted = [...validLaps].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+
+  let best3Value = null;
+  let best3Laps = null;
+  if (validLaps.length >= 3) {
+    const top3 = validLaps
+      .map((time, idx) => ({ time, idx: idx + 1 }))
+      .sort((a, b) => a.time - b.time)
+      .slice(0, 3);
+    best3Value = top3.reduce((s, l) => s + l.time, 0);
+    best3Laps = top3.map((l) => `L${l.idx}`).sort().join(", ");
+  }
+  return {
+    fastest,
+    fastestIndex,
+    fastest3ConsecValue,
+    fastest3ConsecLaps,
+    best3Value,
+    best3Laps,
+    median,
+  };
+}
+
+function renderFastestLapPanel(stats) {
+  if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
+
+  return `
+    <div class="stats-boxes" style="max-width: 360px; margin: 0 auto;">
+      <div class="stat-box">
+        <div class="stat-label">Fastest Lap</div>
+        <div class="stat-value">${stats.fastest.toFixed(2)}s</div>
+        <div class="stat-sublabel">Lap ${stats.fastestIndex}</div>
+      </div>
+    </div>
+  `;
+}
+
 function updateRaceAnalysisView() {
-  // Collect all pilots' data
-  const pilots = collectAllPilotsData();
-  
-  if (pilots.length === 0 || pilots.every(p => p.lapTimes.length < 2)) {
-    document.getElementById("raceAnalysisContent").innerHTML = '<p class="no-data">Complete at least 2 laps to see race analysis</p>';
-    document.getElementById("raceAnalysisLegend").innerHTML = '';
+  const tabsContainer = document.getElementById("raceAnalyticsTabs");
+  const contentContainer = document.getElementById("raceAnalysisContent");
+  const emptyMessage = document.getElementById("raceAnalysisEmptyMessage");
+  const enabledTabs = getEnabledRaceAnalyticsTabs();
+  const stats = computeRaceStats();
+
+  renderAlwaysOnRaceStats(stats);
+
+  if (emptyMessage) emptyMessage.style.display = enabledTabs.length > 0 ? "none" : "block";
+  if (!tabsContainer || !contentContainer) return;
+
+  if (enabledTabs.length === 0) {
+    tabsContainer.innerHTML = "";
+    contentContainer.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
     return;
   }
-  
-  // Render the appropriate chart
-  switch (currentRaceAnalysisMode) {
-    case "lapTimes":
-      renderLapTimesChart(pilots);
-      break;
-    case "consistency":
-      renderConsistencyChart(pilots);
-      break;
+
+  if (!enabledTabs.includes(currentRaceAnalyticsTab)) {
+    currentRaceAnalyticsTab = enabledTabs[0];
   }
-  
-  // Render legend
-  renderRaceAnalysisLegend(pilots);
+
+  tabsContainer.innerHTML = enabledTabs
+    .map((tabKey) => `<button class="analysis-tab ${tabKey === currentRaceAnalyticsTab ? "active" : ""}" onclick="switchRaceAnalyticsTab('${tabKey}')">${getRaceAnalyticsTabLabel(tabKey)}</button>`)
+    .join("");
+  if (currentRaceAnalyticsTab === "fastestLap") {
+    contentContainer.innerHTML = renderFastestLapPanel(stats);
+    return;
+  }
+  if (currentRaceAnalyticsTab === "fastest3Consec") {
+    contentContainer.innerHTML = renderFastest3ConsecPanel(stats);
+    return;
+  }
+
+  const pilots = collectAllPilotsData();
+  if (currentRaceAnalyticsTab === "lapTimes") {
+    renderLapTimesChart(pilots, "raceAnalysisContent");
+    return;
+  }
+  if (currentRaceAnalyticsTab === "consistency") {
+    renderConsistencyChart(pilots, "raceAnalysisContent");
+  }
 }
 
 function collectAllPilotsData() {
@@ -4649,8 +4988,9 @@ function collectAllPilotsData() {
   return pilots;
 }
 
-function renderLapTimesChart(pilots) {
-  const container = document.getElementById("raceAnalysisContent");
+function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
   
   // Find max laps and time range
   let maxLaps = 0;
@@ -4759,8 +5099,9 @@ function renderLapTimesChart(pilots) {
   container.innerHTML = svg;
 }
 
-function renderConsistencyChart(pilots) {
-  const container = document.getElementById("raceAnalysisContent");
+function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
+  const container = document.getElementById(containerId);
+  if (!container) return;
   
   // Calculate box plot statistics for each pilot
   const pilotStats = pilots.map(pilot => {
@@ -4890,40 +5231,26 @@ function renderConsistencyChart(pilots) {
   container.innerHTML = svg;
 }
 
-function renderRaceAnalysisLegend(pilots) {
-  const legend = document.getElementById("raceAnalysisLegend");
-  let html = '';
-  
-  pilots.forEach(pilot => {
-    const validLaps = pilot.lapTimes.slice(1);
-    const lapCount = validLaps.length;
-    const fastest = lapCount > 0 ? Math.min(...validLaps).toFixed(2) : '--';
-    html += `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background-color: var(--bg-secondary); border-radius: 4px; border-left: 4px solid ${pilot.color};">
-        <span style="font-weight: bold;">${pilot.name}${pilot.isLocal ? ' *' : ''}</span>
-        <span style="color: var(--secondary-color); font-size: 12px;">${lapCount} laps, best: ${fastest}s</span>
-      </div>
-    `;
-  });
-  
-  legend.innerHTML = html;
-}
 
 // Toggle between Lap Analysis and Race Analysis based on sync mode
 function updateAnalysisSectionVisibility() {
   const lapAnalysis = document.getElementById("lapAnalysis");
   const raceAnalysis = document.getElementById("raceAnalysis");
-  
-  if (raceSyncMode === 1 || raceSyncMode === 2) {
-    // Sync mode - show Race Analysis
+  const anyAnalyticsEnabled =
+    !!raceAnalyticsDisplaySettings.fastestLap ||
+    !!raceAnalyticsDisplaySettings.fastest3Consec ||
+    !!raceAnalyticsDisplaySettings.lapTimes ||
+    !!raceAnalyticsDisplaySettings.consistency;
+
+  if (anyAnalyticsEnabled) {
+    // Show Race Analysis panels selected via toggles in both personal and sync modes.
     if (lapAnalysis) lapAnalysis.style.display = "none";
     if (raceAnalysis) raceAnalysis.style.display = "block";
     updateRaceAnalysisView();
   } else {
-    // Personal mode - show Lap Analysis
-    if (lapAnalysis) lapAnalysis.style.display = "block";
+    // All toggles off => no analytics content shown.
+    if (lapAnalysis) lapAnalysis.style.display = "none";
     if (raceAnalysis) raceAnalysis.style.display = "none";
-    updateAnalysisView();
   }
 }
 
@@ -4931,8 +5258,20 @@ function updateAnalysisSectionVisibility() {
 let raceHistoryData = [];
 let currentDetailRace = null;
 
-function saveCurrentRace() {
-  if (lapTimes.length === 0) return;
+function escapeHtml(input) {
+  return String(input || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function saveCurrentRace(options = {}) {
+  const { setAsCurrentSession = true } = options;
+  if (lapTimes.length === 0) return Promise.resolve(null);
+  if (currentRaceSessionTimestamp && setAsCurrentSession) return Promise.resolve(currentRaceSessionTimestamp);
+  if (pendingRaceSavePromise) return pendingRaceSavePromise;
 
   // Calculate stats (excluding Gate 1)
   const validLaps = lapTimes.slice(1);
@@ -4951,6 +5290,7 @@ function saveCurrentRace() {
   const pilotCallsign = document.getElementById("pcallsign")?.value || "";
   const bandValue = bandSelect.options[bandSelect.selectedIndex].value;
   const channelValue = parseInt(channelSelect.options[channelSelect.selectedIndex].value);
+  const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
 
   // Calculate total race distance: track length per lap × number of laps
   let totalRaceDistance = 0;
@@ -4963,8 +5303,9 @@ function saveCurrentRace() {
     console.warn(`Did you select a track before starting the race? currentTrackId=${currentTrackId}`);
   }
 
+  const raceTimestamp = Math.floor(Date.now() / 1000);
   const raceData = {
-    timestamp: Math.floor(Date.now() / 1000),
+    timestamp: raceTimestamp,
     lapTimes: lapTimes.map((t) => Math.round(t * 1000)), // Convert to milliseconds
     fastestLap: Math.round(fastest * 1000),
     medianLap: Math.round(median * 1000),
@@ -4974,6 +5315,7 @@ function saveCurrentRace() {
     frequency: frequency,
     band: bandValue,
     channel: channelValue,
+    notes: notes,
     trackId: currentTrackId || 0,
     trackName: currentTrackName || "",
     totalDistance: totalRaceDistance,
@@ -5022,7 +5364,7 @@ function saveCurrentRace() {
     console.log(`[Race] Saving multi-pilot race with ${pilots.length} pilots`);
   }
 
-  fetch("/races/save", {
+  pendingRaceSavePromise = fetch("/races/save", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -5032,10 +5374,25 @@ function saveCurrentRace() {
   })
     .then((response) => response.json())
     .then((data) => {
+      if (!data || data.status !== "OK") {
+        throw new Error("Race save failed");
+      }
       console.log("Race saved:", data);
+      if (setAsCurrentSession) {
+        currentRaceSessionTimestamp = raceTimestamp;
+      }
       loadRaceHistory();
+      return raceTimestamp;
     })
-    .catch((error) => console.error("Error saving race:", error));
+    .catch((error) => {
+      console.error("Error saving race:", error);
+      return null;
+    })
+    .finally(() => {
+      pendingRaceSavePromise = null;
+    });
+
+  return pendingRaceSavePromise;
 }
 
 function loadRaceHistory() {
@@ -5071,6 +5428,8 @@ function renderRaceHistory() {
     const freqDisplay = race.frequency ? `${race.band}${race.channel} (${race.frequency}MHz)` : "";
     const trackDisplay = race.trackName ? race.trackName : "";
     const distanceDisplay = race.totalDistance ? `${race.totalDistance.toFixed(1)}m` : "";
+    const notes = (race.notes || "").trim();
+    const notesPreview = notes.length > 140 ? notes.substring(0, 137) + "..." : notes;
     
     // Multi-pilot race detection
     const isMultiPilot = race.pilots && race.pilots.length > 1;
@@ -5103,6 +5462,7 @@ function renderRaceHistory() {
             ${pilotsDisplay}
             ${freqDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_channel", { n: freqDisplay }) + "</div>" : ""}
             ${trackDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_track", { n: trackDisplay + (distanceDisplay ? " (" + distanceDisplay + ")" : "") }) + "</div>" : ""}
+            ${notesPreview ? '<div class="race-notes-preview">' + i18n.t("history.item_notes", { n: escapeHtml(notesPreview) }) + "</div>" : ""}
           </div>
         </div>
         <div class="race-item-stats">
@@ -5239,12 +5599,24 @@ function viewRaceDetails(index) {
   const medianEl = document.getElementById("detailMedian");
   const best3El = document.getElementById("detailBest3");
   const totalTimeEl = document.getElementById("detailTotalTime");
+  const notesContainerEl = document.getElementById("raceDetailsNotes");
+  const notesTextEl = document.getElementById("raceDetailsNotesText");
 
   if (titleEl) titleEl.textContent = i18n.t("history.details_title_with_date", { date: dateStr });
   if (fastestEl) fastestEl.textContent = (race.fastestLap / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (medianEl) medianEl.textContent = (race.medianLap / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (best3El) best3El.textContent = (race.best3LapsTotal / 1000).toFixed(2) + i18n.t("race.table.seconds_short");
   if (totalTimeEl) totalTimeEl.textContent = totalTime.toFixed(2) + i18n.t("race.table.seconds_short");
+  if (notesContainerEl && notesTextEl) {
+    const notes = (race.notes || "").trim();
+    if (notes) {
+      notesTextEl.textContent = notes;
+      notesContainerEl.style.display = "block";
+    } else {
+      notesTextEl.textContent = "";
+      notesContainerEl.style.display = "none";
+    }
+  }
 
   // Render the race timeline
   renderRaceTimeline(race);
@@ -5603,7 +5975,7 @@ function updateRaceDetailTabs() {
       <button class="analysis-tab active" onclick="switchDetailMode('history')" data-i18n="analysis.tab_history">Lap History</button>
       <button class="analysis-tab" onclick="switchDetailMode('fastestRound')" data-i18n="analysis.tab_fastest">Fastest Round (3 Laps)</button>
     `;
-    i18n.apply();
+    i18n.translatePage();
   }
 }
 
@@ -6035,6 +6407,7 @@ function openEditModal(index) {
   document.getElementById("raceName").value = race.name || "";
   document.getElementById("raceTag").value = race.tag || "";
   document.getElementById("raceDistance").value = race.totalDistance || 0;
+  document.getElementById("raceEditNotes").value = race.notes || "";
 
   // Populate lap times for marshalling mode
   renderEditLapsList(race.lapTimes);
@@ -6122,6 +6495,7 @@ function saveRaceEdit() {
   const name = document.getElementById("raceName").value;
   const tag = document.getElementById("raceTag").value;
   const distance = parseFloat(document.getElementById("raceDistance").value) || 0;
+  const notes = document.getElementById("raceEditNotes").value.trim();
 
   // Collect updated lap times from inputs
   const lapInputs = document.querySelectorAll('#editLapsList input[type="number"]');
@@ -6156,6 +6530,7 @@ function saveRaceEdit() {
   formData.append("name", name);
   formData.append("tag", tag);
   formData.append("totalDistance", distance);
+  formData.append("notes", notes);
 
   fetch("/races/update", {
     method: "POST",
@@ -6340,8 +6715,8 @@ function downloadConfig() {
         theme: localStorage.getItem("theme") || "oceanic",
         // Audio settings
         audioEnabled: audioEnabled,
-        lapFormat: localStorage.getItem("lapFormat") || "full",
-        selectedVoice: localStorage.getItem("selectedVoice") || "default",
+        lapFormat: document.getElementById("lapFormatSelect")?.value || lapFormat || "full",
+        selectedVoice: normalizeVoiceSelectionValue(document.getElementById("voiceSelect")?.value || selectedVoice || "default"),
         ttsEngine: localStorage.getItem("ttsEngine") || "webspeech",
         // Pilot frontend settings
         pilotCallsign: localStorage.getItem("pilotCallsign") || "",
@@ -6442,7 +6817,7 @@ function importConfig(input) {
             localStorage.setItem("lapFormat", config.lapFormat);
           }
           if (config.selectedVoice) {
-            localStorage.setItem("selectedVoice", config.selectedVoice);
+            localStorage.setItem("selectedVoice", normalizeVoiceSelectionValue(config.selectedVoice));
           }
           if (config.ttsEngine) {
             localStorage.setItem("ttsEngine", config.ttsEngine);
@@ -6717,19 +7092,98 @@ function showResults() {
   document.getElementById("wizardManualMarking").style.display = "none";
   document.getElementById("wizardResults").style.display = "block";
   wizardState.phase = "results";
+  setupWizardResultInputHandlers();
 
   updateResultsDisplay();
   drawResultsChart();
   setupIgnoreRegionHandlers();
 }
 
+function clampWizardResultValue(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function applyWizardResultInputEdits() {
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
+
+  if (enterInput) {
+    var enterVal = parseInt(enterInput.value, 10);
+    if (!isNaN(enterVal)) {
+      wizardState.calculatedEnter = clampWizardResultValue(Math.round(enterVal), 50, 255);
+    }
+  }
+
+  if (exitInput) {
+    var exitVal = parseInt(exitInput.value, 10);
+    if (!isNaN(exitVal)) {
+      wizardState.calculatedExit = clampWizardResultValue(Math.round(exitVal), 50, 255);
+    }
+  }
+
+  if (minLapInput) {
+    var minLapSeconds = parseFloat(minLapInput.value);
+    if (!isNaN(minLapSeconds)) {
+      wizardState.calculatedMinLap = clampWizardResultValue(Math.round(minLapSeconds * 1000), 1000, 20000);
+    }
+  }
+}
+
+function setupWizardResultInputHandlers() {
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
+
+  function onInputChanged() {
+    applyWizardResultInputEdits();
+    drawResultsChart();
+  }
+
+  function onInputBlur() {
+    applyWizardResultInputEdits();
+    updateResultsDisplay();
+    drawResultsChart();
+  }
+
+  if (enterInput && !enterInput.dataset.bound) {
+    enterInput.addEventListener("input", onInputChanged);
+    enterInput.addEventListener("blur", onInputBlur);
+    enterInput.dataset.bound = "1";
+  }
+
+  if (exitInput && !exitInput.dataset.bound) {
+    exitInput.addEventListener("input", onInputChanged);
+    exitInput.addEventListener("blur", onInputBlur);
+    exitInput.dataset.bound = "1";
+  }
+
+  if (minLapInput && !minLapInput.dataset.bound) {
+    minLapInput.addEventListener("input", onInputChanged);
+    minLapInput.addEventListener("blur", onInputBlur);
+    minLapInput.dataset.bound = "1";
+  }
+}
+
 function updateResultsDisplay() {
   var activePeaks = getActivePeaks();
   var tooFew = activePeaks.length < 3;
+  var enterInput = document.getElementById("calculatedEnterRssi");
+  var exitInput = document.getElementById("calculatedExitRssi");
+  var minLapInput = document.getElementById("calculatedMinLap");
 
-  document.getElementById("calculatedEnterRssi").textContent = tooFew ? "--" : wizardState.calculatedEnter;
-  document.getElementById("calculatedExitRssi").textContent = tooFew ? "--" : wizardState.calculatedExit;
-  document.getElementById("calculatedMinLap").textContent = tooFew ? "--" : (wizardState.calculatedMinLap / 1000).toFixed(1) + "s";
+  if (enterInput) {
+    enterInput.value = tooFew ? "" : wizardState.calculatedEnter;
+    enterInput.disabled = tooFew;
+  }
+  if (exitInput) {
+    exitInput.value = tooFew ? "" : wizardState.calculatedExit;
+    exitInput.disabled = tooFew;
+  }
+  if (minLapInput) {
+    minLapInput.value = tooFew ? "" : (wizardState.calculatedMinLap / 1000).toFixed(1);
+    minLapInput.disabled = tooFew;
+  }
   document.getElementById("calculatedPeakCount").textContent = activePeaks.length;
   document.getElementById("calculatedNoiseCeiling").textContent = wizardState.noiseCeiling;
   document.getElementById("calculatedAvgPeak").textContent = tooFew ? "--" : Math.round(wizardState.avgPeak);
@@ -7110,6 +7564,7 @@ function calculateThresholdsManual() {
 }
 
 function applyCalculatedThresholds() {
+  applyWizardResultInputEdits();
   enterRssiInput.value = wizardState.calculatedEnter;
   exitRssiInput.value = wizardState.calculatedExit;
   updateEnterRssi(enterRssiInput, wizardState.calculatedEnter);
@@ -7308,19 +7763,25 @@ function resetWiFiSettings() {
 
 // Settings Modal Functions
 // (openSettingsModal is defined later with full config loading)
+// Race Notes Modal Functions
+// (openRaceNotesModal/closeRaceNotesModal are defined above)
 
 function closeSettingsModal() {
   const modal = document.getElementById("settingsModal");
   if (modal) {
-    modal.classList.remove("active");
+  modal.classList.remove("active");
   }
 }
 
 // Close modal when clicking on the overlay background
 document.addEventListener("click", function (event) {
   const modal = document.getElementById("settingsModal");
+    const notesModal = document.getElementById("raceNotesModal");
   if (modal && event.target === modal) {
     closeSettingsModal();
+  }
+  if (notesModal && event.target === notesModal) {
+    closeRaceNotesModal();
   }
 });
 
@@ -7357,8 +7818,13 @@ function switchSettingsSection(ev, sectionName) {
 document.addEventListener("keydown", function (event) {
   if (event.key === "Escape") {
     const modal = document.getElementById("settingsModal");
+    const notesModal = document.getElementById("raceNotesModal");
     if (modal && modal.classList.contains("active")) {
       closeSettingsModal();
+      return;
+    }
+    if (notesModal && notesModal.classList.contains("active")) {
+      closeRaceNotesModal();
     }
   }
 });
@@ -8438,9 +8904,11 @@ function testWebhook() {
 
 // Load tracks when settings modal opens
 function openSettingsModal() {
+  closeRaceNotesModal();
   const modal = document.getElementById("settingsModal");
   if (modal) {
-    modal.classList.add("active");
+  modal.classList.add("active");
+    syncOpenRaceNotesOnRaceEndToggle();
 
     // Load full config to populate all settings
     _refreshingFromDevice = true;
@@ -8546,9 +9014,10 @@ function openSettingsModal() {
         // Voice and lap format settings
         const voiceSelect = document.getElementById("voiceSelect");
         const lapFormatSelect = document.getElementById("lapFormatSelect");
-        if (voiceSelect && config.selectedVoice) {
-          voiceSelect.value = config.selectedVoice;
-          selectedVoice = config.selectedVoice;
+        if (voiceSelect) {
+          selectedVoice = normalizeVoiceSelectionValue(config.selectedVoice || "default");
+          voiceSelect.value = selectedVoice;
+          if (audioAnnouncer) audioAnnouncer.setVoice(selectedVoice);
         }
         if (lapFormatSelect && config.lapFormat) {
           lapFormatSelect.value = config.lapFormat;

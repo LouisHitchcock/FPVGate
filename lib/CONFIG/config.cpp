@@ -11,6 +11,31 @@ static float sanitizeBatteryDivider(float ratio) {
 #endif
     return ratio;
 }
+
+static const char* normalizeSelectedVoiceValue(const char* voiceValue) {
+    if (!voiceValue || !voiceValue[0]) return "default";
+
+    if (strcmp(voiceValue, "piper") == 0) return "default";
+
+    if (strcmp(voiceValue, "german") == 0 || strcmp(voiceValue, "voice_de") == 0 || strcmp(voiceValue, "voice_german_de") == 0) return "de";
+    if (strcmp(voiceValue, "spanish") == 0 || strcmp(voiceValue, "voice_es") == 0 || strcmp(voiceValue, "voice_spanish_es") == 0) return "es";
+    if (strcmp(voiceValue, "french") == 0 || strcmp(voiceValue, "voice_fr") == 0 || strcmp(voiceValue, "voice_french_fr") == 0) return "fr";
+
+    if (strcmp(voiceValue, "voice_default_en") == 0) return "default";
+    if (strcmp(voiceValue, "voice_rachel_en") == 0) return "rachel";
+    if (strcmp(voiceValue, "voice_adam_en") == 0) return "adam";
+    if (strcmp(voiceValue, "voice_antoni_en") == 0) return "antoni";
+    if (strcmp(voiceValue, "voice_matilda_en") == 0) return "matilda";
+
+    const char* allowed[] = {"default", "rachel", "adam", "antoni", "matilda", "de", "es", "fr", "webspeech", nullptr};
+    for (int i = 0; allowed[i] != nullptr; i++) {
+        if (strcmp(voiceValue, allowed[i]) == 0) {
+            return voiceValue;
+        }
+    }
+
+    return "default";
+}
 #include "storage.h"
 #include "battery.h"
 
@@ -344,6 +369,13 @@ void Config::load(void) {
             conf.enterRssi = 72;
             conf.exitRssi = 68;
         }
+        modified = true;
+    }
+
+    const char* normalizedVoice = normalizeSelectedVoiceValue(conf.selectedVoice);
+    if (strcmp(normalizedVoice, conf.selectedVoice) != 0) {
+        DEBUG("Normalizing selectedVoice from '%s' to '%s'\n", conf.selectedVoice, normalizedVoice);
+        strlcpy(conf.selectedVoice, normalizedVoice, sizeof(conf.selectedVoice));
         modified = true;
     }
 }
@@ -718,9 +750,13 @@ void Config::fromJson(JsonObject source) {
         strlcpy(conf.theme, source["theme"] | "oceanic", sizeof(conf.theme));
         modified = true;
     }
-    if (!source["selectedVoice"].isNull() && source["selectedVoice"] != conf.selectedVoice) {
-        strlcpy(conf.selectedVoice, source["selectedVoice"] | "default", sizeof(conf.selectedVoice));
-        modified = true;
+    if (!source["selectedVoice"].isNull()) {
+        const char* requestedVoice = source["selectedVoice"] | "default";
+        const char* normalizedVoice = normalizeSelectedVoiceValue(requestedVoice);
+        if (strcmp(normalizedVoice, conf.selectedVoice) != 0) {
+            strlcpy(conf.selectedVoice, normalizedVoice, sizeof(conf.selectedVoice));
+            modified = true;
+        }
     }
     if (!source["lapFormat"].isNull() && source["lapFormat"] != conf.lapFormat) {
         strlcpy(conf.lapFormat, source["lapFormat"] | "full", sizeof(conf.lapFormat));
@@ -1568,7 +1604,7 @@ void Config::setDefaults(void) {
     strlcpy(conf.pilotPhonetic, "Louie", sizeof(conf.pilotPhonetic));  // Default phonetic
     conf.pilotColor = 0x0080FF;  // Default blue color
     strlcpy(conf.theme, "oceanic", sizeof(conf.theme));  // Default theme
-    strlcpy(conf.selectedVoice, "piper", sizeof(conf.selectedVoice));  // Default voice
+    strlcpy(conf.selectedVoice, "default", sizeof(conf.selectedVoice));  // Default voice
     strlcpy(conf.lapFormat, "timeonly", sizeof(conf.lapFormat));  // Default lap format
     strlcpy(conf.ssid, "", sizeof(conf.ssid));  // Empty WiFi credentials
     strlcpy(conf.password, "", sizeof(conf.password));  // Empty WiFi credentials

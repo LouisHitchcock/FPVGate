@@ -550,7 +550,7 @@ static void handleNotFound(AsyncWebServerRequest *request) {
     String path = request->url();
 
 #ifdef HAS_SD_CARD_SUPPORT
-    // Try SD card as a fallback for any unknown path (e.g. /sounds_*/file.mp3)
+    // Try SD card as a fallback for any unknown path (e.g. /voice_*/file.mp3 or /sounds_*/file.mp3)
     if (g_storage && g_storage->isSDAvailable() && SD.exists(path)) {
         const char* contentType = "application/octet-stream";
         if (path.endsWith(".mp3")) contentType = "audio/mpeg";
@@ -1039,12 +1039,11 @@ EEPROM:\n\
         led->on(200);
     });
 
-    // Serve audio files from SD card voice directories (sounds_default, sounds_rachel, etc.)
-    // Use onRequestBody to handle the route before serveStatic catches it
-    server.on("/sounds_default/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    // Serve audio files from canonical voice_* directories with legacy fallback routes.
+    auto handleAudioFileRequest = [this](AsyncWebServerRequest *request) {
         String path = request->url();
         DEBUG("Audio request: %s\n", path.c_str());
-        
+
 #ifdef HAS_SD_CARD_SUPPORT
         if (storage->isSDAvailable() && SD.exists(path)) {
             DEBUG("Serving from SD: %s\n", path.c_str());
@@ -1057,110 +1056,34 @@ EEPROM:\n\
             request->send(LittleFS, path, "audio/mpeg");
             return;
         }
+
         DEBUG("Audio file not found: %s\n", path.c_str());
         request->send(404, "text/plain", "Audio file not found");
-    });
-    
-    server.on("/sounds_rachel/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String path = request->url();
-        DEBUG("Audio request: %s\n", path.c_str());
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        if (storage->isSDAvailable() && SD.exists(path)) {
-            DEBUG("Serving from SD: %s\n", path.c_str());
-            request->send(SD, path, "audio/mpeg");
-            return;
-        }
-#endif
-        if (LittleFS.exists(path)) {
-            DEBUG("Serving from LittleFS: %s\n", path.c_str());
-            request->send(LittleFS, path, "audio/mpeg");
-            return;
-        }
-        DEBUG("Audio file not found: %s\n", path.c_str());
-        request->send(404, "text/plain", "Audio file not found");
-    });
-    
-    server.on("/sounds_adam/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String path = request->url();
-        DEBUG("Audio request: %s\n", path.c_str());
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        if (storage->isSDAvailable() && SD.exists(path)) {
-            DEBUG("Serving from SD: %s\n", path.c_str());
-            request->send(SD, path, "audio/mpeg");
-            return;
-        }
-#endif
-        if (LittleFS.exists(path)) {
-            DEBUG("Serving from LittleFS: %s\n", path.c_str());
-            request->send(LittleFS, path, "audio/mpeg");
-            return;
-        }
-        DEBUG("Audio file not found: %s\n", path.c_str());
-        request->send(404, "text/plain", "Audio file not found");
-    });
-    
-    server.on("/sounds_antoni/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String path = request->url();
-        DEBUG("Audio request: %s\n", path.c_str());
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        if (storage->isSDAvailable() && SD.exists(path)) {
-            DEBUG("Serving from SD: %s\n", path.c_str());
-            request->send(SD, path, "audio/mpeg");
-            return;
-        }
-#endif
-        if (LittleFS.exists(path)) {
-            DEBUG("Serving from LittleFS: %s\n", path.c_str());
-            request->send(LittleFS, path, "audio/mpeg");
-            return;
-        }
-        DEBUG("Audio file not found: %s\n", path.c_str());
-        request->send(404, "text/plain", "Audio file not found");
-    });
-    
-    server.on("/sounds_matilda/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String path = request->url();
-        DEBUG("Audio request: %s\n", path.c_str());
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        if (storage->isSDAvailable() && SD.exists(path)) {
-            DEBUG("Serving from SD: %s\n", path.c_str());
-            request->send(SD, path, "audio/mpeg");
-            return;
-        }
-#endif
-        if (LittleFS.exists(path)) {
-            DEBUG("Serving from LittleFS: %s\n", path.c_str());
-            request->send(LittleFS, path, "audio/mpeg");
-            return;
-        }
-        DEBUG("Audio file not found: %s\n", path.c_str());
-        request->send(404, "text/plain", "Audio file not found");
-    });
-    
-    // Serve audio files from SD /sounds/ directory (legacy/fallback - PiperTTS)
-    server.on("/sounds/*", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String path = request->url();
-        DEBUG("Audio request (legacy): %s\n", path.c_str());
-        
-#ifdef HAS_SD_CARD_SUPPORT
-        if (storage->isSDAvailable() && SD.exists(path)) {
-            DEBUG("Serving from SD: %s\n", path.c_str());
-            request->send(SD, path, "audio/mpeg");
-            return;
-        }
-#endif
-        if (LittleFS.exists(path)) {
-            DEBUG("Serving from LittleFS: %s\n", path.c_str());
-            request->send(LittleFS, path, "audio/mpeg");
-            return;
-        }
-        DEBUG("Audio file not found: %s\n", path.c_str());
-        request->send(404, "text/plain", "Audio file not found");
-    });
+    };
+
+    const char* audioRoutes[] = {
+        "/voice_default_en/*",
+        "/voice_rachel_en/*",
+        "/voice_adam_en/*",
+        "/voice_antoni_en/*",
+        "/voice_matilda_en/*",
+        "/voice_german_de/*",
+        "/voice_spanish_es/*",
+        "/voice_french_fr/*",
+        "/voice_en/*",
+        "/voice_de/*",
+        "/voice_es/*",
+        "/voice_fr/*",
+        "/sounds_default/*",
+        "/sounds_rachel/*",
+        "/sounds_adam/*",
+        "/sounds_antoni/*",
+        "/sounds_matilda/*",
+        "/sounds/*",
+    };
+    for (const char* route : audioRoutes) {
+        server.on(route, HTTP_GET, handleAudioFileRequest);
+    }
     
     // RotorHazard integration status endpoint
     server.on("/api/rh/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -1269,6 +1192,7 @@ EEPROM:\n\
         race.frequency = jsonObj["frequency"] | 0;
         race.band = jsonObj["band"] | "";
         race.channel = jsonObj["channel"] | 0;
+        race.notes = jsonObj["notes"] | "";
         
         DEBUG("Parsing race save: trackId=%u\n", (uint32_t)(jsonObj["trackId"] | 0));
         race.trackId = jsonObj["trackId"] | 0;
@@ -1345,7 +1269,8 @@ EEPROM:\n\
             if (request->hasParam("totalDistance", true)) {
                 totalDistance = request->getParam("totalDistance", true)->value().toFloat();
             }
-            bool success = history->updateRace(timestamp, name, tag, totalDistance);
+            String notes = request->hasParam("notes", true) ? request->getParam("notes", true)->value() : "";
+            bool success = history->updateRace(timestamp, name, tag, totalDistance, notes);
             request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
         } else {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
@@ -1397,6 +1322,7 @@ EEPROM:\n\
                     raceObj["frequency"] = race.frequency;
                     raceObj["band"] = race.band;
                     raceObj["channel"] = race.channel;
+                    raceObj["notes"] = race.notes;
                     raceObj["syncMode"] = race.syncMode;
                     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {
@@ -1623,9 +1549,9 @@ EEPROM:\n\
                     if (entry.isDirectory()) {
                         response += "  [DIR] " + String(entry.name()) + "\n";
                         
-                        // List first 5 files in sounds_* directories
+                        // List first 5 files in voice_* and legacy sounds_* directories
                         String entryName = String(entry.name());
-                        if (entryName.startsWith("/sounds_")) {
+                        if (entryName.startsWith("/voice_") || entryName.startsWith("/sounds_")) {
                             File subdir = SD.open(entry.name());
                             if (subdir) {
                                 int count = 0;
@@ -1651,18 +1577,24 @@ EEPROM:\n\
             
             // Test specific file
             response += "\nTest file access:\n";
-            const char* testFile = "/sounds_adam/gate_1.mp3";
-            response += "  " + String(testFile) + ": ";
-            if (SD.exists(testFile)) {
-                File f = SD.open(testFile);
-                if (f) {
-                    response += "EXISTS, size=" + String(f.size()) + " bytes\n";
-                    f.close();
+            const char* testFiles[] = {
+                "/voice_default_en/gate_1.mp3",
+                "/voice_en/gate_1.mp3",
+                "/sounds_default/gate_1.mp3",
+            };
+            for (const char* testFile : testFiles) {
+                response += "  " + String(testFile) + ": ";
+                if (SD.exists(testFile)) {
+                    File f = SD.open(testFile);
+                    if (f) {
+                        response += "EXISTS, size=" + String(f.size()) + " bytes\n";
+                        f.close();
+                    } else {
+                        response += "EXISTS but CANNOT OPEN\n";
+                    }
                 } else {
-                    response += "EXISTS but CANNOT OPEN\n";
+                    response += "NOT FOUND\n";
                 }
-            } else {
-                response += "NOT FOUND\n";
             }
         } else {
             response += "\nSD card not available!\n";

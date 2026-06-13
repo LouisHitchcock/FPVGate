@@ -211,23 +211,56 @@ TestResult SelfTest::testSDCard() {
     }
 
     // Inventory voice asset directories (informational only, doesn't affect pass/fail)
+    struct PathFallbacks {
+        const char* primary;
+        const char* fallback1;
+        const char* fallback2;
+    };
+    const PathFallbacks voiceDirChecks[] = {
+        {"/voice_default_en", "/voice_en", "/sounds_default"},
+        {"/voice_rachel_en",  "/sounds_rachel", nullptr},
+        {"/voice_adam_en",    "/sounds_adam", nullptr},
+        {"/voice_antoni_en",  "/sounds_antoni", nullptr},
+        {"/voice_matilda_en", "/sounds_matilda", nullptr},
+        {"/voice_german_de",  "/voice_de", nullptr},
+        {"/voice_spanish_es", "/voice_es", nullptr},
+        {"/voice_french_fr",  "/voice_fr", nullptr},
+    };
+    const PathFallbacks sampleFileChecks[] = {
+        {"/voice_default_en/gate_1.mp3", "/voice_en/gate_1.mp3", "/sounds_default/gate_1.mp3"},
+        {"/voice_default_en/lap_1.mp3",  "/voice_en/lap_1.mp3",  "/sounds_default/lap_1.mp3"},
+    };
+
     int voiceDirsFound = 0;
-    const char* voiceDirs[] = {"sounds_default", "sounds_rachel", "sounds_adam", "sounds_antoni"};
-    spiMutexTake();
-    for (int i = 0; i < 4; i++) {
-        String path = String("/") + voiceDirs[i];
-        if (SD.exists(path)) voiceDirsFound++;
-    }
     int audioFilesFound = 0;
-    const char* sampleFiles[] = {"/sounds_default/gate_1.mp3", "/sounds_default/lap_1.mp3"};
-    for (int i = 0; i < 2; i++) {
-        if (SD.exists(sampleFiles[i])) audioFilesFound++;
+    spiMutexTake();
+    for (const auto& check : voiceDirChecks) {
+        bool found = false;
+        const char* candidates[] = {check.primary, check.fallback1, check.fallback2};
+        for (const char* candidate : candidates) {
+            if (candidate && SD.exists(candidate)) {
+                found = true;
+                break;
+            }
+        }
+        if (found) voiceDirsFound++;
+    }
+    for (const auto& check : sampleFileChecks) {
+        bool found = false;
+        const char* candidates[] = {check.primary, check.fallback1, check.fallback2};
+        for (const char* candidate : candidates) {
+            if (candidate && SD.exists(candidate)) {
+                found = true;
+                break;
+            }
+        }
+        if (found) audioFilesFound++;
     }
     spiMutexGive();
 
     String details = String("Size: ") + String(cardSize / (1024*1024)) + "MB, " +
                      "Free: " + String(freeBytes / (1024*1024)) + "MB, " +
-                     "Voices: " + String(voiceDirsFound) + "/4, " +
+                     "Voices: " + String(voiceDirsFound) + "/8, " +
                      "Audio: " + String(audioFilesFound) + "/2, R/W OK";
     return makePass("SD Card", details, start);
 #endif

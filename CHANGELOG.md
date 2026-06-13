@@ -1,6 +1,36 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
+## [1.7.3] - 2026-05-18
+
+### Added
+- Race notes support across the race workflow:
+  - Notes field on the main race tab while racing
+  - Notes preview in history cards
+  - Notes section in race details
+  - Notes editing in the race edit modal
+- Notes persistence through race APIs and storage:
+  - `/races/save` accepts and stores notes
+  - `/races/update` accepts notes updates
+  - Race JSON import/export includes notes
+- Multi-language voice generation and packaging outputs:
+  - Language-specific SD card packs in `release/v1.7.3/` (`sd_card_en`, `sd_card_de`, `sd_card_es`, `sd_card_fr`)
+  - New tooling for language pack builds in `tools/generate_language_packs.py` and `tools/generate_sd_card_languages.py`
+
+### Changed
+- Updated `tools/generate_voice_files.py` for the new language voice generation flow and pack structure
+- Added localization keys for race notes UI in:
+  - `data/locales/en.json`
+  - `data/locales/de.json`
+  - `data/locales/es.json`
+  - `data/locales/fr.json`
+  - `data/locales/zh-CN.json`
+
+### Fixed
+- Web race details tab translation refresh now uses `i18n.translatePage()` to avoid runtime errors
+- Race history save/load reliability improved when storage backend availability changes:
+  - Ensures `/races` directory exists before race read/write operations
+  - Adds deferred SD initialization retry logic and reload behavior so history repopulates after transient SD mount failures
 ## [1.7.2] - 2026-04-21
 
 ### Changed

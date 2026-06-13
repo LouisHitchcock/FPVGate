@@ -18,20 +18,27 @@ class AudioAnnouncer {
         this.rate = 1.3;  // Faster playback for quicker announcements
         this.volume = 1.0;  // Volume 0.0-1.0
         
-        // Voice directory mapping
+        // Voice directory mapping (new canonical names first, legacy names as fallback)
         this.voiceDirectories = {
-            'default': 'sounds_default',  // Sarah (Energetic Female)
-            'rachel': 'sounds_rachel',    // Rachel (Calm Female)
-            'adam': 'sounds_adam',        // Adam (Deep Male)
-            'antoni': 'sounds_antoni',    // Antoni (Male)
-            'matilda': 'sounds_matilda',  // Matilda (Warm Female)
-            'webspeech': null             // Web Speech only (no pre-recorded)
+            'default': ['voice_default_en', 'sounds_default'],   // Sarah (Energetic Female, en)
+            'rachel': ['voice_rachel_en', 'sounds_rachel'],      // Rachel (Calm Female, en)
+            'adam': ['voice_adam_en', 'sounds_adam'],            // Adam (Deep Male, en)
+            'antoni': ['voice_antoni_en', 'sounds_antoni'],      // Antoni (Male, en)
+            'matilda': ['voice_matilda_en', 'sounds_matilda'],   // Matilda (Warm Female, en)
+            'de': ['voice_german_de', 'voice_de'],               // German
+            'es': ['voice_spanish_es', 'voice_es'],              // Spanish
+            'fr': ['voice_french_fr', 'voice_fr'],               // French
+            'webspeech': []                                      // Web Speech only (no pre-recorded)
         };
         
         // Load selected voice from localStorage
-        this.selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const storedVoice = localStorage.getItem('selectedVoice') || 'default';
+        this.selectedVoice = this.normalizeVoiceSelection(storedVoice);
+        if (this.selectedVoice !== storedVoice) {
+            localStorage.setItem('selectedVoice', this.selectedVoice);
+        }
         console.log('[AudioAnnouncer] Selected voice from localStorage:', this.selectedVoice);
-        console.log('[AudioAnnouncer] Voice directory:', this.voiceDirectories[this.selectedVoice] || 'Web Speech only');
+        console.log('[AudioAnnouncer] Voice directories:', this.getVoiceDirectoryCandidates().join(', ') || 'Web Speech only');
         
         // Pre-recorded audio cache
         this.audioCache = new Map();
@@ -59,6 +66,70 @@ class AudioAnnouncer {
         }
         
         console.log('[AudioAnnouncer] Initialized (audio disabled by default, call enable() to activate)');
+    }
+
+    normalizeVoiceSelection(voice) {
+        const aliases = {
+            'piper': 'default',
+            'german': 'de',
+            'spanish': 'es',
+            'french': 'fr',
+            'voice_de': 'de',
+            'voice_es': 'es',
+            'voice_fr': 'fr',
+        };
+        const normalized = aliases[voice] || voice;
+        if (Object.prototype.hasOwnProperty.call(this.voiceDirectories, normalized)) {
+            return normalized;
+        }
+        return 'default';
+    }
+
+    getVoiceDirectoryCandidates() {
+        const voice = this.normalizeVoiceSelection(this.selectedVoice);
+        return this.voiceDirectories[voice] || this.voiceDirectories.default;
+    }
+
+    getPrimaryVoiceDirectory() {
+        const candidates = this.getVoiceDirectoryCandidates();
+        return candidates.length > 0 ? candidates[0] : null;
+    }
+
+    async resolveAudioPath(audioPath) {
+        if (!audioPath) return null;
+
+        if (await this.hasPrerecordedAudio(audioPath)) {
+            return audioPath;
+        }
+
+        const candidates = this.getVoiceDirectoryCandidates();
+        if (candidates.length < 2) return null;
+
+        const primary = candidates[0];
+        const prefix = `${primary}/`;
+        if (!audioPath.startsWith(prefix)) return null;
+
+        const filename = audioPath.substring(prefix.length);
+        for (let i = 1; i < candidates.length; i++) {
+            const fallbackPath = `${candidates[i]}/${filename}`;
+            if (await this.hasPrerecordedAudio(fallbackPath)) {
+                return fallbackPath;
+            }
+        }
+
+        return null;
+    }
+
+    async playVoiceFile(filename, overlapMs = 50) {
+        const candidates = this.getVoiceDirectoryCandidates();
+        for (const dir of candidates) {
+            const candidatePath = `${dir}/${filename}`;
+            if (await this.hasPrerecordedAudio(candidatePath)) {
+                await this.playPrerecorded(candidatePath, overlapMs);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -157,6 +228,44 @@ class AudioAnnouncer {
     }
 
     /**
+     * Resolve currently selected UI language for Web Speech
+     */
+    getCurrentLanguageCode() {
+        const i18nLang = (typeof window !== 'undefined' && window.i18n && window.i18n.currentLang)
+            ? window.i18n.currentLang
+            : null;
+        const storedLang = localStorage.getItem('fpvgate_lang');
+        const htmlLang = document.documentElement?.lang;
+        const browserLang = navigator.language;
+        const raw = (i18nLang || storedLang || htmlLang || browserLang || 'en').toString().trim();
+        const lang = raw.toLowerCase();
+
+        if (lang.startsWith('zh')) return 'zh-CN';
+        if (lang.startsWith('fr')) return 'fr-FR';
+        if (lang.startsWith('es')) return 'es-ES';
+        if (lang.startsWith('de')) return 'de-DE';
+        if (lang.startsWith('en')) return 'en-US';
+
+        return raw;
+    }
+
+    /**
+     * Find a browser speech voice matching the requested language
+     */
+    selectWebSpeechVoice(languageCode, voices) {
+        if (!voices || voices.length === 0) return null;
+
+        const target = (languageCode || '').toLowerCase();
+        const base = target.split('-')[0];
+
+        return (
+            voices.find((v) => v.lang && v.lang.toLowerCase() === target) ||
+            voices.find((v) => v.lang && v.lang.toLowerCase().startsWith(`${base}-`)) ||
+            voices.find((v) => v.lang && v.lang.toLowerCase() === base) ||
+            null
+        );
+    }
+    /**
      * Generate speech using Web Speech API
      */
     async playWebSpeech(text) {
@@ -167,12 +276,21 @@ class AudioAnnouncer {
                 return;
             }
             
-            // Check if voices are available
+            const languageCode = this.getCurrentLanguageCode();
             const voices = speechSynthesis.getVoices();
-            console.log('[AudioAnnouncer] Web Speech voices available:', voices.length);
+            const matchedVoice = this.selectWebSpeechVoice(languageCode, voices);
+            console.log('[AudioAnnouncer] Web Speech voices available:', voices.length, 'target lang:', languageCode);
             
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.rate = this.rate;
+            utterance.lang = languageCode;
+            if (matchedVoice) {
+                utterance.voice = matchedVoice;
+                utterance.lang = matchedVoice.lang || languageCode;
+                console.log('[AudioAnnouncer] Using Web Speech voice:', matchedVoice.name, matchedVoice.lang);
+            } else {
+                console.log('[AudioAnnouncer] No exact Web Speech voice match, using browser default for lang:', languageCode);
+            }
             
             utterance.onstart = () => {
                 console.log('[AudioAnnouncer] Web Speech started speaking:', text);
@@ -225,7 +343,8 @@ class AudioAnnouncer {
         console.log('[AudioAnnouncer] Speaking:', cleanText);
         
         // Check if Web Speech only mode is selected
-        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const selectedVoice = this.normalizeVoiceSelection(localStorage.getItem('selectedVoice') || 'default');
+        this.selectedVoice = selectedVoice;
         const useWebSpeechOnly = (selectedVoice === 'webspeech');
         
         try {
@@ -281,13 +400,13 @@ class AudioAnnouncer {
             // Try pre-recorded audio (ElevenLabs)
             const audioPath = this.mapTextToAudio(cleanText);
             if (audioPath) {
-                console.log('[AudioAnnouncer] Mapped to audio path:', audioPath);
-                if (await this.hasPrerecordedAudio(audioPath)) {
-                    console.log('[AudioAnnouncer] ✓ Playing pre-recorded:', audioPath);
-                    await this.playPrerecorded(audioPath);
+                const resolvedAudioPath = await this.resolveAudioPath(audioPath);
+                if (resolvedAudioPath) {
+                    console.log('[AudioAnnouncer] ✓ Playing pre-recorded:', resolvedAudioPath);
+                    await this.playPrerecorded(resolvedAudioPath);
                     return;
                 } else {
-                    console.log('[AudioAnnouncer] ✗ Pre-recorded audio not found, trying fallback');
+                    console.log('[AudioAnnouncer] ✗ Pre-recorded audio not found in any configured voice directory, trying fallback');
                 }
             } else {
                 console.log('[AudioAnnouncer] No audio mapping found for:', cleanText);
@@ -312,7 +431,8 @@ class AudioAnnouncer {
      */
     mapTextToAudio(text) {
         // Get voice directory based on selection
-        const voiceDir = this.voiceDirectories[this.selectedVoice] || 'sounds_default';
+        const voiceDir = this.getPrimaryVoiceDirectory();
+        if (!voiceDir) return null;
         
         // Normalize text: lowercase, trim, remove extra whitespace
         const lower = text.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -381,7 +501,8 @@ class AudioAnnouncer {
         if (!this.audioEnabled) return;
         
         // Check if Web Speech only mode is selected
-        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const selectedVoice = this.normalizeVoiceSelection(localStorage.getItem('selectedVoice') || 'default');
+        this.selectedVoice = selectedVoice;
         const useWebSpeechOnly = (selectedVoice === 'webspeech');
         
         // If Web Speech mode is selected, use it exclusively
@@ -398,16 +519,10 @@ class AudioAnnouncer {
         const phoneticName = (phoneticInput?.value || pilotNameInput?.value || pilot).toLowerCase().trim();
         const fileName = phoneticName.replace(/\s+/g, '_');
         
-        // Get voice directory
-        const voiceDir = this.voiceDirectories[this.selectedVoice] || 'sounds_default';
-        
         try {
             // Try to use pre-recorded pilot name + lap
-            const pilotLapPath = `${voiceDir}/${fileName}_lap.mp3`;
-            console.log('[AudioAnnouncer] Trying complex speech with pilot:', pilotLapPath);
-            if (await this.hasPrerecordedAudio(pilotLapPath)) {
+            if (await this.playVoiceFile(`${fileName}_lap.mp3`)) {
                 console.log('[AudioAnnouncer] Using complex speech with pre-recorded chunks');
-                await this.playPrerecorded(pilotLapPath);
                 await this.speakNumber(lapNumber);
                 // No pause - immediate transition to lap time
                 await this.speakNumber(lapTime);
@@ -449,7 +564,8 @@ class AudioAnnouncer {
         if (!this.audioEnabled) return;
         
         // Check if Web Speech only mode is selected
-        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const selectedVoice = this.normalizeVoiceSelection(localStorage.getItem('selectedVoice') || 'default');
+        this.selectedVoice = selectedVoice;
         const useWebSpeechOnly = (selectedVoice === 'webspeech');
         
         // If Web Speech mode is selected, use it exclusively
@@ -460,16 +576,11 @@ class AudioAnnouncer {
             return;
         }
         
-        // Get voice directory
-        const voiceDir = this.voiceDirectories[this.selectedVoice] || 'sounds_default';
-        
         // ElevenLabs voice - try pre-recorded files first
         try {
             // Check if we have pre-recorded "Lap X" file
-            const lapPath = `${voiceDir}/lap_${lapNumber}.mp3`;
-            if (lapNumber >= 1 && lapNumber <= 50 && await this.hasPrerecordedAudio(lapPath)) {
-                console.log('[AudioAnnouncer] Using pre-recorded lap number:', lapPath);
-                await this.playPrerecorded(lapPath);
+            if (lapNumber >= 1 && lapNumber <= 50 && await this.playVoiceFile(`lap_${lapNumber}.mp3`)) {
+                console.log('[AudioAnnouncer] Using pre-recorded lap number');
                 // No pause - immediate transition to lap time
                 await this.speakNumber(lapTime);
                 return;
@@ -495,7 +606,8 @@ class AudioAnnouncer {
         console.log('[AudioAnnouncer] Speaking number:', numStr);
         
         // Check if Web Speech only mode is selected
-        const selectedVoice = localStorage.getItem('selectedVoice') || 'default';
+        const selectedVoice = this.normalizeVoiceSelection(localStorage.getItem('selectedVoice') || 'default');
+        this.selectedVoice = selectedVoice;
         const useWebSpeechOnly = (selectedVoice === 'webspeech');
         
         // If Web Speech mode is selected, use it exclusively
@@ -506,10 +618,6 @@ class AudioAnnouncer {
             }
             return;
         }
-        
-        // Get voice directory
-        const voiceDir = this.voiceDirectories[this.selectedVoice] || 'sounds_default';
-        
         // ElevenLabs voice - try pre-recorded number files first
         // Split into whole and decimal parts
         const parts = numStr.split('.');
@@ -519,18 +627,24 @@ class AudioAnnouncer {
         try {
             // Speak whole number part (0-99 as words)
             if (wholePart >= 0 && wholePart <= 99) {
-                await this.playPrerecorded(`${voiceDir}/num_${wholePart}.mp3`, 30);
+                if (!(await this.playVoiceFile(`num_${wholePart}.mp3`, 30))) {
+                    throw new Error(`Missing pre-recorded number file for ${wholePart}`);
+                }
             } else {
                 // Fallback: spell out digit by digit for numbers >= 100
                 console.log('[AudioAnnouncer] Number >= 100, using digit-by-digit:', wholePart);
                 for (const char of parts[0]) {
-                    await this.playPrerecorded(`${voiceDir}/num_${char}.mp3`, 30);
+                    if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
+                        throw new Error(`Missing pre-recorded digit file for ${char}`);
+                    }
                 }
             }
             
             // Speak decimal part if exists
             if (decimalPart) {
-                await this.playPrerecorded(`${voiceDir}/point.mp3`, 20);
+                if (!(await this.playVoiceFile('point.mp3', 20))) {
+                    throw new Error('Missing pre-recorded point file');
+                }
                 
                 // Handle decimals with leading zeros properly
                 // For lap times, we always want to preserve leading zeros (e.g., "01" = "zero one", not "one")
@@ -541,22 +655,32 @@ class AudioAnnouncer {
                     
                     // If first digit is 0, we must say it
                     if (firstDigit === 0) {
-                        await this.playPrerecorded(`${voiceDir}/num_0.mp3`, 30);
-                        await this.playPrerecorded(`${voiceDir}/num_${secondDigit}.mp3`, 30);
+                        if (!(await this.playVoiceFile('num_0.mp3', 30))) {
+                            throw new Error('Missing pre-recorded digit file for 0');
+                        }
+                        if (!(await this.playVoiceFile(`num_${secondDigit}.mp3`, 30))) {
+                            throw new Error(`Missing pre-recorded digit file for ${secondDigit}`);
+                        }
                     } else {
                         // Parse as a two-digit number (e.g., "44" -> forty-four)
                         const decimalNum = parseInt(decimalPart);
-                        await this.playPrerecorded(`${voiceDir}/num_${decimalNum}.mp3`, 30);
+                        if (!(await this.playVoiceFile(`num_${decimalNum}.mp3`, 30))) {
+                            throw new Error(`Missing pre-recorded number file for ${decimalNum}`);
+                        }
                     }
                 } else if (decimalPart.length === 1) {
                     // Single digit decimal (e.g., "4.5")
                     const digit = parseInt(decimalPart);
-                    await this.playPrerecorded(`${voiceDir}/num_${digit}.mp3`, 30);
+                    if (!(await this.playVoiceFile(`num_${digit}.mp3`, 30))) {
+                        throw new Error(`Missing pre-recorded digit file for ${digit}`);
+                    }
                 } else {
                     // More than 2 digits: spell out digit by digit
                     console.log('[AudioAnnouncer] Decimal > 2 digits, using digit-by-digit:', decimalPart);
                     for (const char of decimalPart) {
-                        await this.playPrerecorded(`${voiceDir}/num_${char}.mp3`, 30);
+                        if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
+                            throw new Error(`Missing pre-recorded digit file for ${char}`);
+                        }
                     }
                 }
             }
@@ -620,9 +744,10 @@ class AudioAnnouncer {
      * Change voice and clear audio cache
      */
     setVoice(voice) {
-        console.log('[AudioAnnouncer] Changing voice to:', voice);
-        this.selectedVoice = voice;
-        localStorage.setItem('selectedVoice', voice);
+        const normalizedVoice = this.normalizeVoiceSelection(voice);
+        console.log('[AudioAnnouncer] Changing voice to:', normalizedVoice);
+        this.selectedVoice = normalizedVoice;
+        localStorage.setItem('selectedVoice', normalizedVoice);
         
         // Clear audio cache so new voice files are loaded
         this.audioCache.clear();
@@ -821,26 +946,30 @@ class AudioAnnouncer {
      */
     async testAudioFiles() {
         console.log('[AudioAnnouncer] Testing audio file accessibility...');
-        const testFiles = [
-            'sounds/arm_your_quad.mp3',
-            'sounds/starting_tone.mp3',
-            'sounds/race_complete.mp3',
-            'sounds/race_stopped.mp3',
-            'sounds/hole_shot.mp3',
-            'sounds/lap_1.mp3',
-            'sounds/lap_5.mp3',
-            'sounds/num_0.mp3',
-            'sounds/num_1.mp3',
-            'sounds/point.mp3',
-            'sounds/comma.mp3'
-        ];
+        const testFiles = [];
+        const voiceDirs = this.getVoiceDirectoryCandidates();
+        for (const dir of voiceDirs) {
+            testFiles.push(
+                `${dir}/arm_your_quad.mp3`,
+                `${dir}/starting_tone.mp3`,
+                `${dir}/race_complete.mp3`,
+                `${dir}/race_stopped.mp3`,
+                `${dir}/lap_1.mp3`,
+                `${dir}/lap_5.mp3`,
+                `${dir}/num_0.mp3`,
+                `${dir}/num_1.mp3`,
+                `${dir}/point.mp3`
+            );
+        }
         
         const phoneticInput = document.getElementById('pphonetic');
         const pilotNameInput = document.getElementById('pname');
         const phoneticName = (phoneticInput?.value || pilotNameInput?.value || '').toLowerCase().trim();
         if (phoneticName) {
             const fileName = phoneticName.replace(/\s+/g, '_');
-            testFiles.push(`sounds/${fileName}_lap.mp3`);
+            for (const dir of voiceDirs) {
+                testFiles.push(`${dir}/${fileName}_lap.mp3`);
+            }
         }
         
         let found = 0;

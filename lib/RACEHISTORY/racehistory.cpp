@@ -19,6 +19,12 @@ bool RaceHistory::init(Storage* storageBackend) {
 }
 
 bool RaceHistory::saveRace(const RaceSession& race) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in saveRace!\\n");
+        return false;
+    }
+    // Ensure /races exists on whichever backend is currently active
+    storage->mkdir(RACES_DIR);
     // Generate filename from timestamp: DDMMYY-HrMinSec.json
     time_t timestamp = race.timestamp;
     struct tm timeinfo;
@@ -42,6 +48,7 @@ bool RaceHistory::saveRace(const RaceSession& race) {
     raceObj["frequency"] = race.frequency;
     raceObj["band"] = race.band;
     raceObj["channel"] = race.channel;
+    raceObj["notes"] = race.notes;
     raceObj["trackId"] = race.trackId;
     raceObj["trackName"] = race.trackName;
     raceObj["totalDistance"] = race.totalDistance;
@@ -99,6 +106,9 @@ bool RaceHistory::loadRaces() {
         DEBUG("RaceHistory: Storage backend is null!\n");
         return false;
     }
+
+    // Ensure /races exists on whichever backend is currently active
+    storage->mkdir(RACES_DIR);
     
     races.clear();
     
@@ -142,6 +152,7 @@ bool RaceHistory::loadRaces() {
         race.frequency = doc["frequency"] | 0;
         race.band = doc["band"] | "";
         race.channel = doc["channel"] | 0;
+        race.notes = doc["notes"] | "";
         race.trackId = doc["trackId"] | 0;
         race.trackName = doc["trackName"] | "";
         race.totalDistance = doc["totalDistance"] | 0.0f;
@@ -208,7 +219,11 @@ bool RaceHistory::deleteRace(uint32_t timestamp) {
     return false;
 }
 
-bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance) {
+bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance, const String& notes) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in updateRace!\n");
+        return false;
+    }
     // Update in-memory race
     RaceSession* targetRace = nullptr;
     for (auto& race : races) {
@@ -218,6 +233,7 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
             if (totalDistance >= 0.0f) {
                 race.totalDistance = totalDistance;
             }
+            race.notes = notes;
             targetRace = &race;
             break;
         }
@@ -250,6 +266,7 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
     raceObj["frequency"] = targetRace->frequency;
     raceObj["band"] = targetRace->band;
     raceObj["channel"] = targetRace->channel;
+    raceObj["notes"] = targetRace->notes;
     raceObj["trackId"] = targetRace->trackId;
     raceObj["trackName"] = targetRace->trackName;
     raceObj["totalDistance"] = targetRace->totalDistance;
@@ -266,6 +283,10 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
 }
 
 bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in updateLaps!\n");
+        return false;
+    }
     // Validate lap times
     if (newLapTimes.empty()) {
         DEBUG("Cannot update race with empty lap times\n");
@@ -336,6 +357,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
     raceObj["frequency"] = targetRace->frequency;
     raceObj["band"] = targetRace->band;
     raceObj["channel"] = targetRace->channel;
+    raceObj["notes"] = targetRace->notes;
     raceObj["trackId"] = targetRace->trackId;
     raceObj["trackName"] = targetRace->trackName;
     raceObj["totalDistance"] = targetRace->totalDistance;
@@ -395,6 +417,7 @@ String RaceHistory::toJsonString() {
         raceObj["frequency"] = race.frequency;
         raceObj["band"] = race.band;
         raceObj["channel"] = race.channel;
+        raceObj["notes"] = race.notes;
         raceObj["trackId"] = race.trackId;
         raceObj["trackName"] = race.trackName;
         raceObj["totalDistance"] = race.totalDistance;
@@ -454,6 +477,7 @@ bool RaceHistory::fromJsonString(const String& json) {
         race.frequency = raceObj["frequency"] | 0;
         race.band = raceObj["band"] | "";
         race.channel = raceObj["channel"] | 0;
+        race.notes = raceObj["notes"] | "";
         race.trackId = raceObj["trackId"] | 0;
         race.trackName = raceObj["trackName"] | "";
         race.totalDistance = raceObj["totalDistance"] | 0.0f;

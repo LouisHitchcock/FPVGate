@@ -63,6 +63,10 @@
           <button id="stopRaceButton" onclick="stopRace()" disabled data-i18n="race.stop_race">Stop Race</button>
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
+          <div class="race-notes-inline">
+            <button id="raceNotesButton" class="secondary-button" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
+            <span id="raceNotesIndicator" class="race-notes-indicator" style="display: none" data-i18n="race.notes_saved">Notes saved</span>
+          </div>
         </div>
         <div id="raceCountdownOverlay" class="race-countdown-overlay" style="display: none;" aria-hidden="true">
           <span id="raceCountdownNumber">10</span>
@@ -134,20 +138,23 @@
         <!-- Sync Mode: Race Analysis (Multi-Pilot) -->
         <div id="raceAnalysis" class="lap-analysis" style="display: none;">
           <h3>Race Analysis</h3>
-          
-          <!-- Chart Tabs -->
-          <div class="analysis-tabs">
-            <button class="analysis-tab active" onclick="switchRaceAnalysisMode('lapTimes')">Lap Times</button>
-            <button class="analysis-tab" onclick="switchRaceAnalysisMode('consistency')">Consistency</button>
+          <div class="stats-boxes" style="margin-bottom: 12px;">
+            <div class="stat-box">
+              <div class="stat-label">Best 3 Laps</div>
+              <div class="stat-value" id="raceAlwaysBest3">--</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Median Lap</div>
+              <div class="stat-value" id="raceAlwaysMedian">--</div>
+            </div>
           </div>
-          
-          <!-- Chart Container -->
+          <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;">
+            Enable at least one analytics tab in System Settings to display additional race analytics.
+          </div>
+          <div id="raceAnalyticsTabs" class="analysis-tabs" style="margin-top: 8px;"></div>
           <div id="raceAnalysisContent" class="analysis-content" style="min-height: 350px;">
-            <p class="no-data">Complete at least 2 laps to see race analysis</p>
+            <p class="no-data">Enable an analytics tab to display race analytics</p>
           </div>
-          
-          <!-- Legend -->
-          <div id="raceAnalysisLegend" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 12px;"></div>
         </div>
       </div>
 
@@ -165,6 +172,10 @@
         <div id="raceDetails" class="race-details" style="display: none">
           <button onclick="closeRaceDetails()" class="close-button" data-i18n="history.close">Close</button>
           <h3 id="raceDetailsTitle"></h3>
+          <div id="raceDetailsNotes" class="race-details-notes" style="display: none">
+            <h4 data-i18n="history.notes">Notes</h4>
+            <div id="raceDetailsNotesText" class="race-details-notes-text"></div>
+          </div>
 
           <!-- Race Timeline -->
           <div class="race-timeline">
@@ -324,6 +335,10 @@
           <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
           <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
         </div>
+        <div class="config-item" style="align-items: flex-start">
+          <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
+          <textarea id="raceEditNotes" maxlength="300" rows="3" placeholder="Optional notes about this race..." style="flex: 1; padding: 8px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--primary-color); font-family: inherit; resize: vertical" data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
+        </div>
 
         <h4 style="margin-top: 24px; margin-bottom: 12px" data-i18n="history.edit_lap_times">Lap Times</h4>
         <div id="editLapsList" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px"></div>
@@ -412,19 +427,22 @@
             <button onclick="rerecordCalibration()" style="display: block; margin-top: 8px; padding: 6px 14px; font-size: 12px; background-color: var(--primary-color); color: #fff; border: none; border-radius: 4px; cursor: pointer" data-i18n="calib.rerecord">Re-record Flight Data</button>
           </div>
           <div class="wizard-results-box">
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_enter_rssi">Enter RSSI:</label>
-              <span id="calculatedEnterRssi" class="result-value">--</span>
+              <input type="number" id="calculatedEnterRssi" class="result-value-input" min="50" max="255" step="1" inputmode="numeric" />
             </div>
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_exit_rssi">Exit RSSI:</label>
-              <span id="calculatedExitRssi" class="result-value">--</span>
+              <input type="number" id="calculatedExitRssi" class="result-value-input" min="50" max="255" step="1" inputmode="numeric" />
             </div>
-            <div class="result-item">
+            <div class="result-item result-item-editable">
               <label data-i18n="calib.wizard_min_lap">Min Lap Time:</label>
-              <span id="calculatedMinLap" class="result-value">--</span>
+              <div class="result-value-input-wrap">
+                <input type="number" id="calculatedMinLap" class="result-value-input result-value-input-minlap" min="1" max="20" step="0.1" inputmode="decimal" />
+                <span class="result-value-unit">s</span>
+              </div>
             </div>
-            <div class="result-item" style="font-size: 12px; color: var(--secondary-color)">
+            <div class="result-item result-item-meta">
               <label data-i18n="calib.wizard_peaks_detected">Peaks Detected:</label>
               <span id="calculatedPeakCount">--</span>
               &nbsp;|&nbsp;
@@ -441,6 +459,23 @@
             <button onclick="rerecordCalibration()" style="flex: 1; background-color: var(--accent-color, #2980b9)" data-i18n="calib.rerecord">Re-record</button>
             <button onclick="closeCalibrationWizard()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="history.close">Close</button>
           </div>
+        </div>
+      </div>
+    </div>
+    <!-- Race Notes Modal -->
+    <div id="raceNotesModal" class="settings-modal">
+      <div class="settings-modal-container race-notes-modal-container">
+        <div class="race-notes-modal-header">
+          <h2 data-i18n="race.notes_modal_title">Race Notes</h2>
+          <button class="settings-close-button" onclick="closeRaceNotesModal()">✕</button>
+        </div>
+        <div class="race-notes-modal-content">
+          <label for="raceNotesInput" data-i18n="race.notes">Race Notes:</label>
+          <textarea id="raceNotesInput" maxlength="300" placeholder="Optional notes for this race..." data-i18n-placeholder="race.notes_placeholder"></textarea>
+        </div>
+        <div class="race-notes-modal-footer">
+          <button onclick="saveRaceNotes()" data-i18n="race.notes_save_button">Save Notes</button>
+          <button onclick="closeRaceNotesModal()" data-i18n="history.close">Close</button>
         </div>
       </div>
     </div>
@@ -558,15 +593,18 @@
               <div class="config-item">
                 <label for="voiceSelect" data-i18n="settings.tts.voice">Voice:</label>
                 <select id="voiceSelect" onchange="saveVoiceSelection()">
-                  <option value="default" selected data-i18n="settings.tts.voice_options.eleven_sarah">ElevenLabs (Sarah - Energetic)</option>
-                  <option value="rachel" data-i18n="settings.tts.voice_options.eleven_rachel">ElevenLabs (Rachel - Calm)</option>
-                  <option value="adam" data-i18n="settings.tts.voice_options.eleven_adam">ElevenLabs (Adam - Deep Male)</option>
-                  <option value="antoni" data-i18n="settings.tts.voice_options.eleven_antoni">ElevenLabs (Antoni - Male)</option>
-                  <option value="matilda" data-i18n="settings.tts.voice_options.eleven_matilda">ElevenLabs (Matilda - Warm Female)</option>
+                  <option value="default" selected data-i18n="settings.tts.voice_options.eleven_sarah">Sarah - Energetic, en</option>
+                  <option value="rachel" data-i18n="settings.tts.voice_options.eleven_rachel">Rachel - Calm, en</option>
+                  <option value="adam" data-i18n="settings.tts.voice_options.eleven_adam">Adam - Deep Male, en</option>
+                  <option value="antoni" data-i18n="settings.tts.voice_options.eleven_antoni">Antoni - Male, en</option>
+                  <option value="matilda" data-i18n="settings.tts.voice_options.eleven_matilda">Matilda - Warm Female, en</option>
+                  <option value="de" data-i18n="settings.tts.voice_options.eleven_german_pack">German Pack, de</option>
+                  <option value="es" data-i18n="settings.tts.voice_options.eleven_spanish_pack">Spanish Pack, es</option>
+                  <option value="fr" data-i18n="settings.tts.voice_options.eleven_french_pack">French Pack, fr</option>
                   <option value="webspeech" data-i18n="settings.tts.voice_options.webspeech">Web Speech (Browser TTS)</option>
                 </select>
               </div>
-              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.eleven_labs_note">Note: ElevenLabs voices require pre-generated audio files on SD card</div>
+<div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.eleven_labs_note">Note: Voices require pre-generated audio files on SD card</div>
 
               <div class="config-item">
                 <label for="rate" data-i18n="settings.tts.rate">Announcer Rate:</label>
@@ -1084,6 +1122,64 @@
             <!-- System Section -->
             <div id="settings-system" class="settings-section">
               <h2 data-i18n="settings.system.title">System Settings</h2>
+              <div class="config-item">
+                <label for="openRaceNotesOnRaceEnd" data-i18n="settings.system.notes_auto_open">Open Race Notes on Race End:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="openRaceNotesOnRaceEnd" onchange="toggleOpenRaceNotesOnRaceEnd(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.system.notes_auto_open_tip">Automatically open race notes when a race is stopped.</div>
+              <h3>Race Analytics Display</h3>
+              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);">
+                Choose which multi-pilot race analytics panels to display in the Race tab (up to 3 enabled at once).
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleFastestLap" onchange="toggleRaceAnalyticsPanel('fastestLap', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Fastest Lap</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show fastest lap time and lap number details</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleFastest3Consec" onchange="toggleRaceAnalyticsPanel('fastest3Consec', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Fastest 3 Consecutive</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show best 3-lap consecutive block and lap range</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleLapTimes" onchange="toggleRaceAnalyticsPanel('lapTimes', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleConsistency" onchange="toggleRaceAnalyticsPanel('consistency', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Consistency</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show distribution and spread of lap times</div>
+                </div>
+              </div>
 
               <h3 style="margin-top: 0" data-i18n="settings.system.receiver_radio">Receiver Radio</h3>
               <div class="config-item">

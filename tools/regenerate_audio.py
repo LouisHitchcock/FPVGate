@@ -17,7 +17,7 @@ from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 
 # Configuration
-OUTPUT_DIR = Path("data/sounds")
+OUTPUT_DIR = Path("SD_Card/voice_default_en")
 PILOT_NAME = "Louis"  # Change this to your name
 PHONETIC_NAME = "Louie"  # How you want it pronounced
 
@@ -217,9 +217,9 @@ def main():
         
         print("✅ Done! Your audio files are ready to use.")
         print("\nNext steps:")
-        print("1. Review the audio files in data/sounds/")
-        print("2. Upload filesystem to ESP32: pio run -e ESP32S3 -t uploadfs")
-        print("3. Test the new voice system in FPVGate!")
+        print("1. Review the audio files in SD_Card/voice_default_en/")
+        print("2. Copy the folder to your SD card")
+        print("3. Test the new voice system in FPVGate")
         
     except Exception as e:
         print(f"\n❌ Error: {e}")

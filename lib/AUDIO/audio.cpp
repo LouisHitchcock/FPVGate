@@ -7,24 +7,81 @@
 #include <SD.h>
 #include <cmath>
 
-// Voice directory mapping (matches audio-announcer.js)
-static const char* voiceDirMap[][2] = {
-    {"default",  "sounds_default"},
-    {"rachel",   "sounds_rachel"},
-    {"adam",      "sounds_adam"},
-    {"antoni",    "sounds_antoni"},
-    {"matilda",   "sounds_matilda"},
-    {"piper",    "sounds_piper"},
-    {nullptr,    nullptr}
+struct VoiceDirectoryConfig {
+    const char* key;
+    const char* primaryDir;
+    const char* legacyDir;
 };
 
-static const char* getVoiceDirectory(const char* voiceName) {
-    for (int i = 0; voiceDirMap[i][0] != nullptr; i++) {
-        if (strcmp(voiceName, voiceDirMap[i][0]) == 0) {
-            return voiceDirMap[i][1];
+// Voice directory mapping (matches data/audio-announcer.js canonical-first behavior)
+static const VoiceDirectoryConfig voiceDirectoryConfigs[] = {
+    {"default", "voice_default_en", "sounds_default"},
+    {"rachel", "voice_rachel_en", "sounds_rachel"},
+    {"adam", "voice_adam_en", "sounds_adam"},
+    {"antoni", "voice_antoni_en", "sounds_antoni"},
+    {"matilda", "voice_matilda_en", "sounds_matilda"},
+    {"de", "voice_german_de", "voice_de"},
+    {"es", "voice_spanish_es", "voice_es"},
+    {"fr", "voice_french_fr", "voice_fr"},
+    {"webspeech", "voice_default_en", "sounds_default"},
+    {nullptr, nullptr, nullptr}
+};
+
+static const char* normalizeVoiceSelection(const char* voiceName) {
+    if (!voiceName || !voiceName[0]) return "default";
+
+    if (strcmp(voiceName, "piper") == 0) return "default";
+
+    if (strcmp(voiceName, "german") == 0 || strcmp(voiceName, "voice_de") == 0 || strcmp(voiceName, "voice_german_de") == 0) return "de";
+    if (strcmp(voiceName, "spanish") == 0 || strcmp(voiceName, "voice_es") == 0 || strcmp(voiceName, "voice_spanish_es") == 0) return "es";
+    if (strcmp(voiceName, "french") == 0 || strcmp(voiceName, "voice_fr") == 0 || strcmp(voiceName, "voice_french_fr") == 0) return "fr";
+
+    if (strcmp(voiceName, "voice_default_en") == 0) return "default";
+    if (strcmp(voiceName, "voice_rachel_en") == 0) return "rachel";
+    if (strcmp(voiceName, "voice_adam_en") == 0) return "adam";
+    if (strcmp(voiceName, "voice_antoni_en") == 0) return "antoni";
+    if (strcmp(voiceName, "voice_matilda_en") == 0) return "matilda";
+
+    for (int i = 0; voiceDirectoryConfigs[i].key != nullptr; i++) {
+        if (strcmp(voiceName, voiceDirectoryConfigs[i].key) == 0) {
+            return voiceName;
         }
     }
-    return "sounds_default";  // Fallback
+
+    return "default";
+}
+
+static const VoiceDirectoryConfig* getVoiceDirectoryConfig(const char* voiceName) {
+    const char* normalized = normalizeVoiceSelection(voiceName);
+    for (int i = 0; voiceDirectoryConfigs[i].key != nullptr; i++) {
+        if (strcmp(voiceDirectoryConfigs[i].key, normalized) == 0) {
+            return &voiceDirectoryConfigs[i];
+        }
+    }
+    return nullptr;
+}
+
+static bool voiceDirectoryExists(const char* dir) {
+    if (!dir) return false;
+    char checkPath[64];
+    snprintf(checkPath, sizeof(checkPath), "/%s", dir);
+    return SD.exists(checkPath);
+}
+
+static const char* resolveVoiceDirectory(const char* voiceName) {
+    const VoiceDirectoryConfig* config = getVoiceDirectoryConfig(voiceName);
+    if (!config) return nullptr;
+
+    if (voiceDirectoryExists(config->primaryDir)) return config->primaryDir;
+    if (voiceDirectoryExists(config->legacyDir)) return config->legacyDir;
+
+    // Last-resort fallback to default voice
+    const VoiceDirectoryConfig* defaultConfig = getVoiceDirectoryConfig("default");
+    if (!defaultConfig) return nullptr;
+    if (voiceDirectoryExists(defaultConfig->primaryDir)) return defaultConfig->primaryDir;
+    if (voiceDirectoryExists(defaultConfig->legacyDir)) return defaultConfig->legacyDir;
+
+    return nullptr;
 }
 
 // ---------- Init ----------
@@ -39,25 +96,15 @@ void AudioAnnouncer::init(Config* config, Storage* storage) {
         return;
     }
 
-    // Determine voice directory from config
-    const char* voice = conf->getSelectedVoice();
-    const char* dir = getVoiceDirectory(voice);
-    strlcpy(voiceDir, dir, sizeof(voiceDir));
-
-    // Check if voice directory exists on SD
-    char checkPath[48];
-    snprintf(checkPath, sizeof(checkPath), "/%s", voiceDir);
-    if (!SD.exists(checkPath)) {
-        DEBUG("[Audio] Voice directory not found: %s\n", checkPath);
-        // Try default
-        strlcpy(voiceDir, "sounds_default", sizeof(voiceDir));
-        snprintf(checkPath, sizeof(checkPath), "/%s", voiceDir);
-        if (!SD.exists(checkPath)) {
-            DEBUG("[Audio] No sound directories found on SD, speaker disabled\n");
-            initialized = false;
-            return;
-        }
+    // Determine voice directory from config (canonical-first with legacy fallback)
+    const char* selectedVoice = conf->getSelectedVoice();
+    const char* resolvedDir = resolveVoiceDirectory(selectedVoice);
+    if (!resolvedDir) {
+        DEBUG("[Audio] No compatible voice directories found on SD (selectedVoice=%s), speaker disabled\n", selectedVoice ? selectedVoice : "null");
+        initialized = false;
+        return;
     }
+    strlcpy(voiceDir, resolvedDir, sizeof(voiceDir));
 
     // Init I2S output
     audioOut = new AudioOutputI2S(0);
@@ -69,7 +116,7 @@ void AudioAnnouncer::init(Config* config, Storage* storage) {
 
     initialized = true;
     enabled = conf->getSpeakerEnabled();
-    DEBUG("[Audio] Speaker initialized (voice: %s, enabled: %d)\n", voiceDir, enabled);
+    DEBUG("[Audio] Speaker initialized (selectedVoice: %s, voiceDir: %s, enabled: %d)\n", selectedVoice, voiceDir, enabled);
 }
 
 // ---------- Main Loop Handler ----------
@@ -80,12 +127,12 @@ void AudioAnnouncer::handleAudio() {
     // Update enabled state from config
     enabled = conf->getSpeakerEnabled();
 
-    // Update voice directory if changed
-    const char* voice = conf->getSelectedVoice();
-    const char* dir = getVoiceDirectory(voice);
-    if (strcmp(voiceDir, dir) != 0) {
-        strlcpy(voiceDir, dir, sizeof(voiceDir));
-        DEBUG("[Audio] Voice changed to: %s\n", voiceDir);
+    // Update voice directory if changed (canonical-first with legacy fallback)
+    const char* selectedVoice = conf->getSelectedVoice();
+    const char* resolvedDir = resolveVoiceDirectory(selectedVoice);
+    if (resolvedDir && strcmp(voiceDir, resolvedDir) != 0) {
+        strlcpy(voiceDir, resolvedDir, sizeof(voiceDir));
+        DEBUG("[Audio] Voice changed to: %s (selectedVoice=%s)\n", voiceDir, selectedVoice);
     }
 
     if (!enabled) {
