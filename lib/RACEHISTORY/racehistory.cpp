@@ -1,9 +1,9 @@
-#include "racehistory.h"
+﻿#include "racehistory.h"
 #include <algorithm>
 #include <time.h>
 #include "debug.h"
 
-RaceHistory::RaceHistory() : storage(nullptr) {
+RaceHistory::RaceHistory() : storage(nullptr), rssiRecorder(nullptr) {
 }
 
 bool RaceHistory::init(Storage* storageBackend) {
@@ -13,30 +13,24 @@ bool RaceHistory::init(Storage* storageBackend) {
         return false;
     }
     
-    // Create races directory if it doesn't exist
     storage->mkdir("/races");
     return true;
 }
 
-bool RaceHistory::saveRace(const RaceSession& race) {
-    if (!storage) {
-        DEBUG("RaceHistory: Storage backend is null in saveRace!\\n");
-        return false;
-    }
-    // Ensure /races exists on whichever backend is currently active
-    storage->mkdir(RACES_DIR);
-    // Generate filename from timestamp: DDMMYY-HrMinSec.json
-    time_t timestamp = race.timestamp;
+void RaceHistory::setRssiRecorder(RaceRssiRecorder* recorder) {
+    rssiRecorder = recorder;
+}
+
+static String raceFilePathForTimestamp(uint32_t timestamp) {
+    time_t ts = timestamp;
     struct tm timeinfo;
-    localtime_r(&timestamp, &timeinfo);
-    
+    localtime_r(&ts, &timeinfo);
     char filename[32];
     strftime(filename, sizeof(filename), "%d%m%y-%H%M%S.json", &timeinfo);
-    String filepath = String(RACES_DIR) + "/" + String(filename);
-    
-    // Create JSON for single race
-    JsonDocument doc;
-    JsonObject raceObj = doc.to<JsonObject>();
+    return String(RACES_DIR) + "/" + String(filename);
+}
+
+void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) const {
     raceObj["timestamp"] = race.timestamp;
     raceObj["fastestLap"] = race.fastestLap;
     raceObj["medianLap"] = race.medianLap;
@@ -53,13 +47,12 @@ bool RaceHistory::saveRace(const RaceSession& race) {
     raceObj["trackName"] = race.trackName;
     raceObj["totalDistance"] = race.totalDistance;
     raceObj["syncMode"] = race.syncMode;
-    
+
     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
     for (uint32_t lap : race.lapTimes) {
         lapsArray.add(lap);
     }
-    
-    // Multi-pilot support
+
     if (!race.pilots.empty()) {
         JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
         for (const auto& pilot : race.pilots) {
@@ -75,31 +68,101 @@ bool RaceHistory::saveRace(const RaceSession& race) {
             }
         }
     }
-    
+
+    if (race.rssiMeta.hasHistory && race.rssiMeta.file.length() > 0) {
+        JsonObject rh = raceObj["rssiHistory"].to<JsonObject>();
+        rh["intervalMs"] = race.rssiMeta.intervalMs;
+        rh["sampleCount"] = race.rssiMeta.sampleCount;
+        rh["truncated"] = race.rssiMeta.truncated;
+        rh["file"] = race.rssiMeta.file;
+        raceObj["hasRssiHistory"] = true;
+        raceObj["rssiSampleCount"] = race.rssiMeta.sampleCount;
+        raceObj["rssiIntervalMs"] = race.rssiMeta.intervalMs;
+    } else {
+        raceObj["hasRssiHistory"] = false;
+        raceObj["rssiSampleCount"] = 0;
+        raceObj["rssiIntervalMs"] = 0;
+    }
+}
+
+void RaceHistory::readRssiMeta(JsonObject raceObj, RaceSession& race) const {
+    race.rssiMeta = RaceRssiMeta();
+    if (!raceObj["rssiHistory"].isNull()) {
+        JsonObject rh = raceObj["rssiHistory"].as<JsonObject>();
+        race.rssiMeta.intervalMs = rh["intervalMs"] | RACE_RSSI_INTERVAL_MS;
+        race.rssiMeta.sampleCount = rh["sampleCount"] | 0;
+        race.rssiMeta.truncated = rh["truncated"] | false;
+        race.rssiMeta.file = rh["file"] | "";
+        race.rssiMeta.hasHistory = race.rssiMeta.file.length() > 0 && race.rssiMeta.sampleCount > 0;
+    } else if (raceObj["hasRssiHistory"] | false) {
+        race.rssiMeta.hasHistory = true;
+        race.rssiMeta.sampleCount = raceObj["rssiSampleCount"] | 0;
+        race.rssiMeta.intervalMs = raceObj["rssiIntervalMs"] | RACE_RSSI_INTERVAL_MS;
+        race.rssiMeta.file = RaceRssiRecorder::sidecarBasenameForTimestamp(race.timestamp);
+    }
+}
+
+bool RaceHistory::writeRaceFile(const RaceSession& race) {
+    if (!storage) {
+        return false;
+    }
+    JsonDocument doc;
+    JsonObject raceObj = doc.to<JsonObject>();
+    writeRaceObject(raceObj, race);
     String json;
     serializeJson(doc, json);
-    
-    DEBUG("Saving race JSON: totalDistance=%.2f, syncMode=%d, pilots=%d\n", race.totalDistance, race.syncMode, race.pilots.size());
-    DEBUG("JSON content: %s\n", json.c_str());
-    
-    bool success = storage->writeFile(filepath, json);
+    String filepath = raceFilePathForTimestamp(race.timestamp);
+    return storage->writeFile(filepath, json);
+}
+
+void RaceHistory::deleteSidecar(const RaceSession& race) {
+    if (!storage) {
+        return;
+    }
+    if (race.rssiMeta.file.length() > 0) {
+        String path = race.rssiMeta.file.startsWith("/") ? race.rssiMeta.file : (String(RACES_DIR) + "/" + race.rssiMeta.file);
+        storage->deleteFile(path);
+    }
+    // Also try canonical path from timestamp
+    storage->deleteFile(RaceRssiRecorder::sidecarPathForTimestamp(race.timestamp));
+}
+
+bool RaceHistory::saveRace(const RaceSession& raceIn) {
+    if (!storage) {
+        DEBUG("RaceHistory: Storage backend is null in saveRace!\n");
+        return false;
+    }
+    storage->mkdir(RACES_DIR);
+
+    RaceSession race = raceIn;
+
+    // Attach pending RSSI capture from the just-finished race if present
+    if (rssiRecorder && rssiRecorder->hasPending()) {
+        RaceRssiMeta meta;
+        if (rssiRecorder->attachToRace(race.timestamp, meta)) {
+            race.rssiMeta = meta;
+        }
+    }
+
+    bool success = writeRaceFile(race);
     if (success) {
-        DEBUG("Saved race to %s (%d bytes)\n", filepath.c_str(), json.length());
-        Serial.printf("[Race] Saved to SD: %s (%u laps)\n", filepath.c_str(), (unsigned)race.lapTimes.size());
-        
-        // Add to in-memory list
+        DEBUG("Saved race to %s\n", raceFilePathForTimestamp(race.timestamp).c_str());
+        Serial.printf("[Race] Saved to SD: %s (%u laps, rssi=%u)\n",
+                      raceFilePathForTimestamp(race.timestamp).c_str(),
+                      (unsigned)race.lapTimes.size(),
+                      (unsigned)race.rssiMeta.sampleCount);
         races.insert(races.begin(), race);
         if (races.size() > MAX_RACES) {
+            // Delete sidecar for dropped race if we ever prune files later; for now only memory list
             races.resize(MAX_RACES);
         }
     } else {
-        DEBUG("Failed to save race to %s\n", filepath.c_str());
-        Serial.printf("[Race] Failed to save to %s\n", filepath.c_str());
+        DEBUG("Failed to save race\n");
+        Serial.printf("[Race] Failed to save race %u\n", race.timestamp);
     }
-    
+
     return success;
 }
-
 
 bool RaceHistory::loadRaces() {
     if (!storage) {
@@ -107,39 +170,35 @@ bool RaceHistory::loadRaces() {
         return false;
     }
 
-    // Ensure /races exists on whichever backend is currently active
     storage->mkdir(RACES_DIR);
-    
     races.clear();
-    
-    // List all JSON files in races directory
+
     std::vector<String> files;
     if (!storage->listDir(RACES_DIR, files)) {
         DEBUG("Races directory does not exist or is empty\n");
         return true;
     }
-    
-    // Load each race file
+
     int fileCount = 0;
     for (const String& filename : files) {
         if (!filename.endsWith(".json")) {
             continue;
         }
-        
+
         String filepath = String(RACES_DIR) + "/" + filename;
         String json;
         if (!storage->readFile(filepath, json)) {
             DEBUG("Failed to read %s\n", filepath.c_str());
             continue;
         }
-        
+
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, json);
         if (error) {
             DEBUG("Failed to parse %s: %s\n", filepath.c_str(), error.c_str());
             continue;
         }
-        
+
         RaceSession race;
         race.timestamp = doc["timestamp"];
         race.fastestLap = doc["fastestLap"];
@@ -157,13 +216,12 @@ bool RaceHistory::loadRaces() {
         race.trackName = doc["trackName"] | "";
         race.totalDistance = doc["totalDistance"] | 0.0f;
         race.syncMode = doc["syncMode"] | 0;
-        
+
         JsonArray lapsArray = doc["lapTimes"];
         for (uint32_t lap : lapsArray) {
             race.lapTimes.push_back(lap);
         }
-        
-        // Load pilots array if present
+
         if (!doc["pilots"].isNull()) {
             JsonArray pilotsArray = doc["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
@@ -180,42 +238,62 @@ bool RaceHistory::loadRaces() {
                 race.pilots.push_back(pilot);
             }
         }
-        
+
+        readRssiMeta(doc.as<JsonObject>(), race);
+        // Verify sidecar still exists
+        if (race.rssiMeta.hasHistory) {
+            String path = race.rssiMeta.file.startsWith("/") ? race.rssiMeta.file
+                                                             : (String(RACES_DIR) + "/" + race.rssiMeta.file);
+            if (!storage->exists(path)) {
+                // Try timestamp canonical name
+                path = RaceRssiRecorder::sidecarPathForTimestamp(race.timestamp);
+                if (storage->exists(path)) {
+                    race.rssiMeta.file = RaceRssiRecorder::sidecarBasenameForTimestamp(race.timestamp);
+                } else {
+                    race.rssiMeta = RaceRssiMeta();
+                }
+            }
+        }
+
         races.push_back(race);
         fileCount++;
-        
-        // Yield to other tasks every 10 files to prevent watchdog timeout
-        // and reduce SPI mutex contention with LCD
+
         if (fileCount % 10 == 0) {
             vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
-    
+
     DEBUG("Loaded %d races from individual files\n", races.size());
     return true;
 }
 
 bool RaceHistory::deleteRace(uint32_t timestamp) {
-    // Find and delete the file
-    time_t ts = timestamp;
-    struct tm timeinfo;
-    localtime_r(&ts, &timeinfo);
-    
-    char filename[32];
-    strftime(filename, sizeof(filename), "%d%m%y-%H%M%S.json", &timeinfo);
-    String filepath = String(RACES_DIR) + "/" + String(filename);
-    
+    String filepath = raceFilePathForTimestamp(timestamp);
     bool fileDeleted = storage->deleteFile(filepath);
-    
-    // Remove from in-memory list
+
+    RaceSession removed;
+    bool found = false;
     auto it = std::remove_if(races.begin(), races.end(),
-        [timestamp](const RaceSession& r) { return r.timestamp == timestamp; });
-    
+        [timestamp, &removed, &found](const RaceSession& r) {
+            if (r.timestamp == timestamp) {
+                removed = r;
+                found = true;
+                return true;
+            }
+            return false;
+        });
+
     if (it != races.end()) {
         races.erase(it, races.end());
+        if (found) {
+            deleteSidecar(removed);
+        } else {
+            storage->deleteFile(RaceRssiRecorder::sidecarPathForTimestamp(timestamp));
+        }
         return fileDeleted;
     }
-    
+
+    storage->deleteFile(RaceRssiRecorder::sidecarPathForTimestamp(timestamp));
     return false;
 }
 
@@ -224,7 +302,6 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
         DEBUG("RaceHistory: Storage backend is null in updateRace!\n");
         return false;
     }
-    // Update in-memory race
     RaceSession* targetRace = nullptr;
     for (auto& race : races) {
         if (race.timestamp == timestamp) {
@@ -238,48 +315,12 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
             break;
         }
     }
-    
+
     if (!targetRace) {
         return false;
     }
-    
-    // Regenerate file with updated data
-    time_t ts = timestamp;
-    struct tm timeinfo;
-    localtime_r(&ts, &timeinfo);
-    
-    char filename[32];
-    strftime(filename, sizeof(filename), "%d%m%y-%H%M%S.json", &timeinfo);
-    String filepath = String(RACES_DIR) + "/" + String(filename);
-    
-    // Create JSON
-    JsonDocument doc;
-    JsonObject raceObj = doc.to<JsonObject>();
-    raceObj["timestamp"] = targetRace->timestamp;
-    raceObj["fastestLap"] = targetRace->fastestLap;
-    raceObj["medianLap"] = targetRace->medianLap;
-    raceObj["best3LapsTotal"] = targetRace->best3LapsTotal;
-    raceObj["name"] = targetRace->name;
-    raceObj["tag"] = targetRace->tag;
-    raceObj["pilotName"] = targetRace->pilotName;
-    raceObj["pilotCallsign"] = targetRace->pilotCallsign;
-    raceObj["frequency"] = targetRace->frequency;
-    raceObj["band"] = targetRace->band;
-    raceObj["channel"] = targetRace->channel;
-    raceObj["notes"] = targetRace->notes;
-    raceObj["trackId"] = targetRace->trackId;
-    raceObj["trackName"] = targetRace->trackName;
-    raceObj["totalDistance"] = targetRace->totalDistance;
-    
-    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
-    for (uint32_t lap : targetRace->lapTimes) {
-        lapsArray.add(lap);
-    }
-    
-    String json;
-    serializeJson(doc, json);
-    
-    return storage->writeFile(filepath, json);
+
+    return writeRaceFile(*targetRace);
 }
 
 bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes) {
@@ -287,13 +328,11 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
         DEBUG("RaceHistory: Storage backend is null in updateLaps!\n");
         return false;
     }
-    // Validate lap times
     if (newLapTimes.empty()) {
         DEBUG("Cannot update race with empty lap times\n");
         return false;
     }
-    
-    // Find the race in memory
+
     RaceSession* targetRace = nullptr;
     for (auto& race : races) {
         if (race.timestamp == timestamp) {
@@ -301,20 +340,15 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
             break;
         }
     }
-    
+
     if (!targetRace) {
         DEBUG("Race with timestamp %u not found\n", timestamp);
         return false;
     }
-    
-    // Update lap times
+
     targetRace->lapTimes = newLapTimes;
-    
-    // Recalculate statistics
-    // Fastest lap
     targetRace->fastestLap = *std::min_element(newLapTimes.begin(), newLapTimes.end());
-    
-    // Median lap
+
     std::vector<uint32_t> sorted = newLapTimes;
     std::sort(sorted.begin(), sorted.end());
     size_t mid = sorted.size() / 2;
@@ -323,8 +357,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
     } else {
         targetRace->medianLap = sorted[mid];
     }
-    
-    // Best 3 laps total
+
     if (newLapTimes.size() >= 3) {
         targetRace->best3LapsTotal = sorted[0] + sorted[1] + sorted[2];
     } else {
@@ -333,44 +366,8 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
             targetRace->best3LapsTotal += lap;
         }
     }
-    
-    // Write updated race to file
-    time_t ts = timestamp;
-    struct tm timeinfo;
-    localtime_r(&ts, &timeinfo);
-    
-    char filename[32];
-    strftime(filename, sizeof(filename), "%d%m%y-%H%M%S.json", &timeinfo);
-    String filepath = String(RACES_DIR) + "/" + String(filename);
-    
-    // Create JSON
-    JsonDocument doc;
-    JsonObject raceObj = doc.to<JsonObject>();
-    raceObj["timestamp"] = targetRace->timestamp;
-    raceObj["fastestLap"] = targetRace->fastestLap;
-    raceObj["medianLap"] = targetRace->medianLap;
-    raceObj["best3LapsTotal"] = targetRace->best3LapsTotal;
-    raceObj["name"] = targetRace->name;
-    raceObj["tag"] = targetRace->tag;
-    raceObj["pilotName"] = targetRace->pilotName;
-    raceObj["pilotCallsign"] = targetRace->pilotCallsign;
-    raceObj["frequency"] = targetRace->frequency;
-    raceObj["band"] = targetRace->band;
-    raceObj["channel"] = targetRace->channel;
-    raceObj["notes"] = targetRace->notes;
-    raceObj["trackId"] = targetRace->trackId;
-    raceObj["trackName"] = targetRace->trackName;
-    raceObj["totalDistance"] = targetRace->totalDistance;
-    
-    JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
-    for (uint32_t lap : targetRace->lapTimes) {
-        lapsArray.add(lap);
-    }
-    
-    String json;
-    serializeJson(doc, json);
-    
-    bool success = storage->writeFile(filepath, json);
+
+    bool success = writeRaceFile(*targetRace);
     if (success) {
         DEBUG("Updated laps for race %u\n", timestamp);
     }
@@ -378,17 +375,16 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
 }
 
 bool RaceHistory::clearAll() {
-    // Delete all race files
     std::vector<String> files;
     if (storage->listDir(RACES_DIR, files)) {
         for (const String& filename : files) {
-            if (filename.endsWith(".json")) {
+            if (filename.endsWith(".json") || filename.endsWith(".rssi")) {
                 String filepath = String(RACES_DIR) + "/" + filename;
                 storage->deleteFile(filepath);
             }
         }
     }
-    
+
     races.clear();
     return true;
 }
@@ -397,73 +393,43 @@ const std::vector<RaceSession>& RaceHistory::getRaces() {
     return races;
 }
 
-String RaceHistory::toJsonString() {
-    JsonDocument doc;  // 128KB - enough for ~50 races with multi-pilot data
-    JsonArray racesArray = doc["races"].to<JsonArray>();
-    
-    // Limit output to MAX_RACES to avoid memory issues
-    size_t racesToOutput = std::min(races.size(), (size_t)MAX_RACES);
-    for (size_t i = 0; i < racesToOutput; i++) {
-        const auto& race = races[i];
-        JsonObject raceObj = racesArray.add<JsonObject>();
-        raceObj["timestamp"] = race.timestamp;
-        raceObj["fastestLap"] = race.fastestLap;
-        raceObj["medianLap"] = race.medianLap;
-        raceObj["best3LapsTotal"] = race.best3LapsTotal;
-        raceObj["name"] = race.name;
-        raceObj["tag"] = race.tag;
-        raceObj["pilotName"] = race.pilotName;
-        raceObj["pilotCallsign"] = race.pilotCallsign;
-        raceObj["frequency"] = race.frequency;
-        raceObj["band"] = race.band;
-        raceObj["channel"] = race.channel;
-        raceObj["notes"] = race.notes;
-        raceObj["trackId"] = race.trackId;
-        raceObj["trackName"] = race.trackName;
-        raceObj["totalDistance"] = race.totalDistance;
-        raceObj["syncMode"] = race.syncMode;
-        
-        JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
-        for (uint32_t lap : race.lapTimes) {
-            lapsArray.add(lap);
-        }
-        
-        // Include pilots array if present
-        if (!race.pilots.empty()) {
-            JsonArray pilotsArray = raceObj["pilots"].to<JsonArray>();
-            for (const auto& pilot : race.pilots) {
-                JsonObject pilotObj = pilotsArray.add<JsonObject>();
-                pilotObj["name"] = pilot.name;
-                pilotObj["callsign"] = pilot.callsign;
-                pilotObj["color"] = pilot.color;
-                pilotObj["fastestLap"] = pilot.fastestLap;
-                pilotObj["isLocal"] = pilot.isLocal;
-                JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
-                for (uint32_t lap : pilot.lapTimes) {
-                    pilotLaps.add(lap);
-                }
-            }
+bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const {
+    for (const auto& race : races) {
+        if (race.timestamp == timestamp) {
+            out = race;
+            return true;
         }
     }
-    
+    return false;
+}
+
+String RaceHistory::toJsonString() {
+    JsonDocument doc;
+    JsonArray racesArray = doc["races"].to<JsonArray>();
+
+    size_t racesToOutput = std::min(races.size(), (size_t)MAX_RACES);
+    for (size_t i = 0; i < racesToOutput; i++) {
+        JsonObject raceObj = racesArray.add<JsonObject>();
+        writeRaceObject(raceObj, races[i]);
+    }
+
     String output;
     serializeJson(doc, output);
     return output;
 }
 
 bool RaceHistory::fromJsonString(const String& json) {
-    JsonDocument doc;  // Increased for multi-pilot data
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
-    
+
     if (error) {
         DEBUG("Failed to parse races JSON: %s\n", error.c_str());
         return false;
     }
-    
-    // Import races from JSON array
+
     JsonArray racesArray = doc["races"];
     int importedCount = 0;
-    
+
     for (JsonObject raceObj : racesArray) {
         RaceSession race;
         race.timestamp = raceObj["timestamp"];
@@ -482,13 +448,12 @@ bool RaceHistory::fromJsonString(const String& json) {
         race.trackName = raceObj["trackName"] | "";
         race.totalDistance = raceObj["totalDistance"] | 0.0f;
         race.syncMode = raceObj["syncMode"] | 0;
-        
+
         JsonArray lapsArray = raceObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
             race.lapTimes.push_back(lap);
         }
-        
-        // Import pilots array if present
+
         if (!raceObj["pilots"].isNull()) {
             JsonArray pilotsArray = raceObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
@@ -505,8 +470,9 @@ bool RaceHistory::fromJsonString(const String& json) {
                 race.pilots.push_back(pilot);
             }
         }
-        
-        // Check if race with this timestamp already exists
+
+        readRssiMeta(raceObj, race);
+
         bool exists = false;
         for (const auto& existingRace : races) {
             if (existingRace.timestamp == race.timestamp) {
@@ -514,17 +480,18 @@ bool RaceHistory::fromJsonString(const String& json) {
                 break;
             }
         }
-        
-        // Save to individual file if it doesn't exist
-        if (!exists && saveRace(race)) {
-            importedCount++;
+
+        // Import without re-attaching pending recorder capture
+        if (!exists) {
+            RaceRssiRecorder* saved = rssiRecorder;
+            rssiRecorder = nullptr;
+            if (saveRace(race)) {
+                importedCount++;
+            }
+            rssiRecorder = saved;
         }
     }
-    
-    // Reload all races to update in-memory list
-    loadRaces();
-    
-    DEBUG("Imported %d races\n", importedCount);
-    return true;
-}
 
+    DEBUG("Imported %d races\n", importedCount);
+    return importedCount > 0 || racesArray.size() == 0;
+}

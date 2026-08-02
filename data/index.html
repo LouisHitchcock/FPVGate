@@ -319,6 +319,85 @@
       </div>
     </footer>
 
+    <!-- Marshal Visual Graph Modal -->
+    <div id="marshalModal" class="modal" style="display: none" onclick="closeMarshalModalOnBackdrop(event)" role="dialog" aria-modal="true" aria-labelledby="marshalTitle">
+      <div class="modal-content marshal-modal-content">
+        <div class="marshal-header">
+          <div>
+            <h3 id="marshalTitle" style="margin: 0" data-i18n="history.marshal_title">Visual Marshal</h3>
+            <p id="marshalMeta" class="marshal-meta" aria-live="polite"></p>
+          </div>
+          <button type="button" onclick="closeMarshalModal()" class="marshal-btn marshal-btn-secondary" data-i18n="history.close">Close</button>
+        </div>
+
+        <div class="marshal-guide" role="note">
+          <button type="button" id="marshalGuideToggle" class="marshal-guide-toggle" aria-expanded="true" aria-controls="marshalGuideBody" onclick="toggleMarshalGuide()">
+            <span data-i18n="history.marshal_how_title">How to use</span>
+            <span id="marshalGuideChevron" class="marshal-guide-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div id="marshalGuideBody" class="marshal-guide-body">
+            <ol class="marshal-guide-list">
+              <li data-i18n="history.marshal_how_1">Blue line = recorded RSSI. Peaks are gate crossings.</li>
+              <li data-i18n="history.marshal_how_2">Click Gate 1 / Lap N in the list to highlight it on the graph.</li>
+              <li data-i18n="history.marshal_how_3">Click a vertical marker on the graph to select that crossing.</li>
+              <li data-i18n="history.marshal_how_4">Click empty space near a peak to add a missing crossing.</li>
+              <li data-i18n="history.marshal_how_5">Delete the selected crossing, or Recalculate from Enter/Exit lines.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="marshal-layout">
+          <div class="marshal-graph-col">
+            <div class="marshal-chart-wrap">
+              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Vertical markers are gate passes. Click a peak to add or select a pass."></canvas>
+            </div>
+
+            <div class="marshal-legend" aria-hidden="false">
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-rssi"></span><span data-i18n="history.marshal_legend_rssi">RSSI signal</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-enter"></span><span data-i18n="history.marshal_legend_enter">Enter threshold</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-exit"></span><span data-i18n="history.marshal_legend_exit">Exit threshold</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-pass"></span><span data-i18n="history.marshal_legend_pass">Pass marker</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-selected"></span><span data-i18n="history.marshal_legend_selected">Selected pass</span></span>
+            </div>
+
+            <p id="marshalSelectionStatus" class="marshal-selection-status" aria-live="polite" data-i18n="history.marshal_none_selected">No pass selected. Click a list item or graph marker.</p>
+            <p id="marshalTruncated" class="marshal-truncated" style="display: none" data-i18n="history.marshal_truncated">History truncated</p>
+
+            <div class="calib-threshold-grid marshal-thresholds">
+              <div class="calib-threshold-item">
+                <div class="calib-threshold-header">
+                  <label for="marshalEnter" data-i18n="calib.enter_rssi">Enter RSSI</label>
+                  <span id="marshalEnterSpan" class="calib-threshold-value">120</span>
+                </div>
+                <input type="range" min="50" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="50" aria-valuemax="255" />
+                <div class="calib-threshold-hint" data-i18n="history.marshal_enter_hint">Used only for Recalculate preview (does not change device config)</div>
+              </div>
+              <div class="calib-threshold-item">
+                <div class="calib-threshold-header">
+                  <label for="marshalExit" data-i18n="calib.exit_rssi">Exit RSSI</label>
+                  <span id="marshalExitSpan" class="calib-threshold-value">100</span>
+                </div>
+                <input type="range" min="50" max="255" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="50" aria-valuemax="255" />
+                <div class="calib-threshold-hint" data-i18n="history.marshal_exit_hint">Used only for Recalculate preview (does not change device config)</div>
+              </div>
+            </div>
+
+            <div class="marshal-actions">
+              <button type="button" onclick="marshalRecalculate()" class="marshal-btn" data-i18n="history.marshal_recalc">Recalculate Laps</button>
+              <button type="button" id="marshalDeleteBtn" onclick="marshalDeleteSelected()" class="marshal-btn marshal-btn-danger" disabled data-i18n="history.marshal_delete_pass">Delete Selected Pass</button>
+              <button type="button" onclick="marshalSaveLaps()" class="marshal-btn marshal-btn-primary" data-i18n="history.marshal_save">Save Lap Changes</button>
+            </div>
+          </div>
+
+          <aside class="marshal-list-col" aria-label="Pass list">
+            <h4 class="marshal-list-title" data-i18n="history.marshal_passes_title">Gate Passes</h4>
+            <p class="marshal-list-hint" data-i18n="history.marshal_list_hint">Click a pass to locate it on the graph. Selected pass is highlighted in yellow.</p>
+            <div id="marshalLapsList" class="marshal-laps-list" role="listbox" aria-label="Recorded gate passes"></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
     <!-- Edit Race Modal -->
     <div id="editRaceModal" class="modal" style="display: none" onclick="closeEditModalOnBackdrop(event)">
       <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto">

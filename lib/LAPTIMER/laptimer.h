@@ -11,6 +11,7 @@
 // Forward declarations to avoid circular dependency
 struct Track;
 class WebhookManager;
+class RaceRssiRecorder;
 
 typedef enum {
     STOPPED,
@@ -26,6 +27,7 @@ typedef enum {
 class LapTimer {
    public:
     void init(Config *config, RX5808 *rx5808, Buzzer *buzzer, Led *l, WebhookManager *webhook = nullptr);
+    void setRssiRecorder(RaceRssiRecorder *recorder);
     void start();
     void stop();
     void handleLapTimerUpdate(uint32_t currentTimeMs);
@@ -84,6 +86,7 @@ class LapTimer {
     Buzzer *buz;
     Led *led;
     WebhookManager *webhooks;
+    RaceRssiRecorder *rssiRecorder = nullptr;
     KalmanFilter filter;
     boolean lapCountWraparound;
     uint32_t raceStartTimeMs;

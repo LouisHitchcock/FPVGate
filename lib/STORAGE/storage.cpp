@@ -196,6 +196,138 @@ bool Storage::writeFile(const String& path, const String& data) {
     return written > 0;
 }
 
+bool Storage::writeBinaryFile(const String& path, const uint8_t* data, size_t len) {
+    if (!data && len > 0) {
+        return false;
+    }
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(200))) {
+            return false;
+        }
+        File file = SD.open(path, FILE_WRITE);
+        if (!file) {
+            spiMutexGive();
+            return false;
+        }
+        size_t written = (len == 0) ? 0 : file.write(data, len);
+        file.close();
+        spiMutexGive();
+        return written == len;
+    }
+#endif
+    File file = LittleFS.open(path, "w");
+    if (!file) {
+        return false;
+    }
+    size_t written = (len == 0) ? 0 : file.write(data, len);
+    file.close();
+    return written == len;
+}
+
+bool Storage::appendBinaryFile(const String& path, const uint8_t* data, size_t len) {
+    if (!data || len == 0) {
+        return true;
+    }
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(200))) {
+            return false;
+        }
+        File file = SD.open(path, FILE_APPEND);
+        if (!file) {
+            // Some SD stacks need create-then-append if file missing
+            file = SD.open(path, FILE_WRITE);
+            if (file) {
+                file.close();
+                file = SD.open(path, FILE_APPEND);
+            }
+        }
+        if (!file) {
+            spiMutexGive();
+            return false;
+        }
+        size_t written = file.write(data, len);
+        file.close();
+        spiMutexGive();
+        return written == len;
+    }
+#endif
+    File file = LittleFS.open(path, "a");
+    if (!file) {
+        return false;
+    }
+    size_t written = file.write(data, len);
+    file.close();
+    return written == len;
+}
+
+bool Storage::readBinaryFile(const String& path, std::vector<uint8_t>& out) {
+    out.clear();
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) {
+            return false;
+        }
+        if (!SD.exists(path)) {
+            spiMutexGive();
+            return false;
+        }
+        File file = SD.open(path, FILE_READ);
+        if (!file) {
+            spiMutexGive();
+            return false;
+        }
+        size_t sz = file.size();
+        out.resize(sz);
+        size_t got = (sz == 0) ? 0 : file.read(out.data(), sz);
+        file.close();
+        spiMutexGive();
+        if (got != sz) {
+            out.clear();
+            return false;
+        }
+        return true;
+    }
+#endif
+    if (!LittleFS.exists(path)) {
+        return false;
+    }
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        return false;
+    }
+    size_t sz = file.size();
+    out.resize(sz);
+    size_t got = (sz == 0) ? 0 : file.read(out.data(), sz);
+    file.close();
+    if (got != sz) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+bool Storage::renameFile(const String& fromPath, const String& toPath) {
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) {
+            return false;
+        }
+        if (SD.exists(toPath)) {
+            SD.remove(toPath);
+        }
+        bool ok = SD.rename(fromPath, toPath);
+        spiMutexGive();
+        return ok;
+    }
+#endif
+    if (LittleFS.exists(toPath)) {
+        LittleFS.remove(toPath);
+    }
+    return LittleFS.rename(fromPath, toPath);
+}
+
 bool Storage::readFile(const String& path, String& data) {
 #ifdef HAS_SD_CARD_SUPPORT
     if (sdAvailable) {

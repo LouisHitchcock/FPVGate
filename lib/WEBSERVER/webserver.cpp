@@ -1,5 +1,6 @@
 #include "webserver.h"
 #include "version.h"
+#include "race_rssi_recorder.h"
 #include <ElegantOTA.h>
 
 #include <DNSServer.h>
@@ -1164,6 +1165,53 @@ EEPROM:\n\
     server.addHandler(configJsonHandler);
 
     // Race history endpoints
+    // Use /api/marshal/rssi (NOT under /races/*). ESPAsyncWebServer can treat
+    // /races as a prefix match, so /races/rssi previously returned the race list.
+    server.on("/api/marshal/rssi", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!request->hasParam("timestamp")) {
+            request->send(400, "application/json", "{\"status\":\"ERROR\",\"message\":\"Missing timestamp\"}");
+            return;
+        }
+        uint32_t timestamp = request->getParam("timestamp")->value().toInt();
+        RaceSession race;
+        if (!history->getRaceByTimestamp(timestamp, race) || !race.rssiMeta.hasHistory) {
+            DEBUG("[Marshal] RSSI lookup miss ts=%u hasHistory=%d\n", timestamp, race.rssiMeta.hasHistory ? 1 : 0);
+            request->send(404, "application/json", "{\"status\":\"ERROR\",\"message\":\"No RSSI history\"}");
+            return;
+        }
+        RaceRssiMeta meta;
+        std::vector<uint8_t> samples;
+        String file = race.rssiMeta.file;
+        if (!RaceRssiRecorder::loadSamples(storage, file, meta, samples)) {
+            String fallback = RaceRssiRecorder::sidecarBasenameForTimestamp(timestamp);
+            DEBUG("[Marshal] loadSamples failed for '%s', trying '%s'\n", file.c_str(), fallback.c_str());
+            if (!RaceRssiRecorder::loadSamples(storage, fallback, meta, samples)) {
+                request->send(404, "application/json", "{\"status\":\"ERROR\",\"message\":\"RSSI file missing\"}");
+                return;
+            }
+        }
+        DEBUG("[Marshal] Serving %u RSSI samples for ts=%u\n", (unsigned)samples.size(), timestamp);
+
+        String out;
+        out.reserve(samples.size() * 4 + 96);
+        out += "{\"timestamp\":";
+        out += String(timestamp);
+        out += ",\"intervalMs\":";
+        out += String(meta.intervalMs);
+        out += ",\"sampleCount\":";
+        out += String((uint32_t)samples.size());
+        out += ",\"truncated\":";
+        out += meta.truncated ? "true" : "false";
+        out += ",\"samples\":[";
+        for (size_t i = 0; i < samples.size(); i++) {
+            if (i) out += ',';
+            out += String(samples[i]);
+        }
+        out += "]}";
+        request->send(200, "application/json", out);
+        led->on(200);
+    });
+
     server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = history->toJsonString();
         request->send(200, "application/json", json);

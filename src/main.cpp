@@ -4,6 +4,7 @@
 #include "led.h"
 #include "webserver.h"
 #include "racehistory.h"
+#include "race_rssi_recorder.h"
 #include "storage.h"
 #include <time.h>
 #include <algorithm>
@@ -79,6 +80,7 @@ static TransportManager transportManager;
 static Buzzer buzzer;
 static Led led;
 static RaceHistory raceHistory;
+static RaceRssiRecorder raceRssiRecorder;
 static TrackManager trackManager;
 static WebhookManager webhookManager;
 static RHManager rhManager;
@@ -190,6 +192,11 @@ static void onSdCardReady() {
     storage.mkdir("/tracks");
     storage.mkdir("/tracks/images");
     DEBUG("SD folders ready\n");
+
+    raceRssiRecorder.cleanupOrphans();
+    // Reload races from SD now that backend is available
+    raceHistory.loadRaces();
+    DEBUG("Race history reloaded after SD mount (%u races)\n", (unsigned)raceHistory.getRaceCount());
 
 #ifdef HAS_I2S_AUDIO
     // Initialize speaker audio (requires SD card)
@@ -410,6 +417,11 @@ void setup() {
     } else {
         DEBUG("Race history initialization failed\n");
     }
+
+    // Marshal RSSI capture (SD-backed staging; no large RAM buffer)
+    raceRssiRecorder.init(&storage);
+    raceHistory.setRssiRecorder(&raceRssiRecorder);
+    timer.setRssiRecorder(&raceRssiRecorder);
     
     // Initialize track manager
     if (trackManager.init(&storage)) {

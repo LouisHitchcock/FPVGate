@@ -3578,11 +3578,40 @@ function stopRace() {
   const currentLapTimerEl = document.getElementById("currentLapTimer");
   if (currentLapTimerEl) currentLapTimerEl.textContent = "00:00:00s";
 
+  stopRaceButton.disabled = true;
+  startRaceButton.disabled = false;
+  addLapButton.disabled = true;
+
+  // Stop distance polling
+  stopDistancePolling();
+
+  const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
+  const afterStop = () => {
+    // Auto-save after stop so device can finalize RSSI capture before attach
+    if (lapTimes.length > 0) {
+      return saveCurrentRace().then(() => {
+        if (shouldOpenRaceNotes) {
+          openRaceNotesModal();
+        }
+      });
+    }
+    if (shouldOpenRaceNotes) {
+      openRaceNotesModal();
+    }
+    return Promise.resolve();
+  };
+
   if (usbConnected && transportManager) {
     transportManager
       .sendCommand("timer/stop", "POST")
-      .then((response) => console.log("/timer/stop:", response))
-      .catch((err) => console.error("Failed to stop timer:", err));
+      .then((response) => {
+        console.log("/timer/stop:", response);
+        return afterStop();
+      })
+      .catch((err) => {
+        console.error("Failed to stop timer:", err);
+        return afterStop();
+      });
   } else {
     fetch("/timer/stop", {
       method: "POST",
@@ -3592,26 +3621,14 @@ function stopRace() {
       },
     })
       .then((response) => response.json())
-      .then((response) => console.log("/timer/stop:" + JSON.stringify(response)));
-  }
-
-  stopRaceButton.disabled = true;
-  startRaceButton.disabled = false;
-  addLapButton.disabled = true;
-
-  // Stop distance polling
-  stopDistancePolling();
-
-  const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
-  // Auto-save race if there are laps
-  if (lapTimes.length > 0) {
-    saveCurrentRace().then(() => {
-      if (shouldOpenRaceNotes) {
-        openRaceNotesModal();
-      }
-    });
-  } else if (shouldOpenRaceNotes) {
-    openRaceNotesModal();
+      .then((response) => {
+        console.log("/timer/stop:" + JSON.stringify(response));
+        return afterStop();
+      })
+      .catch((err) => {
+        console.error("Failed to stop timer:", err);
+        return afterStop();
+      });
   }
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
@@ -5445,10 +5462,12 @@ function renderRaceHistory() {
       pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;">${i18n.t("history.item_pilot", { n: pilotCallsign })}</div>`;
     }
 
+    const canMarshal = !!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount));
     html += `
       <div class="race-item" data-race-index="${index}">
         <div class="race-item-buttons">
           <button class="race-item-button" data-action="edit" data-index="${index}">${i18n.t("history.edit")}</button>
+          ${canMarshal ? `<button class="race-item-button" data-action="marshal" data-index="${index}" style="border-color: var(--accent-color); color: var(--accent-color);">${i18n.t("history.marshal")}</button>` : ""}
           <button class="race-item-button" data-action="download" data-timestamp="${race.timestamp}">${i18n.t("history.download")}</button>
           <button class="race-item-button" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete" data-timestamp="${race.timestamp}">${i18n.t("history.delete")}</button>
         </div>
@@ -5526,6 +5545,9 @@ function setupRaceHistoryEventHandlers() {
       if (action === "edit") {
         const index = parseInt(button.getAttribute("data-index"));
         openEditModal(index);
+      } else if (action === "marshal") {
+        const index = parseInt(button.getAttribute("data-index"));
+        openMarshalModal(index);
       } else if (action === "download") {
         const timestamp = parseInt(button.getAttribute("data-timestamp"));
         downloadSingleRace(timestamp);
@@ -6626,6 +6648,462 @@ function deleteRace(timestamp) {
       }
     })
     .catch((error) => console.error("Error deleting race:", error));
+}
+
+// ---- Visual Marshal (RH-style RSSI history) ----
+let marshalState = null;
+
+function segmentsToAbsPasses(lapTimes) {
+  const abs = [];
+  let t = 0;
+  for (let i = 0; i < lapTimes.length; i++) {
+    t += lapTimes[i];
+    abs.push(t);
+  }
+  return abs;
+}
+
+function absPassesToSegments(absPasses) {
+  const sorted = absPasses.slice().sort((a, b) => a - b);
+  const segs = [];
+  let prev = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const dt = Math.max(1, Math.round(sorted[i] - prev));
+    segs.push(dt);
+    prev = sorted[i];
+  }
+  return segs;
+}
+
+function openMarshalModal(index) {
+  const race = raceHistoryData[index];
+  if (!race) return;
+  if (!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount))) {
+    alert(i18n.t("history.marshal_no_history"));
+    return;
+  }
+
+  marshalState = {
+    index,
+    race,
+    samples: [],
+    intervalMs: 20,
+    truncated: false,
+    absPasses: segmentsToAbsPasses(race.lapTimes || []),
+    selected: -1,
+    enter: typeof enterRssi !== "undefined" ? enterRssi : 120,
+    exit: typeof exitRssi !== "undefined" ? exitRssi : 100,
+  };
+
+  document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_loading");
+  document.getElementById("marshalEnter").value = marshalState.enter;
+  document.getElementById("marshalExit").value = marshalState.exit;
+  document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
+  document.getElementById("marshalExitSpan").textContent = marshalState.exit;
+  document.getElementById("marshalTruncated").style.display = "none";
+  document.getElementById("marshalModal").style.display = "flex";
+  applyMarshalGuidePreference();
+  renderMarshalLapsList();
+
+  fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
+    .then((r) => {
+      if (!r.ok) throw new Error("no history HTTP " + r.status);
+      return r.json();
+    })
+    .then((data) => {
+      // Detect wrong payload (e.g. /races list leaked into this endpoint)
+      if (!data || !Array.isArray(data.samples)) {
+        console.error("[Marshal] Unexpected RSSI payload:", data);
+        throw new Error("invalid rssi payload");
+      }
+      marshalState.samples = data.samples;
+      marshalState.intervalMs = data.intervalMs || 20;
+      marshalState.truncated = !!data.truncated;
+      const dur = ((marshalState.samples.length * marshalState.intervalMs) / 1000).toFixed(1);
+      document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_meta", {
+        count: marshalState.samples.length,
+        interval: marshalState.intervalMs,
+        duration: dur,
+      });
+      document.getElementById("marshalTruncated").style.display = marshalState.truncated ? "inline" : "none";
+      drawMarshalChart();
+    })
+    .catch((err) => {
+      console.error("[Marshal] failed to load RSSI:", err);
+      document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_no_history");
+      drawMarshalChart();
+    });
+
+  const canvas = document.getElementById("marshalChart");
+  canvas.onclick = onMarshalChartClick;
+}
+
+function closeMarshalModal() {
+  document.getElementById("marshalModal").style.display = "none";
+  marshalState = null;
+}
+
+function closeMarshalModalOnBackdrop(event) {
+  if (event.target.id === "marshalModal") closeMarshalModal();
+}
+
+function updateMarshalThresholds() {
+  if (!marshalState) return;
+  marshalState.enter = parseInt(document.getElementById("marshalEnter").value, 10);
+  marshalState.exit = parseInt(document.getElementById("marshalExit").value, 10);
+  if (marshalState.exit >= marshalState.enter) {
+    marshalState.exit = Math.max(50, marshalState.enter - 1);
+    document.getElementById("marshalExit").value = marshalState.exit;
+  }
+  document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
+  document.getElementById("marshalExitSpan").textContent = marshalState.exit;
+  drawMarshalChart();
+}
+
+function marshalPassLabel(i) {
+  if (i === 0) return i18n.t("race.gate1");
+  // Lap numbers start at 1 after Gate 1
+  return i18n.t("race.lap_counter", { n: i });
+}
+
+function toggleMarshalGuide() {
+  const guide = document.querySelector(".marshal-guide");
+  const toggle = document.getElementById("marshalGuideToggle");
+  if (!guide || !toggle) return;
+  const collapsed = guide.classList.toggle("is-collapsed");
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  try {
+    localStorage.setItem("marshalGuideCollapsed", collapsed ? "1" : "0");
+  } catch (e) {}
+}
+
+function applyMarshalGuidePreference() {
+  const guide = document.querySelector(".marshal-guide");
+  const toggle = document.getElementById("marshalGuideToggle");
+  if (!guide || !toggle) return;
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem("marshalGuideCollapsed") === "1";
+  } catch (e) {}
+  guide.classList.toggle("is-collapsed", collapsed);
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function updateMarshalSelectionUI() {
+  if (!marshalState) return;
+  const statusEl = document.getElementById("marshalSelectionStatus");
+  const deleteBtn = document.getElementById("marshalDeleteBtn");
+  const segs = absPassesToSegments(marshalState.absPasses);
+  const i = marshalState.selected;
+  if (i < 0 || i >= marshalState.absPasses.length) {
+    if (statusEl) statusEl.textContent = i18n.t("history.marshal_none_selected");
+    if (deleteBtn) deleteBtn.disabled = true;
+    return;
+  }
+  if (statusEl) {
+    statusEl.textContent = i18n.t("history.marshal_selected", {
+      label: marshalPassLabel(i),
+      time: (marshalState.absPasses[i] / 1000).toFixed(3),
+      seg: (segs[i] / 1000).toFixed(3),
+    });
+  }
+  if (deleteBtn) deleteBtn.disabled = false;
+}
+
+function renderMarshalLapsList() {
+  if (!marshalState) return;
+  const segs = absPassesToSegments(marshalState.absPasses);
+  const box = document.getElementById("marshalLapsList");
+  let html = "";
+  segs.forEach((ms, i) => {
+    const label = marshalPassLabel(i);
+    const sel = marshalState.selected === i;
+    html += `<button type="button" role="option" aria-selected="${sel ? "true" : "false"}" class="marshal-pass-item${sel ? " is-selected" : ""}" onclick="marshalSelectPass(${i})">
+      <div class="marshal-pass-label">${label}</div>
+      <div class="marshal-pass-time">${(ms / 1000).toFixed(3)}s</div>
+      <div class="marshal-pass-abs">${i18n.t("history.marshal_at", { time: (marshalState.absPasses[i] / 1000).toFixed(3) })}</div>
+    </button>`;
+  });
+  if (!segs.length) html = `<p class="no-data">-</p>`;
+  box.innerHTML = html;
+  updateMarshalSelectionUI();
+
+  // Keep selected pass visible in the list
+  if (marshalState.selected >= 0) {
+    const selectedEl = box.querySelector(".marshal-pass-item.is-selected");
+    if (selectedEl && selectedEl.scrollIntoView) {
+      selectedEl.scrollIntoView({ block: "nearest" });
+    }
+  }
+}
+
+function marshalSelectPass(i) {
+  if (!marshalState) return;
+  // Toggle off if clicking the same item again
+  marshalState.selected = marshalState.selected === i ? -1 : i;
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function marshalDeleteSelected() {
+  if (!marshalState || marshalState.selected < 0) return;
+  if (marshalState.absPasses.length <= 1) {
+    alert(i18n.t("history.edit_lap_last_error"));
+    return;
+  }
+  marshalState.absPasses.splice(marshalState.selected, 1);
+  marshalState.selected = -1;
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function drawMarshalChart() {
+  if (!marshalState) return;
+  const canvas = document.getElementById("marshalChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  const padL = 44, padR = 14, padT = 18, padB = 30;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  ctx.clearRect(0, 0, w, h);
+
+  // High-contrast dark plot background
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, w, h);
+
+  const samples = marshalState.samples;
+  const n = samples.length;
+  if (!n) {
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText(i18n.t("history.marshal_no_samples"), padL, h / 2);
+    return;
+  }
+
+  let minV = 255, maxV = 0;
+  for (let i = 0; i < n; i++) {
+    if (samples[i] < minV) minV = samples[i];
+    if (samples[i] > maxV) maxV = samples[i];
+  }
+  minV = Math.max(0, Math.min(minV, marshalState.exit - 10));
+  maxV = Math.min(255, Math.max(maxV, marshalState.enter + 10));
+  if (maxV <= minV) maxV = minV + 1;
+
+  const xAt = (i) => padL + (i / Math.max(1, n - 1)) * plotW;
+  const yAt = (v) => padT + (1 - (v - minV) / (maxV - minV)) * plotH;
+
+  // High-contrast grid
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (g / 4) * plotH;
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + plotW, y);
+  }
+  ctx.stroke();
+
+  // enter/exit with stronger colors + labels
+  const enterY = yAt(marshalState.enter);
+  const exitY = yAt(marshalState.exit);
+  ctx.strokeStyle = "#ff4d4d";
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([8, 5]);
+  ctx.beginPath();
+  ctx.moveTo(padL, enterY);
+  ctx.lineTo(padL + plotW, enterY);
+  ctx.stroke();
+  ctx.strokeStyle = "#ffb020";
+  ctx.beginPath();
+  ctx.moveTo(padL, exitY);
+  ctx.lineTo(padL + plotW, exitY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillStyle = "#ff8a80";
+  ctx.fillText("ENTER " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
+  ctx.fillStyle = "#ffd54f";
+  ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
+
+  // RSSI fill + line (high contrast cyan/blue)
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = xAt(i);
+    const y = yAt(samples[i]);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = "#4da3ff";
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // pass markers with numbers
+  marshalState.absPasses.forEach((absMs, idx) => {
+    const si = Math.round(absMs / marshalState.intervalMs);
+    const clamped = Math.max(0, Math.min(n - 1, si));
+    const x = xAt(clamped);
+    const y = yAt(samples[clamped]);
+    const selected = idx === marshalState.selected;
+
+    if (selected) {
+      // Dim overlay except selected region band
+      ctx.fillStyle = "rgba(255, 229, 102, 0.12)";
+      ctx.fillRect(x - 10, padT, 20, plotH);
+    }
+
+    ctx.strokeStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.lineWidth = selected ? 3.5 : 2;
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+
+    // Marker head
+    ctx.fillStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 7 : 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Number badge at top: G1, L1, L2...
+    const badge = idx === 0 ? "G1" : ("L" + idx);
+    ctx.font = "bold 11px sans-serif";
+    const tw = ctx.measureText(badge).width;
+    const bx = x - tw / 2 - 4;
+    const by = padT - 2;
+    ctx.fillStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.fillRect(bx, by - 12, tw + 8, 14);
+    ctx.fillStyle = "#000000";
+    ctx.fillText(badge, bx + 4, by - 1);
+  });
+
+  // axis labels
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillText(String(maxV), 6, padT + 10);
+  ctx.fillText(String(minV), 6, padT + plotH);
+  const durS = ((n - 1) * marshalState.intervalMs) / 1000;
+  ctx.fillText("0.0s", padL, h - 8);
+  const endLabel = durS.toFixed(1) + "s";
+  ctx.fillText(endLabel, padL + plotW - ctx.measureText(endLabel).width, h - 8);
+
+  marshalState._chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV, xAt, yAt };
+}
+
+function onMarshalChartClick(ev) {
+  if (!marshalState || !marshalState._chart) return;
+  const canvas = ev.target;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const { padL, plotW, n } = marshalState._chart;
+  if (x < padL || x > padL + plotW) return;
+  const frac = (x - padL) / plotW;
+  const idx = Math.round(frac * Math.max(1, n - 1));
+  const absMs = idx * marshalState.intervalMs;
+
+  // If near an existing marker, select it; else add
+  let nearest = -1;
+  let nearestDist = Infinity;
+  marshalState.absPasses.forEach((p, i) => {
+    const d = Math.abs(p - absMs);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = i;
+    }
+  });
+  if (nearest >= 0 && nearestDist < Math.max(marshalState.intervalMs * 8, 80)) {
+    marshalState.selected = nearest;
+  } else {
+    // snap to local peak within small window
+    let peakIdx = idx;
+    let peakVal = marshalState.samples[idx] || 0;
+    const win = 5;
+    for (let i = Math.max(0, idx - win); i <= Math.min(n - 1, idx + win); i++) {
+      if (marshalState.samples[i] > peakVal) {
+        peakVal = marshalState.samples[i];
+        peakIdx = i;
+      }
+    }
+    marshalState.absPasses.push(peakIdx * marshalState.intervalMs);
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.selected = marshalState.absPasses.indexOf(peakIdx * marshalState.intervalMs);
+  }
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function marshalRecalculate() {
+  if (!marshalState || !marshalState.samples.length) return;
+  const samples = marshalState.samples;
+  const enter = marshalState.enter;
+  const exit = marshalState.exit;
+  const interval = marshalState.intervalMs;
+  const minLapMs = 2000;
+  const abs = [];
+  let crossing = false;
+  let peak = 0;
+  let peakIdx = 0;
+  let lastPass = -minLapMs;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    if (!crossing && v >= enter) {
+      crossing = true;
+      peak = v;
+      peakIdx = i;
+    } else if (crossing) {
+      if (v > peak) {
+        peak = v;
+        peakIdx = i;
+      }
+      if (v < exit) {
+        const t = peakIdx * interval;
+        if (t - lastPass >= minLapMs) {
+          abs.push(t);
+          lastPass = t;
+        }
+        crossing = false;
+        peak = 0;
+      }
+    }
+  }
+  if (abs.length) {
+    marshalState.absPasses = abs;
+    marshalState.selected = -1;
+    renderMarshalLapsList();
+    drawMarshalChart();
+  } else {
+    alert(i18n.t("history.marshal_recalc_none"));
+  }
+}
+
+function marshalSaveLaps() {
+  if (!marshalState) return;
+  const segs = absPassesToSegments(marshalState.absPasses);
+  if (!segs.length) {
+    alert(i18n.t("messages.race_edit_no_laps"));
+    return;
+  }
+  fetch("/races/updateLaps", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ timestamp: marshalState.race.timestamp, lapTimes: segs }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      console.log("Marshal laps saved", data);
+      alert(i18n.t("history.marshal_saved"));
+      loadRaceHistory();
+      closeMarshalModal();
+    })
+    .catch((err) => {
+      console.error(err);
+      alert(i18n.t("messages.race_update_error"));
+    });
 }
 
 function clearAllRaces() {

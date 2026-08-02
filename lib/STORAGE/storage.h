@@ -21,8 +21,12 @@ class Storage {
     
     // File operations - automatically use SD if available, fall back to LittleFS
     bool writeFile(const String& path, const String& data);
+    bool writeBinaryFile(const String& path, const uint8_t* data, size_t len);
+    bool appendBinaryFile(const String& path, const uint8_t* data, size_t len);
     bool readFile(const String& path, String& data);
+    bool readBinaryFile(const String& path, std::vector<uint8_t>& out);
     bool deleteFile(const String& path);
+    bool renameFile(const String& fromPath, const String& toPath);
     bool exists(const String& path);
     bool mkdir(const String& path);
     bool listDir(const String& path, std::vector<String>& files);
