@@ -319,6 +319,7 @@
 }
 
 .marshal-chart-wrap {
+  position: relative;
   background: var(--background-color);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -332,6 +333,24 @@
   cursor: crosshair;
   background: #000000;
   border-radius: 4px;
+  touch-action: none;
+}
+
+.marshal-zoom-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+}
+
+.marshal-zoom-btn {
+  min-width: 34px;
+  padding: 6px 10px;
+  background: rgba(20, 20, 20, 0.85);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
 }
 
 .marshal-legend {

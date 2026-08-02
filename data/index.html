@@ -338,10 +338,10 @@
           <div id="marshalGuideBody" class="marshal-guide-body">
             <ol class="marshal-guide-list">
               <li data-i18n="history.marshal_how_1">Blue line = recorded RSSI. Peaks are gate crossings.</li>
-              <li data-i18n="history.marshal_how_2">Click Gate 1 / Lap N in the list to highlight it on the graph.</li>
-              <li data-i18n="history.marshal_how_3">Click a vertical marker on the graph to select that crossing.</li>
+              <li data-i18n="history.marshal_how_2">Click Gate 1 / Lap N in the list or graph to select. Ctrl+click to multi-select.</li>
+              <li data-i18n="history.marshal_how_3">Drag a marker left/right to move its time. Scroll to zoom, drag background to pan.</li>
               <li data-i18n="history.marshal_how_4">Click empty space near a peak to add a missing crossing.</li>
-              <li data-i18n="history.marshal_how_5">Delete the selected crossing, or Recalculate from Enter/Exit lines.</li>
+              <li data-i18n="history.marshal_how_5">Delete selected crossings, or Recalculate from Enter/Exit lines, then Save.</li>
             </ol>
           </div>
         </div>
@@ -349,18 +349,23 @@
         <div class="marshal-layout">
           <div class="marshal-graph-col">
             <div class="marshal-chart-wrap">
-              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Vertical markers are gate passes. Click a peak to add or select a pass."></canvas>
+              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select."></canvas>
+              <div class="marshal-zoom-controls">
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomReset()" data-i18n="history.marshal_zoom_reset">Reset</button>
+              </div>
             </div>
 
             <div class="marshal-legend" aria-hidden="false">
               <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-rssi"></span><span data-i18n="history.marshal_legend_rssi">RSSI signal</span></span>
               <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-enter"></span><span data-i18n="history.marshal_legend_enter">Enter threshold</span></span>
               <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-exit"></span><span data-i18n="history.marshal_legend_exit">Exit threshold</span></span>
-              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-pass"></span><span data-i18n="history.marshal_legend_pass">Pass marker</span></span>
-              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-selected"></span><span data-i18n="history.marshal_legend_selected">Selected pass</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-pass"></span><span data-i18n="history.marshal_legend_pass">Crossing marker</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-selected"></span><span data-i18n="history.marshal_legend_selected">Selected crossing</span></span>
             </div>
 
-            <p id="marshalSelectionStatus" class="marshal-selection-status" aria-live="polite" data-i18n="history.marshal_none_selected">No pass selected. Click a list item or graph marker.</p>
+            <p id="marshalSelectionStatus" class="marshal-selection-status" aria-live="polite" data-i18n="history.marshal_none_selected">No crossing selected. Click a list item or graph marker.</p>
             <p id="marshalTruncated" class="marshal-truncated" style="display: none" data-i18n="history.marshal_truncated">History truncated</p>
 
             <div class="calib-threshold-grid marshal-thresholds">

@@ -5412,14 +5412,19 @@ function saveCurrentRace(options = {}) {
   return pendingRaceSavePromise;
 }
 
-function loadRaceHistory() {
-  fetch("/races")
+function loadRaceHistory(onLoaded) {
+  return fetch("/races")
     .then((response) => response.json())
     .then((data) => {
       raceHistoryData = data.races || [];
       renderRaceHistory();
+      if (typeof onLoaded === "function") onLoaded(raceHistoryData);
+      return raceHistoryData;
     })
-    .catch((error) => console.error("Error loading races:", error));
+    .catch((error) => {
+      console.error("Error loading races:", error);
+      return null;
+    });
 }
 
 function renderRaceHistory() {
@@ -6581,8 +6586,9 @@ function saveRaceEdit() {
     .then((response) => response.json())
     .then((data) => {
       console.log("Race laps updated:", data);
-      loadRaceHistory();
+      const ts = race.timestamp;
       closeEditModal();
+      return loadRaceHistory(() => refreshRaceHistoryViews(ts));
     })
     .catch((error) => {
       console.error("Error updating race:", error);
@@ -6675,6 +6681,95 @@ function absPassesToSegments(absPasses) {
   return segs;
 }
 
+function marshalNormalizeSelection() {
+  if (!marshalState) return;
+  if (!Array.isArray(marshalState.selected)) {
+    const legacy = typeof marshalState.selected === "number" ? marshalState.selected : -1;
+    marshalState.selected = legacy >= 0 ? [legacy] : [];
+  }
+  marshalState.selected = marshalState.selected
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < marshalState.absPasses.length)
+    .sort((a, b) => a - b);
+}
+
+function marshalIsSelected(i) {
+  marshalNormalizeSelection();
+  return marshalState.selected.indexOf(i) >= 0;
+}
+
+function marshalPrimarySelected() {
+  marshalNormalizeSelection();
+  return marshalState.selected.length ? marshalState.selected[marshalState.selected.length - 1] : -1;
+}
+
+function marshalRaceDurationMs() {
+  if (!marshalState) return 1;
+  const n = marshalState.samples.length || 1;
+  return Math.max(1, (n - 1) * (marshalState.intervalMs || 20));
+}
+
+function marshalClampView() {
+  if (!marshalState) return;
+  const dur = marshalRaceDurationMs();
+  let span = Math.max(200, Math.min(dur, marshalState.viewSpanMs || dur));
+  let start = marshalState.viewStartMs || 0;
+  if (start < 0) start = 0;
+  if (start + span > dur) start = Math.max(0, dur - span);
+  marshalState.viewSpanMs = span;
+  marshalState.viewStartMs = start;
+}
+
+function marshalMsToX(ms, chart) {
+  const { padL, plotW } = chart;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || 1;
+  return padL + ((ms - start) / span) * plotW;
+}
+
+function marshalXToMs(x, chart) {
+  const { padL, plotW } = chart;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || 1;
+  const frac = (x - padL) / Math.max(1, plotW);
+  return start + frac * span;
+}
+
+function marshalSampleIndexAtMs(ms) {
+  const n = marshalState.samples.length || 1;
+  const idx = Math.round(ms / Math.max(1, marshalState.intervalMs || 20));
+  return Math.max(0, Math.min(n - 1, idx));
+}
+
+function marshalFindNearestMarker(ms, maxDistMs) {
+  let nearest = -1;
+  let nearestDist = Infinity;
+  marshalState.absPasses.forEach((p, i) => {
+    const d = Math.abs(p - ms);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = i;
+    }
+  });
+  if (nearest >= 0 && nearestDist <= maxDistMs) return nearest;
+  return -1;
+}
+
+function bindMarshalCanvasHandlers() {
+  const canvas = document.getElementById("marshalChart");
+  if (!canvas || canvas._marshalBound) return;
+  canvas._marshalBound = true;
+  canvas.addEventListener("wheel", onMarshalWheel, { passive: false });
+  canvas.addEventListener("pointerdown", onMarshalPointerDown);
+  canvas.addEventListener("pointermove", onMarshalPointerMove);
+  canvas.addEventListener("pointerup", onMarshalPointerUp);
+  canvas.addEventListener("pointercancel", onMarshalPointerUp);
+  canvas.addEventListener("pointerleave", onMarshalPointerUp);
+  canvas.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    marshalZoomReset();
+  });
+}
+
 function openMarshalModal(index) {
   const race = raceHistoryData[index];
   if (!race) return;
@@ -6686,13 +6781,18 @@ function openMarshalModal(index) {
   marshalState = {
     index,
     race,
+    raceTimestamp: race.timestamp,
     samples: [],
     intervalMs: 20,
     truncated: false,
     absPasses: segmentsToAbsPasses(race.lapTimes || []),
-    selected: -1,
+    selected: [],
     enter: typeof enterRssi !== "undefined" ? enterRssi : 120,
     exit: typeof exitRssi !== "undefined" ? exitRssi : 100,
+    viewStartMs: 0,
+    viewSpanMs: 1,
+    drag: null,
+    suppressClick: false,
   };
 
   document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_loading");
@@ -6704,6 +6804,7 @@ function openMarshalModal(index) {
   document.getElementById("marshalModal").style.display = "flex";
   applyMarshalGuidePreference();
   renderMarshalLapsList();
+  bindMarshalCanvasHandlers();
 
   fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
     .then((r) => {
@@ -6711,7 +6812,6 @@ function openMarshalModal(index) {
       return r.json();
     })
     .then((data) => {
-      // Detect wrong payload (e.g. /races list leaked into this endpoint)
       if (!data || !Array.isArray(data.samples)) {
         console.error("[Marshal] Unexpected RSSI payload:", data);
         throw new Error("invalid rssi payload");
@@ -6719,6 +6819,9 @@ function openMarshalModal(index) {
       marshalState.samples = data.samples;
       marshalState.intervalMs = data.intervalMs || 20;
       marshalState.truncated = !!data.truncated;
+      marshalState.viewStartMs = 0;
+      marshalState.viewSpanMs = marshalRaceDurationMs();
+      marshalClampView();
       const dur = ((marshalState.samples.length * marshalState.intervalMs) / 1000).toFixed(1);
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_meta", {
         count: marshalState.samples.length,
@@ -6733,9 +6836,6 @@ function openMarshalModal(index) {
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_no_history");
       drawMarshalChart();
     });
-
-  const canvas = document.getElementById("marshalChart");
-  canvas.onclick = onMarshalChartClick;
 }
 
 function closeMarshalModal() {
@@ -6762,7 +6862,6 @@ function updateMarshalThresholds() {
 
 function marshalPassLabel(i) {
   if (i === 0) return i18n.t("race.gate1");
-  // Lap numbers start at 1 after Gate 1
   return i18n.t("race.lap_counter", { n: i });
 }
 
@@ -6791,34 +6890,43 @@ function applyMarshalGuidePreference() {
 
 function updateMarshalSelectionUI() {
   if (!marshalState) return;
+  marshalNormalizeSelection();
   const statusEl = document.getElementById("marshalSelectionStatus");
   const deleteBtn = document.getElementById("marshalDeleteBtn");
   const segs = absPassesToSegments(marshalState.absPasses);
-  const i = marshalState.selected;
-  if (i < 0 || i >= marshalState.absPasses.length) {
+  const selected = marshalState.selected;
+
+  if (!selected.length) {
     if (statusEl) statusEl.textContent = i18n.t("history.marshal_none_selected");
     if (deleteBtn) deleteBtn.disabled = true;
     return;
   }
-  if (statusEl) {
-    statusEl.textContent = i18n.t("history.marshal_selected", {
-      label: marshalPassLabel(i),
-      time: (marshalState.absPasses[i] / 1000).toFixed(3),
-      seg: (segs[i] / 1000).toFixed(3),
-    });
+
+  if (selected.length === 1) {
+    const i = selected[0];
+    if (statusEl) {
+      statusEl.textContent = i18n.t("history.marshal_selected", {
+        label: marshalPassLabel(i),
+        time: (marshalState.absPasses[i] / 1000).toFixed(3),
+        seg: (segs[i] / 1000).toFixed(3),
+      });
+    }
+  } else if (statusEl) {
+    statusEl.textContent = i18n.t("history.marshal_selected_multi", { count: selected.length });
   }
   if (deleteBtn) deleteBtn.disabled = false;
 }
 
 function renderMarshalLapsList() {
   if (!marshalState) return;
+  marshalNormalizeSelection();
   const segs = absPassesToSegments(marshalState.absPasses);
   const box = document.getElementById("marshalLapsList");
   let html = "";
   segs.forEach((ms, i) => {
     const label = marshalPassLabel(i);
-    const sel = marshalState.selected === i;
-    html += `<button type="button" role="option" aria-selected="${sel ? "true" : "false"}" class="marshal-pass-item${sel ? " is-selected" : ""}" onclick="marshalSelectPass(${i})">
+    const sel = marshalIsSelected(i);
+    html += `<button type="button" role="option" aria-selected="${sel ? "true" : "false"}" class="marshal-pass-item${sel ? " is-selected" : ""}" onclick="marshalSelectPass(${i}, event)">
       <div class="marshal-pass-label">${label}</div>
       <div class="marshal-pass-time">${(ms / 1000).toFixed(3)}s</div>
       <div class="marshal-pass-abs">${i18n.t("history.marshal_at", { time: (marshalState.absPasses[i] / 1000).toFixed(3) })}</div>
@@ -6828,37 +6936,256 @@ function renderMarshalLapsList() {
   box.innerHTML = html;
   updateMarshalSelectionUI();
 
-  // Keep selected pass visible in the list
-  if (marshalState.selected >= 0) {
-    const selectedEl = box.querySelector(".marshal-pass-item.is-selected");
-    if (selectedEl && selectedEl.scrollIntoView) {
-      selectedEl.scrollIntoView({ block: "nearest" });
-    }
+  const primary = marshalPrimarySelected();
+  if (primary >= 0) {
+    const selectedEls = box.querySelectorAll(".marshal-pass-item.is-selected");
+    const target = selectedEls[selectedEls.length - 1];
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: "nearest" });
   }
 }
 
-function marshalSelectPass(i) {
+function marshalSelectPass(i, ev) {
   if (!marshalState) return;
-  // Toggle off if clicking the same item again
-  marshalState.selected = marshalState.selected === i ? -1 : i;
+  marshalNormalizeSelection();
+  const multi = !!(ev && (ev.ctrlKey || ev.metaKey));
+  if (multi) {
+    const pos = marshalState.selected.indexOf(i);
+    if (pos >= 0) marshalState.selected.splice(pos, 1);
+    else marshalState.selected.push(i);
+  } else if (marshalState.selected.length === 1 && marshalState.selected[0] === i) {
+    marshalState.selected = [];
+  } else {
+    marshalState.selected = [i];
+  }
+  marshalNormalizeSelection();
   renderMarshalLapsList();
   drawMarshalChart();
 }
 
 function marshalDeleteSelected() {
-  if (!marshalState || marshalState.selected < 0) return;
-  if (marshalState.absPasses.length <= 1) {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  if (!marshalState.selected.length) return;
+  if (marshalState.absPasses.length - marshalState.selected.length < 1) {
     alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
-  marshalState.absPasses.splice(marshalState.selected, 1);
-  marshalState.selected = -1;
+  const remove = new Set(marshalState.selected);
+  marshalState.absPasses = marshalState.absPasses.filter((_, idx) => !remove.has(idx));
+  marshalState.selected = [];
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function marshalZoomAt(centerMs, factor) {
+  if (!marshalState) return;
+  const dur = marshalRaceDurationMs();
+  const oldSpan = marshalState.viewSpanMs || dur;
+  const oldStart = marshalState.viewStartMs || 0;
+  const frac = oldSpan > 0 ? (centerMs - oldStart) / oldSpan : 0.5;
+  let newSpan = Math.max(200, Math.min(dur, oldSpan * factor));
+  let newStart = centerMs - frac * newSpan;
+  marshalState.viewSpanMs = newSpan;
+  marshalState.viewStartMs = newStart;
+  marshalClampView();
+  drawMarshalChart();
+}
+
+function marshalZoomIn() {
+  if (!marshalState) return;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || marshalRaceDurationMs();
+  marshalZoomAt(start + span / 2, 0.7);
+}
+
+function marshalZoomOut() {
+  if (!marshalState) return;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || marshalRaceDurationMs();
+  marshalZoomAt(start + span / 2, 1.4);
+}
+
+function marshalZoomReset() {
+  if (!marshalState) return;
+  marshalState.viewStartMs = 0;
+  marshalState.viewSpanMs = marshalRaceDurationMs();
+  marshalClampView();
+  drawMarshalChart();
+}
+
+function onMarshalWheel(ev) {
+  if (!marshalState || !marshalState._chart) return;
+  ev.preventDefault();
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const centerMs = marshalXToMs(x, marshalState._chart);
+  marshalZoomAt(centerMs, ev.deltaY < 0 ? 0.85 : 1.18);
+}
+
+function onMarshalPointerDown(ev) {
+  if (!marshalState || !marshalState._chart) return;
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const { padL, plotW } = marshalState._chart;
+  if (x < padL || x > padL + plotW) return;
+
+  const ms = marshalXToMs(x, marshalState._chart);
+  const hitPx = 14;
+  const hitMs = Math.abs(marshalXToMs(x + hitPx, marshalState._chart) - ms);
+  const nearest = marshalFindNearestMarker(ms, hitMs);
+
+  marshalState.suppressClick = false;
+  marshalState.drag = {
+    pointerId: ev.pointerId,
+    mode: nearest >= 0 ? "marker" : "pan",
+    startX: x,
+    lastX: x,
+    originStartMs: marshalState.viewStartMs || 0,
+    markerIndex: nearest,
+    moved: false,
+    multi: !!(ev.ctrlKey || ev.metaKey),
+  };
+
+  try {
+    canvas.setPointerCapture(ev.pointerId);
+  } catch (e) {}
+  canvas.style.cursor = nearest >= 0 ? "ew-resize" : "grabbing";
+  ev.preventDefault();
+}
+
+function onMarshalPointerMove(ev) {
+  if (!marshalState || !marshalState.drag || !marshalState._chart) return;
+  if (marshalState.drag.pointerId !== ev.pointerId) return;
+
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const dx = x - marshalState.drag.startX;
+  if (Math.abs(dx) > 3) {
+    marshalState.drag.moved = true;
+    marshalState.suppressClick = true;
+  }
+
+  if (marshalState.drag.mode === "pan") {
+    const msPerPx = (marshalState.viewSpanMs || 1) / Math.max(1, marshalState._chart.plotW);
+    marshalState.viewStartMs = marshalState.drag.originStartMs - dx * msPerPx;
+    marshalClampView();
+    drawMarshalChart();
+  } else if (marshalState.drag.mode === "marker" && marshalState.drag.markerIndex >= 0) {
+    let ms = Math.round(marshalXToMs(x, marshalState._chart));
+    ms = Math.max(0, Math.min(marshalRaceDurationMs(), ms));
+    // Snap to local peak while dragging for accuracy
+    const centerIdx = marshalSampleIndexAtMs(ms);
+    let peakIdx = centerIdx;
+    let peakVal = marshalState.samples[centerIdx] || 0;
+    const win = 3;
+    for (let i = Math.max(0, centerIdx - win); i <= Math.min(marshalState.samples.length - 1, centerIdx + win); i++) {
+      if (marshalState.samples[i] > peakVal) {
+        peakVal = marshalState.samples[i];
+        peakIdx = i;
+      }
+    }
+    marshalState.absPasses[marshalState.drag.markerIndex] = peakIdx * marshalState.intervalMs;
+    // Keep order stable while dragging one marker: resort and remap selection/drag index
+    const oldSelectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
+    const dragTime = marshalState.absPasses[marshalState.drag.markerIndex];
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.drag.markerIndex = marshalState.absPasses.indexOf(dragTime);
+    marshalState.selected = oldSelectedTimes
+      .map((t) => marshalState.absPasses.indexOf(t))
+      .filter((i) => i >= 0);
+    if (marshalState.selected.indexOf(marshalState.drag.markerIndex) < 0) {
+      marshalState.selected = [marshalState.drag.markerIndex];
+    }
+    renderMarshalLapsList();
+    drawMarshalChart();
+  }
+  marshalState.drag.lastX = x;
+  ev.preventDefault();
+}
+
+function onMarshalPointerUp(ev) {
+  if (!marshalState || !marshalState.drag) return;
+  if (marshalState.drag.pointerId !== ev.pointerId) return;
+  const canvas = ev.currentTarget;
+  const drag = marshalState.drag;
+  marshalState.drag = null;
+  canvas.style.cursor = "crosshair";
+  try {
+    canvas.releasePointerCapture(ev.pointerId);
+  } catch (e) {}
+
+  if (!drag.moved) {
+    // Treat as click selection / add
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const x = (ev.clientX - rect.left) * scaleX;
+    handleMarshalClickAtX(x, drag.multi);
+  } else {
+    // Finalize order after drag
+    const selectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.selected = selectedTimes
+      .map((t) => marshalState.absPasses.indexOf(t))
+      .filter((i) => i >= 0);
+    renderMarshalLapsList();
+    drawMarshalChart();
+  }
+  marshalState.suppressClick = false;
+}
+
+function handleMarshalClickAtX(x, multi) {
+  if (!marshalState || !marshalState._chart) return;
+  const { padL, plotW } = marshalState._chart;
+  if (x < padL || x > padL + plotW) return;
+
+  const ms = marshalXToMs(x, marshalState._chart);
+  const hitPx = 14;
+  const hitMs = Math.abs(marshalXToMs(x + hitPx, marshalState._chart) - ms);
+  const nearest = marshalFindNearestMarker(ms, Math.max(hitMs, marshalState.intervalMs * 4));
+
+  if (nearest >= 0) {
+    marshalNormalizeSelection();
+    if (multi) {
+      const pos = marshalState.selected.indexOf(nearest);
+      if (pos >= 0) marshalState.selected.splice(pos, 1);
+      else marshalState.selected.push(nearest);
+    } else if (marshalState.selected.length === 1 && marshalState.selected[0] === nearest) {
+      marshalState.selected = [];
+    } else {
+      marshalState.selected = [nearest];
+    }
+  } else if (!multi) {
+    // Add missing crossing near click, snapped to local peak
+    const idx = marshalSampleIndexAtMs(ms);
+    let peakIdx = idx;
+    let peakVal = marshalState.samples[idx] || 0;
+    const win = 5;
+    for (let i = Math.max(0, idx - win); i <= Math.min(marshalState.samples.length - 1, idx + win); i++) {
+      if (marshalState.samples[i] > peakVal) {
+        peakVal = marshalState.samples[i];
+        peakIdx = i;
+      }
+    }
+    const newMs = peakIdx * marshalState.intervalMs;
+    marshalState.absPasses.push(newMs);
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.selected = [marshalState.absPasses.indexOf(newMs)];
+  }
+
+  marshalNormalizeSelection();
   renderMarshalLapsList();
   drawMarshalChart();
 }
 
 function drawMarshalChart() {
   if (!marshalState) return;
+  marshalNormalizeSelection();
   const canvas = document.getElementById("marshalChart");
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
@@ -6867,8 +7194,6 @@ function drawMarshalChart() {
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   ctx.clearRect(0, 0, w, h);
-
-  // High-contrast dark plot background
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, w, h);
 
@@ -6881,8 +7206,15 @@ function drawMarshalChart() {
     return;
   }
 
+  marshalClampView();
+  const viewStart = marshalState.viewStartMs || 0;
+  const viewSpan = marshalState.viewSpanMs || marshalRaceDurationMs();
+  const viewEnd = viewStart + viewSpan;
+  const i0 = Math.max(0, Math.floor(viewStart / marshalState.intervalMs) - 1);
+  const i1 = Math.min(n - 1, Math.ceil(viewEnd / marshalState.intervalMs) + 1);
+
   let minV = 255, maxV = 0;
-  for (let i = 0; i < n; i++) {
+  for (let i = i0; i <= i1; i++) {
     if (samples[i] < minV) minV = samples[i];
     if (samples[i] > maxV) maxV = samples[i];
   }
@@ -6890,10 +7222,11 @@ function drawMarshalChart() {
   maxV = Math.min(255, Math.max(maxV, marshalState.enter + 10));
   if (maxV <= minV) maxV = minV + 1;
 
-  const xAt = (i) => padL + (i / Math.max(1, n - 1)) * plotW;
+  const chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV };
+  const xAtMs = (ms) => marshalMsToX(ms, chart);
   const yAt = (v) => padT + (1 - (v - minV) / (maxV - minV)) * plotH;
 
-  // High-contrast grid
+  // Grid
   ctx.strokeStyle = "rgba(255,255,255,0.28)";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -6904,12 +7237,12 @@ function drawMarshalChart() {
   }
   ctx.stroke();
 
-  // enter/exit with stronger colors + labels
+  // Enter / exit
   const enterY = yAt(marshalState.enter);
   const exitY = yAt(marshalState.exit);
-  ctx.strokeStyle = "#ff4d4d";
-  ctx.lineWidth = 2.5;
   ctx.setLineDash([8, 5]);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#ff4d4d";
   ctx.beginPath();
   ctx.moveTo(padL, enterY);
   ctx.lineTo(padL + plotW, enterY);
@@ -6927,28 +7260,32 @@ function drawMarshalChart() {
   ctx.fillStyle = "#ffd54f";
   ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
 
-  // RSSI fill + line (high contrast cyan/blue)
+  // RSSI line in view
   ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const x = xAt(i);
+  let started = false;
+  for (let i = i0; i <= i1; i++) {
+    const x = xAtMs(i * marshalState.intervalMs);
     const y = yAt(samples[i]);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
   }
   ctx.strokeStyle = "#4da3ff";
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // pass markers with numbers
+  // Markers
   marshalState.absPasses.forEach((absMs, idx) => {
-    const si = Math.round(absMs / marshalState.intervalMs);
-    const clamped = Math.max(0, Math.min(n - 1, si));
-    const x = xAt(clamped);
-    const y = yAt(samples[clamped]);
-    const selected = idx === marshalState.selected;
+    if (absMs < viewStart - marshalState.intervalMs || absMs > viewEnd + marshalState.intervalMs) return;
+    const si = marshalSampleIndexAtMs(absMs);
+    const x = xAtMs(absMs);
+    const y = yAt(samples[si]);
+    const selected = marshalIsSelected(idx);
 
     if (selected) {
-      // Dim overlay except selected region band
       ctx.fillStyle = "rgba(255, 229, 102, 0.12)";
       ctx.fillRect(x - 10, padT, 20, plotH);
     }
@@ -6960,7 +7297,6 @@ function drawMarshalChart() {
     ctx.lineTo(x, padT + plotH);
     ctx.stroke();
 
-    // Marker head
     ctx.fillStyle = selected ? "#ffe566" : "#ffffff";
     ctx.beginPath();
     ctx.arc(x, y, selected ? 7 : 5, 0, Math.PI * 2);
@@ -6969,8 +7305,7 @@ function drawMarshalChart() {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Number badge at top: G1, L1, L2...
-    const badge = idx === 0 ? "G1" : ("L" + idx);
+    const badge = idx === 0 ? "G1" : "L" + idx;
     ctx.font = "bold 11px sans-serif";
     const tw = ctx.measureText(badge).width;
     const bx = x - tw / 2 - 4;
@@ -6981,60 +7316,17 @@ function drawMarshalChart() {
     ctx.fillText(badge, bx + 4, by - 1);
   });
 
-  // axis labels
+  // Axis labels for current view
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 12px sans-serif";
   ctx.fillText(String(maxV), 6, padT + 10);
   ctx.fillText(String(minV), 6, padT + plotH);
-  const durS = ((n - 1) * marshalState.intervalMs) / 1000;
-  ctx.fillText("0.0s", padL, h - 8);
-  const endLabel = durS.toFixed(1) + "s";
+  const startLabel = (viewStart / 1000).toFixed(1) + "s";
+  const endLabel = (viewEnd / 1000).toFixed(1) + "s";
+  ctx.fillText(startLabel, padL, h - 8);
   ctx.fillText(endLabel, padL + plotW - ctx.measureText(endLabel).width, h - 8);
 
-  marshalState._chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV, xAt, yAt };
-}
-
-function onMarshalChartClick(ev) {
-  if (!marshalState || !marshalState._chart) return;
-  const canvas = ev.target;
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const x = (ev.clientX - rect.left) * scaleX;
-  const { padL, plotW, n } = marshalState._chart;
-  if (x < padL || x > padL + plotW) return;
-  const frac = (x - padL) / plotW;
-  const idx = Math.round(frac * Math.max(1, n - 1));
-  const absMs = idx * marshalState.intervalMs;
-
-  // If near an existing marker, select it; else add
-  let nearest = -1;
-  let nearestDist = Infinity;
-  marshalState.absPasses.forEach((p, i) => {
-    const d = Math.abs(p - absMs);
-    if (d < nearestDist) {
-      nearestDist = d;
-      nearest = i;
-    }
-  });
-  if (nearest >= 0 && nearestDist < Math.max(marshalState.intervalMs * 8, 80)) {
-    marshalState.selected = nearest;
-  } else {
-    // snap to local peak within small window
-    let peakIdx = idx;
-    let peakVal = marshalState.samples[idx] || 0;
-    const win = 5;
-    for (let i = Math.max(0, idx - win); i <= Math.min(n - 1, idx + win); i++) {
-      if (marshalState.samples[i] > peakVal) {
-        peakVal = marshalState.samples[i];
-        peakIdx = i;
-      }
-    }
-    marshalState.absPasses.push(peakIdx * marshalState.intervalMs);
-    marshalState.absPasses.sort((a, b) => a - b);
-    marshalState.selected = marshalState.absPasses.indexOf(peakIdx * marshalState.intervalMs);
-  }
-  renderMarshalLapsList();
-  drawMarshalChart();
+  marshalState._chart = chart;
 }
 
 function marshalRecalculate() {
@@ -7073,11 +7365,21 @@ function marshalRecalculate() {
   }
   if (abs.length) {
     marshalState.absPasses = abs;
-    marshalState.selected = -1;
+    marshalState.selected = [];
     renderMarshalLapsList();
     drawMarshalChart();
   } else {
     alert(i18n.t("history.marshal_recalc_none"));
+  }
+}
+
+function refreshRaceHistoryViews(timestamp) {
+  // Keep open race details/timeline/analytics in sync after lap edits
+  if (currentDetailRace && currentDetailRace.timestamp === timestamp) {
+    const idx = raceHistoryData.findIndex((r) => r.timestamp === timestamp);
+    if (idx >= 0) {
+      viewRaceDetails(idx);
+    }
   }
 }
 
@@ -7088,17 +7390,18 @@ function marshalSaveLaps() {
     alert(i18n.t("messages.race_edit_no_laps"));
     return;
   }
+  const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
   fetch("/races/updateLaps", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ timestamp: marshalState.race.timestamp, lapTimes: segs }),
+    body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
   })
     .then((r) => r.json())
     .then((data) => {
       console.log("Marshal laps saved", data);
       alert(i18n.t("history.marshal_saved"));
-      loadRaceHistory();
       closeMarshalModal();
+      return loadRaceHistory(() => refreshRaceHistoryViews(ts));
     })
     .catch((err) => {
       console.error(err);
