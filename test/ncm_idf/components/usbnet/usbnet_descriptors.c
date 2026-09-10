@@ -30,7 +30,7 @@
 #include <string.h>
 
 #define USBNET_VID 0x303A  // Espressif
-#define USBNET_PID 0x4005  // distinct from the earlier NCM build so Windows
+#define USBNET_PID 0x4007  // distinct from the earlier NCM build so Windows
                            // does not serve a cached descriptor set
 
 // CDC + RNDIS uses 5 IN endpoints (EP0, CDC notif, CDC bulk, RNDIS notif,
@@ -119,19 +119,41 @@ static const tusb_desc_device_t s_device_desc = {
 // Configuration descriptor
 //--------------------------------------------------------------------+
 
-#if USBNET_WITH_CDC
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_RNDIS_DESC_LEN)
+// USBNET_USE_NCM selects NCM instead of RNDIS for the network function.
+//
+// Kept at 0: NCM was tested with the net function FIRST (the arrangement that
+// fixes RNDIS) and still failed with CM_PROB_FAILED_START on Windows 11 build
+// 26200. So NCM has a separate incompatibility from the RNDIS ordering quirk,
+// matching TinyUSB issue #2660. The switch remains so it can be retried
+// against a future Windows or TinyUSB version - NCM would be preferable, as it
+// covers Windows 11 + macOS + Linux where RNDIS covers Windows + Linux only.
+#define USBNET_USE_NCM 0
+
+#if USBNET_USE_NCM
+#define TUD_NET_DESC_LEN TUD_CDC_NCM_DESC_LEN
 #else
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_RNDIS_DESC_LEN)
+#define TUD_NET_DESC_LEN TUD_RNDIS_DESC_LEN
+#endif
+
+#if USBNET_WITH_CDC
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_NET_DESC_LEN)
+#else
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_NET_DESC_LEN)
 #endif
 
 static const uint8_t s_fs_config_desc[] = {
     // config number, interface count, string index, total length, attribute, power in mA
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
 
-    // RNDIS first - see the note on the interface enum above.
+    // Network function first - see the note on the interface enum above.
+#if USBNET_USE_NCM
+    // NCM additionally takes the MAC string index and max segment size.
+    TUD_CDC_NCM_DESCRIPTOR(ITF_NUM_RNDIS, STRID_RNDIS_INTERFACE, STRID_MAC, EPNUM_RNDIS_NOTIF, 8,
+                           EPNUM_RNDIS_OUT, EPNUM_RNDIS_IN, 64, CFG_TUD_NET_MTU),
+#else
     TUD_RNDIS_DESCRIPTOR(ITF_NUM_RNDIS, STRID_RNDIS_INTERFACE, EPNUM_RNDIS_NOTIF, 8,
                          EPNUM_RNDIS_OUT, EPNUM_RNDIS_IN, 64),
+#endif
 
 #if USBNET_WITH_CDC
     // CDC: debug console, and the serial port the web flasher and esptool need

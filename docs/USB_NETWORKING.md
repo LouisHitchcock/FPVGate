@@ -175,10 +175,18 @@ first-install timing, the `const ntb_parameters` flash-DMA workaround (moved
 to RAM, no change), and wrong-speed descriptors (the 64-byte full-speed
 variant is correctly selected).
 
-**Important:** `esp_tinyusb`'s NCM descriptors also place CDC first with NCM
-at `MI_02`. Given §3, that failure was very likely the same ordering quirk
-rather than an NCM/Windows incompatibility. **This is untested and worth
-retrying** — see §7.
+**Retested with NCM placed first (the arrangement that fixes RNDIS): still
+Code 10.** So NCM has a genuine, separate incompatibility with this host, and
+the ordering quirk is RNDIS-specific:
+
+| Build | Net position | Network | CDC |
+|---|---|---|---|
+| RNDIS first + CDC | `MI_00` | works | works |
+| NCM first + CDC | `MI_00` | **Code 10** | works |
+
+This vindicates the original NCM diagnosis and matches TinyUSB #2660. NCM is
+not usable here. The `USBNET_USE_NCM` switch in `usbnet_descriptors.c` is kept
+at 0 so it can be retried against a future Windows or TinyUSB version.
 
 ### 4.3 DWC2 slave vs buffer-DMA mode — no effect
 
@@ -238,11 +246,14 @@ endpoints; it is gated on `bm_double_buffered`, which defaults to zero.
 
 ## 7. Open questions
 
-1. **Does NCM work when placed first?** If so it replaces RNDIS and restores
-   macOS support. Highest-value next test.
-2. **Protocol coverage.** RNDIS: Windows + Linux, **not macOS**. NCM:
-   Windows 11 + macOS + Linux. A dual-configuration device (config 1 RNDIS,
-   config 2 ECM) is the belt-and-braces answer if both matter.
+1. ~~Does NCM work when placed first?~~ **Answered: no.** Tested, still
+   Code 10. NCM is off the table on this host.
+2. **macOS support.** RNDIS covers Windows + Linux but **not macOS**, and NCM
+   is unusable, so a **dual-configuration device** (config 1 RNDIS for
+   Windows, config 2 ECM for macOS, host picks) is the only remaining route
+   if Mac support is required. TinyUSB's `net_lwip_webserver` example
+   implements exactly that pattern. Decide whether Mac matters before
+   building FPVGate around single-config RNDIS.
 3. **FPVGate integration is not started.** Everything above is the ESP-IDF
    reference app. FPVGate is Arduino — ~16k lines across 23 modules, plus
    `ESPAsyncWebServer`, ElegantOTA, LVGL, TFT_eSPI, FastLED, ESP8266Audio,
