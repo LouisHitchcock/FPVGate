@@ -12,7 +12,6 @@
 #include "selftest.h"
 #include "transport.h"
 #include "trackmanager.h"
-#include "usb.h"
 #include "webhook.h"
 #include "rotorhazard.h"
 // DISABLED FOR NOW: #include "nodemode.h"
@@ -74,7 +73,6 @@ static Config config;
 static Storage storage;
 static SelfTest selfTest;
 static Webserver ws;
-static USBTransport usbTransport;
 static TransportManager transportManager;
 static Buzzer buzzer;
 static Led led;
@@ -167,7 +165,6 @@ static void parallelTask(void *pvArgs) {
         rgbLed.handleRgbLed(currentTimeMs);
 #endif
         ws.handleWebUpdate(currentTimeMs);
-        usbTransport.update(currentTimeMs);
         config.handleEeprom(currentTimeMs);
         rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
 #ifdef HAS_BATTERY_MONITOR
@@ -446,16 +443,8 @@ void setup() {
     ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
 #endif
     
-    // Initialize USB transport
-#ifdef HAS_BATTERY_MONITOR
-    usbTransport.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager);
-#else
-    usbTransport.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager);
-#endif
-    
     // Register transports with TransportManager
     transportManager.addTransport(&ws);
-    transportManager.addTransport(&usbTransport);
     
     // Set TransportManager in webserver for event broadcasting
     ws.setTransportManager(&transportManager);

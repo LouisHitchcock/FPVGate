@@ -11,7 +11,6 @@
     <script src="i18n.js"></script>
     <script src="audio-announcer.js"></script>
     <script src="smoothie.js"></script>
-    <script src="usb-transport.js"></script>
   </head>
 
   <body>
@@ -926,26 +925,7 @@
             <div id="settings-wifi" class="settings-section">
               <h2 data-i18n="settings.wifi.title">WiFi & Connection</h2>
 
-              <h3 style="margin-top: 0" data-i18n="settings.wifi.mode">Connection Mode</h3>
-              <div class="config-item">
-                <label for="connectionMode" data-i18n="settings.wifi.mode">Connection Mode:</label>
-                <select id="connectionMode" onchange="changeConnectionMode()">
-                  <option value="auto" selected data-i18n="settings.wifi.mode_options.auto">Auto (WiFi/USB)</option>
-                  <option value="wifi" data-i18n="settings.wifi.mode_options.wifi">WiFi Only</option>
-                  <option value="usb" data-i18n="settings.wifi.mode_options.usb">USB Only</option>
-                </select>
-              </div>
-              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.wifi.mode_tip">Auto mode detects USB connection, falls back to WiFi</div>
-
-              <div class="config-item" id="comPortSection" style="display: none">
-                <label for="comPort" data-i18n="settings.wifi.com_port">COM Port:</label>
-                <select id="comPort" onchange="selectComPort()">
-                  <option value="" data-i18n="settings.wifi.select_port">Select a port...</option>
-                </select>
-              </div>
-              <div id="comPortStatus" style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px; display: none" data-i18n="race.disconnected">Status: Disconnected</div>
-
-              <h3 data-i18n="settings.wifi.title">WiFi Configuration</h3>
+              <h3 style="margin-top: 0" data-i18n="settings.wifi.title">WiFi Configuration</h3>
               <div class="config-item">
                 <label for="ssid" data-i18n="settings.wifi.ssid">WiFi SSID:</label>
                 <input type="text" id="ssid" maxlength="32" placeholder="Enter WiFi network name" data-i18n-placeholder="settings.wifi.placeholder_ssid" />

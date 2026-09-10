@@ -476,7 +476,6 @@ TestResult SelfTest::testWebhooks() {
 TestResult SelfTest::testTransport() {
     uint32_t start = millis();
 
-    bool usbTransportFileExists = LittleFS.exists("/usb-transport.js");
     wifi_mode_t mode = WiFi.getMode();
     bool wifiActive = (mode != WIFI_OFF);
 
@@ -490,8 +489,7 @@ TestResult SelfTest::testTransport() {
 
     bool ok = (wifiActive || usbAvailable);
     String details = String("WiFi: ") + (wifiActive ? "active" : "off") +
-                     ", USB: " + (usbAvailable ? "connected" : "disconnected") +
-                     ", Transport JS: " + (usbTransportFileExists ? "loaded" : "missing");
+                     ", USB: " + (usbAvailable ? "connected" : "disconnected");
     return ok ? makePass("Transport Layer", details, start)
               : makeFail("Transport Layer", details, start);
 }
@@ -573,9 +571,7 @@ TestResult SelfTest::testUSB() {
     return makeSkip("USB Serial CDC", "CDC not enabled in build", start);
 #else
     bool connected = (bool)Serial;
-    bool transportFileExists = LittleFS.exists("/usb-transport.js");
-    String details = String("CDC ") + (connected ? "connected" : "disconnected") +
-                     ", Transport JS: " + (transportFileExists ? "loaded" : "missing");
+    String details = String("CDC ") + (connected ? "connected" : "disconnected");
     // CDC disconnected is normal when running over WiFi; treat as PASS as
     // long as the build supports it.
     return makePass("USB Serial CDC", details, start);
