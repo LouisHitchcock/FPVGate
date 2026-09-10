@@ -82,3 +82,6 @@ tools/apply_frontend_defaults.html
 
 # PCB design files
 PCB/
+
+# Spike build output
+test/ncm_test/.pio/
