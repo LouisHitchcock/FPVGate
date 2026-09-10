@@ -26,6 +26,7 @@
 #include "esp_netif_ip_addr.h"
 #include "lwip/esp_netif_net_stack.h"
 #include "tusb_ncm_demo.h"
+#include "tusb_cdc_acm.h"
 
 static const char *TAG = "NCM/RNDIS";
 #define DEF_IP "192.168.4.1"
@@ -224,6 +225,28 @@ static esp_err_t init_fs(void)
     return ESP_OK;
 }
 
+/**
+ * Reports TinyUSB's own view of enumeration over CDC.
+ *
+ * process_set_config() calls each class driver's open() in descriptor order
+ * and, if any fails (including an endpoint-allocation assertion), resets
+ * _usbd_dev.cfg_num to zero. tud_mounted() just tests that value. So if the
+ * network function still fails on the host while this reports mounted=1, the
+ * device-side endpoint allocation succeeded and the problem is host-side.
+ */
+static void status_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        char line[96];
+        int n = snprintf(line, sizeof(line), "[usb] mounted=%d connected=%d suspended=%d\r\n",
+                         (int)tud_mounted(), (int)tud_connected(), (int)tud_suspended());
+        tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, (const uint8_t *)line, n);
+        tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "starting app for RNDIS and webusb");
@@ -243,4 +266,7 @@ void app_main(void)
     
     ESP_ERROR_CHECK(resetful_server_start(CONFIG_EXAMPLE_WEB_MOUNT_POINT));
 
+    tusb_cdc_handler_init();
+
+    xTaskCreate(status_task, "usbstatus", 4096, NULL, 4, NULL);
 }
