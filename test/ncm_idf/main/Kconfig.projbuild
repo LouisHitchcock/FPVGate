@@ -1,0 +1,9 @@
+menu "Example Configuration"
+     config EXAMPLE_WEB_MOUNT_POINT
+         string "Website mount point in VFS"
+         default "/www"
+         help
+             Specify the mount point in VFS.
+ 
+
+endmenu
