@@ -263,7 +263,22 @@ bool RaceHistory::loadRaces() {
         }
     }
 
-    DEBUG("Loaded %d races from individual files\n", races.size());
+    // listDir returns whatever order the filesystem hands back, and race files
+    // are named DDMMYY-HHMMSS so even an alphabetical listing sorts by day of
+    // month before month and year. Without this the list is not newest-first,
+    // and because toJsonString only emits the first MAX_RACES entries the most
+    // recent races can be dropped from the web UI entirely.
+    std::sort(races.begin(), races.end(),
+              [](const RaceSession& a, const RaceSession& b) { return a.timestamp > b.timestamp; });
+
+    // Say so plainly when the cap is biting: the races are safe on the card,
+    // but the web UI is only ever sent the newest MAX_RACES of them.
+    if (races.size() > MAX_RACES) {
+        Serial.printf("[Race] Loaded %u races from SD; web UI shows the newest %u\n",
+                      (unsigned)races.size(), (unsigned)MAX_RACES);
+    } else {
+        Serial.printf("[Race] Loaded %u races from SD\n", (unsigned)races.size());
+    }
     return true;
 }
 
