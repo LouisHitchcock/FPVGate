@@ -3,8 +3,12 @@
 Record of the investigation into presenting FPVGate over USB-C as a network
 interface, so the existing web UI is reachable at a URL without WiFi.
 
-Status: **working in a standalone ESP-IDF spike** (`test/ncm_idf/`). Not yet
-integrated into the FPVGate firmware.
+Status: **the full FPVGate web UI now loads over USB-C on the AIO target**,
+but the firmware resets after sustained load. See section 5 for the exact
+state, what is proven, and what is still open.
+
+USB uses `192.168.7.1/24`, deliberately distinct from the WiFi SoftAP's
+`192.168.4.1/24`.
 
 ---
 
@@ -129,7 +133,7 @@ resulting "explanation" is a guess until the variables are separated.
 
 ## 4. What did not work, and why
 
-### 4.1 Arduino framework — abandoned
+### 4.1 Arduino framework — initial attempt and revised approach
 
 `arduino-esp32` excludes the USB networking classes by design.
 `libarduino_tinyusb.a` contains no `ncm_device.c` / `ecm_rndis_device.c`, and
@@ -254,11 +258,10 @@ endpoints; it is gated on `bm_double_buffered`, which defaults to zero.
    if Mac support is required. TinyUSB's `net_lwip_webserver` example
    implements exactly that pattern. Decide whether Mac matters before
    building FPVGate around single-config RNDIS.
-3. **FPVGate integration is not started.** Everything above is the ESP-IDF
-   reference app. FPVGate is Arduino — ~16k lines across 23 modules, plus
-   `ESPAsyncWebServer`, ElegantOTA, LVGL, TFT_eSPI, FastLED, ESP8266Audio,
-   arduinoWebSockets. The likely bridge is Arduino-as-an-ESP-IDF-component,
-   which also affects the release and web-flasher pipeline. Needs scoping.
+3. **FPVGate integration is awaiting hardware validation.** The AIO-only
+   Arduino build now contains RNDIS + CDC and an Ethernet/DHCP interface.
+   It keeps the existing web server and toolchain. Arduino-as-an-ESP-IDF-component
+   remains a fallback if the vendored class approach fails on hardware.
 4. **Recovery flow.** With CDC present the web flasher still works, so this is
    less pressing than it appeared. `usb_persist_restart(RESTART_BOOTLOADER)`
    as a "reboot into flash mode" button remains a possible refinement.
@@ -275,3 +278,163 @@ endpoints; it is gated on `bm_double_buffered`, which defaults to zero.
 - [idf-extra-components #313](https://github.com/espressif/idf-extra-components/pull/313) — `tinyusb_net.c` not built for RNDIS
 - [arduino-esp32 #12053](https://github.com/espressif/arduino-esp32/issues/12053) — USB classes disabled in prebuilt libs
 - [microsoft/NCM-Driver-for-Windows](https://github.com/microsoft/NCM-Driver-for-Windows) — the inbox NCM driver's source
+
+### Pending startup correction
+
+The vendored class previously allowed TX as soon as endpoints opened,
+independent of the host packet filter. TX now waits for RNDIS data-initialized;
+reset/halt clear the stored state. The change is built and flashed but has no
+runtime verdict yet; it is not a proven explanation for Code 10 or RX stalls.
+See [Microsoft RNDIS state definitions](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/remote-ndis-concepts-and-definitions).
+
+Bench recovery: the latest RNDIS state-gating candidate showed repeated USB
+reconnects about six seconds apart (user reported boot looping). Reset cause
+was not captured. The archived pre-USB baseline has been restored with hash
+verification; a subsequent 30-second serial capture showed steady uptime with no reset. Experimental source
+is retained and currently differs from the board firmware.
+
+---
+
+## 5. Arduino integration on FPVGateAIO — current state
+
+The spike above proved the *concept* on ESP-IDF. This section covers bringing
+it into the real FPVGate firmware, which is Arduino (core 2.0.17 / IDF 4.4)
+with `ESPAsyncWebServer`, on the `FPVGateAIO` target only.
+
+### 5.1 How it is wired in
+
+No custom Arduino core is required. `lib/USBNET/` vendors the TinyUSB **0.16.0**
+RNDIS class (matching the core's bundled version) and registers it at runtime:
+
+- `ecm_rndis_device.c`, `rndis_reports.c`, `rndis_protocol.h`, `ndis.h` are
+  vendored; `net_device.h` comes from the core's include tree and was verified
+  byte-identical.
+- `usbd_app_driver_get_cb` is an **undefined weak reference** in the core, so
+  defining it registers the `netd_*` class driver without patching anything.
+- **Interface order is solved by slot choice.** The core emits interfaces in
+  `tinyusb_interface_t` enum order. `USB_INTERFACE_MSC` is slot 0 and
+  `USB_INTERFACE_CDC` is slot 4, so registering the RNDIS descriptor under the
+  MSC slot puts RNDIS at interfaces 0/1 and CDC at 2/3 — the layout section 3
+  proves is required. **USBMSC therefore cannot be used on this target.**
+- Registration happens in a **global constructor**, because
+  `ARDUINO_USB_ON_BOOT` is derived from `ARDUINO_USB_CDC_ON_BOOT`, so the core
+  calls `USB.begin()` in `app_main()` before `setup()` runs.
+- `targets/FPVGateAIO.ini` overrides `board_build.extra_flags` to set
+  `ARDUINO_USB_MODE=0` (keeping `ARDUINO_USB_CDC_ON_BOOT=1`) and adds
+  `CFG_TUD_ECM_RNDIS` / `CFG_TUD_NET_MTU`. `build_unflags` cannot strip flags
+  that come from the board manifest, hence the wholesale override.
+- IDF 4.4's DHCP server keeps its interface, server address and lease pool in
+  **global state** shared with the WiFi SoftAP, so `usbnet_dhcp.c` compiles a
+  namespaced private copy (`idf/dhcpserver.inc`, IDF v4.4.7, Apache-2.0) bound
+  to the USB netif, leaving WiFi's server untouched.
+
+### 5.2 What is proven working
+
+Verified on a XIAO ESP32-S3 against Windows 11 build 26200:
+
+| Check | Result |
+|---|---|
+| Enumeration | composite + RNDIS + CDC, all `CM_PROB_NONE` |
+| DHCP | host leased `192.168.7.2` |
+| ICMP | 3/3 at 1 ms |
+| `GET /` | `200`, **104,486 bytes** (complete page) |
+| `GET /script.js` | `200`, 322,198 bytes |
+| `GET /style.css` | `200`, 49,230 bytes |
+| `/config` `/status` `/races` `/version` | all `200` |
+| Repeatability | best run **10/10** consecutive full page loads, ~1 s each |
+| Serial | CDC COM port present throughout |
+
+So the web UI genuinely transfers over the cable, and the COM port needed by
+the web flasher survives alongside it.
+
+### 5.3 Bugs found and fixed (both ours, both evidence-backed)
+
+**1. lwIP readiness race — proven by core dump.**
+
+```
+Crashed task 'usbd'
+assert failed: tcpip_inpkt lwip/src/api/tcpip.c:258 (Invalid mbox)
+  tud_network_recv_cb -> esp_netif_receive -> tcpip_input -> tcpip_inpkt
+```
+
+The receive callback gated on the `netif` **pointer**, which is assigned before
+bring-up completes. Since the core starts USB in `app_main()`, RNDIS can reach
+*data_initialized* and the host can start sending before `usbnet_begin()` even
+runs. Any packet in that window was pushed into a not-yet-ready lwIP, which
+`abort()`s. Fixed with a `netifReady` flag set only after DHCP start succeeds,
+plus an `esp_netif_init()` call so USB does not depend on WiFi having
+initialised the stack.
+
+**2. TinyUSB event-queue flooding — proven by reading `usbd.c`.**
+
+`usbd_defer_func()` posts into the **same 16-entry queue**
+(`CFG_TUD_TASK_QUEUE_SZ`) that carries `DCD_EVENT_XFER_COMPLETE`, and it
+returns `void`, so a full queue drops the request silently. The TX retry loop
+was posting ~80 defers/second, starving the completion event that re-arms
+`can_xmit`; TX then wedged, which made the loop spin harder. A dropped defer
+also meant `xSemaphoreTake(..., portMAX_DELAY)` blocked forever. Fixed by
+capping retries at 3 spaced 10 ms apart, bounding every semaphore wait at
+200 ms, and moving the TX buffers off the stack so a late callback cannot
+corrupt a reused frame.
+
+### 5.4 The open issue
+
+**The firmware resets after roughly 15-35 full page loads (~2-3 MB).**
+
+Everything looks healthy right up to the moment it goes:
+
+```
+heap 158-160 KB free, min 144 KB     no leak
+rx   934 -> 1165 -> 1399             flowing
+sent 371 -> 802 -> 1232              ~69 packets/page x 17 pages, correct
+dropped=2 (constant)  defer_lost=0   in_fail=0
+state=0x11d  (can_xmit + data_ready) rndis state=2
+```
+
+It is **not an ESP-IDF panic** — the coredump partition contents were byte
+identical across three separate failures, so the panic handler never ran. The
+device drops off USB and then re-enumerates cleanly, so it is resetting rather
+than hanging. That points at a watchdog or brownout.
+
+**Next step:** capture `reset_reason` on the boot immediately *after* a load
+failure. The periodic `[USB SYS]` status line reports it, so the first status
+line after recovery gives the answer. 4=PANIC, 5=INT_WDT, 6=TASK_WDT, 7=WDT,
+9=BROWNOUT.
+
+### 5.5 Diagnostics and tooling notes
+
+A coredump partition was added (`custom_8mb_coredump.csv`, AIO only, at
+0x510000/0x10000). The Arduino core already sets
+`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`, but the stock partition table gave it
+nowhere to write, so every panic was previously silent. Read and decode with:
+
+```
+esptool ... --after no_reset read_flash 0x510000 0x10000 coredump.bin
+docker run --rm -v "<dir>:/w" -w /w espressif/idf:release-v5.4 \
+  bash -lc "esp-coredump --chip esp32s3 info_corefile -t raw \
+            -c /w/coredump.bin /w/firmware.elf"
+```
+`--chip` is a **global** option and must precede the subcommand. Always compare
+the dump's hash against the previous one — an unchanged dump means no new panic
+was recorded, not that the old backtrace is current.
+
+**Serial capture will reset the board if done carelessly.** Arduino's `USBCDC`
+watches the esptool DTR/RTS sequence (`USBCDC.cpp` ~205-233):
+
+```
+IDLE --(!dtr,rts)--> LINE_1 --(dtr,rts)--> LINE_2
+     --(dtr,!rts)--> LINE_3 --(!dtr,!rts)--> usb_persist_restart(RESTART_BOOTLOADER)
+```
+
+Repeated open/close cycles can walk that path and reboot the device into the
+ROM bootloader. This produced a completely bogus "crashes after one page"
+conclusion during development. Capture with **DTR asserted and RTS low, a
+single open, and no loops** — and prefer running network tests with the serial
+port untouched entirely. Note DTR must be asserted or the CDC treats the host
+as disconnected and suppresses output.
+
+### 5.6 Known-imperfect diagnostics
+
+`in_done` (IN-transfer completions) reported 27 while `sent` reached 1232 and
+traffic was demonstrably flowing, so that counter is misplaced. Do not draw
+conclusions from it until it is fixed.

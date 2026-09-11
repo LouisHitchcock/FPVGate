@@ -85,3 +85,7 @@ PCB/
 
 # Spike build output
 test/ncm_test/.pio/
+
+# Internal development files - working notes, plans, scratch builds.
+# These are for the dev loop only and must never be committed.
+.dev/
