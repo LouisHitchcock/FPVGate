@@ -12,6 +12,10 @@
 #define dhcps_coarse_tmr usb_dhcps_coarse_tmr
 #define dhcps_pbuf_alloc usb_dhcps_pbuf_alloc
 #define node_remove_from_list usb_dhcps_node_remove_from_list
+// The gate is not a DNS resolver. Upstream would advertise 192.168.7.1 as the
+// host's DNS server anyway, so real lookups on that interface go nowhere and
+// the host appears to lose Internet access. Omit the option instead.
+#define DHCPS_OMIT_DNS_WHEN_UNSET 1
 #include "idf/dhcpserver.inc"
 #include "lwip/timeouts.h"
 

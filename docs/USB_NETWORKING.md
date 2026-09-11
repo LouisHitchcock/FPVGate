@@ -225,6 +225,36 @@ clustering near 80 requests with `reset_reason=6` and a ~66 KB heap floor would
 isolate async_tcp heap pressure as the remaining blocker, separate from USB.
 
 
+### DHCP no longer advertises the gate as a DNS server - fixed and verified
+
+The user reported losing desktop Internet access while the board was attached.
+Host inspection showed the RNDIS interface listing `192.168.7.1` as its DNS
+server, while WiFi and Ethernet correctly used the ISP resolvers. Routing was
+not at fault: the USB interface has no default route and an interface metric of
+55, well below WiFi's 35.
+
+Cause: in `add_offer_options()` the bundled IDF DHCP server emits
+`DHCP_OPTION_DNS_SERVER` unconditionally, and when `dhcps_dns_enabled()` is
+false it falls through to `ipadd`, the server's own address. The existing
+`dhcps_offer_t` option API therefore cannot suppress the option. `usbnet_dhcp.c`
+already suppressed the ROUTER option, but no equivalent existed for DNS.
+
+Fix: `lib/USBNET/idf/dhcpserver.inc` now omits the option entirely when no
+resolver is configured, gated behind `DHCPS_OMIT_DNS_WHEN_UNSET`, which
+`usbnet_dhcp.c` defines before the include. That file is a private USB-only copy
+with all symbols prefixed `usb_`, so the WiFi AP DHCP server is unaffected.
+
+Verified on hardware after reflash and replug: the RNDIS interface no longer
+appears in `Get-DnsClientServerAddress` at all, still receives `192.168.7.2` by
+DHCP, the gate answers ping and serves the full 104,486-byte page, and the host
+retains Internet reachability and working name resolution.
+
+Note this was fixed on the strength of a clearly incorrect advertisement rather
+than a reproduction: Internet access happened to be working at the moment of
+measurement, so the causal link to the user's reported outage is likely but not
+proven.
+
+
 USB uses `192.168.7.1/24`, deliberately distinct from the WiFi SoftAP's
 `192.168.4.1/24`.
 

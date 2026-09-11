@@ -380,6 +380,21 @@ static u8_t *add_offer_options(u8_t *optptr)
         }
     }
 
+    // Upstream emits this option unconditionally, falling back to the server's
+    // own address when no DNS server is configured. A device that is not a
+    // resolver must not claim to be one: the host would send real lookups here
+    // and get nothing. Omitting the option leaves the host's existing resolvers
+    // untouched. Only USB defines this; the WiFi AP copy is unaffected.
+#ifdef DHCPS_OMIT_DNS_WHEN_UNSET
+    if (dhcps_dns_enabled(dhcps_dns)) {
+        *optptr++ = DHCP_OPTION_DNS_SERVER;
+        *optptr++ = 4;
+        *optptr++ = ip4_addr1(&dns_server);
+        *optptr++ = ip4_addr2(&dns_server);
+        *optptr++ = ip4_addr3(&dns_server);
+        *optptr++ = ip4_addr4(&dns_server);
+    }
+#else
     *optptr++ = DHCP_OPTION_DNS_SERVER;
     *optptr++ = 4;
     if (dhcps_dns_enabled(dhcps_dns)) {
@@ -393,6 +408,7 @@ static u8_t *add_offer_options(u8_t *optptr)
         *optptr++ = ip4_addr3(&ipadd);
         *optptr++ = ip4_addr4(&ipadd);
     }
+#endif
 
     ip4_addr_t broadcast_addr = { .addr = (ipadd.addr & s_dhcps_mask.addr) | ~s_dhcps_mask.addr };
     *optptr++ = DHCP_OPTION_BROADCAST_ADDRESS;
