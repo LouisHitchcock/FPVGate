@@ -334,7 +334,8 @@ DWC2 mode (`CONFIG_TINYUSB_MODE_DMA` vs `_SLAVE`) is **irrelevant** — see §4.
 
 ### Component structure
 
-`test/ncm_idf/components/usbnet/` supplies what `esp_tinyusb` does not:
+The reference app added a small `components/usbnet/` supplying what
+`esp_tinyusb` does not:
 
 - `usbnet_descriptors.c` — device, configuration and string descriptors,
   plus the `tud_network_mac_address` definition
@@ -342,6 +343,10 @@ DWC2 mode (`CONFIG_TINYUSB_MODE_DMA` vs `_SLAVE`) is **irrelevant** — see §4.
 
 The application side (`esp_netif` with `ESP_NETIF_DHCP_SERVER`, the DHCP
 server, and `esp_http_server`) is unchanged from the reference.
+
+That ESP-IDF spike has since been removed; the shipped implementation is
+the Arduino/PlatformIO integration in `lib/USBNET/` (see
+`lib/USBNET/README.md`).
 
 ---
 
@@ -437,8 +442,9 @@ the ordering quirk is RNDIS-specific:
 | NCM first + CDC | `MI_00` | **Code 10** | works |
 
 This vindicates the original NCM diagnosis and matches TinyUSB #2660. NCM is
-not usable here. The `USBNET_USE_NCM` switch in `usbnet_descriptors.c` is kept
-at 0 so it can be retried against a future Windows or TinyUSB version.
+not usable here. The spike kept a `USBNET_USE_NCM` switch (default 0) so it
+could be retried against a future Windows or TinyUSB version; that spike has
+since been removed.
 
 ### 4.3 DWC2 slave vs buffer-DMA mode — no effect
 

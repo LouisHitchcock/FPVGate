@@ -66,7 +66,6 @@ sd_card/
 # Temp directories and backup files
 sounds_TEMP/
 sounds_TEMP_BACKUP/
-test/
 
 # Temp documentation and config files
 CHANGES_SINCE_*.md
@@ -83,9 +82,9 @@ tools/apply_frontend_defaults.html
 # PCB design files
 PCB/
 
-# Spike build output
-test/ncm_test/.pio/
-
 # Internal development files - working notes, plans, scratch builds.
 # These are for the dev loop only and must never be committed.
 .dev/
+
+# The discord bot for the FPVGate Discord Server
+discord-bot/

@@ -36,7 +36,6 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 **Dual Connectivity**
 - WiFi Access Point (works with any device)
 - USB Serial CDC (zero-latency local connection)
-- Electron desktop app for Windows/Mac/Linux
 
 **Visual Feedback**
 - RGB LED indicators with 10 customizable presets (settings persist to EEPROM)
@@ -324,4 +323,3 @@ See the [LICENSE](LICENSE) file for full details or visit https://creativecommon
 ---
 
 **Made with care for the FPV community**
-
