@@ -17,6 +17,9 @@ typedef struct {
     uint32_t last_rndis_msg;  // last MessageType seen
     uint32_t rndis_state;     // raw rndis_state_t value
     uint32_t in_xfer_fail;    // usbd_edpt_xfer submit failures on the IN endpoint
+    uint32_t in_busy, in_stalled, in_submit_len, in_complete_len;
+    uint32_t in_ctl, in_int, in_size, in_fifo;
+    uint32_t in_fifo_config;
     uint32_t in_xfer_done;    // IN transfer completions (these re-arm can_xmit)
 } usbnet_driver_status_t;
 void usbnet_driver_status(usbnet_driver_status_t *status);

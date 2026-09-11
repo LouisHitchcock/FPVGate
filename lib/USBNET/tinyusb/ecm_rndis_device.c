@@ -35,6 +35,8 @@
 #include "class/net/net_device.h"
 #include "rndis_protocol.h"
 #include "../usbnet_diagnostics.h"
+#include "portable/synopsys/dwc2/dwc2_type.h"
+
 
 void rndis_class_set_handler(uint8_t *data, int size); /* found in ./misc/networking/rndis_reports.c */
 bool usbnet_rndis_data_ready(void);
@@ -120,6 +122,9 @@ static uint32_t control_calls, report_calls;
 // completes in netd_xfer_cb. Upstream ignores the usbd_edpt_xfer return
 // value, so a single failed submit wedges TX permanently.
 static uint32_t in_xfer_fail, in_xfer_done;
+static uint32_t in_submit_len, in_complete_len;
+static uint8_t *in_next;
+static uint16_t in_remaining;
 
 void usbnet_driver_status(usbnet_driver_status_t *status)
 {
@@ -141,6 +146,21 @@ void usbnet_driver_status(usbnet_driver_status_t *status)
   status->rndis_state = usbnet_rndis_raw_state();
   status->in_xfer_fail = in_xfer_fail;
   status->in_xfer_done = in_xfer_done;
+  status->in_submit_len = in_submit_len;
+  status->in_complete_len = in_complete_len;
+  if (_netd_itf.ep_in) {
+    status->in_busy = usbd_edpt_busy(0, _netd_itf.ep_in);
+    status->in_stalled = usbd_edpt_stalled(0, _netd_itf.ep_in);
+    // Read-only snapshot; never read the FIFO or pop the receive status.
+    dwc2_regs_t *regs = (dwc2_regs_t *) 0x60080000UL /* ESP32-S3 DWC2_REG_BASE */;
+    dwc2_epin_t *ep = &regs->epin[tu_edpt_number(_netd_itf.ep_in)];
+    status->in_ctl = ep->diepctl;
+    status->in_int = ep->diepint;
+    status->in_size = ep->dieptsiz;
+    status->in_fifo = ep->dtxfsts;
+    uint8_t fifo = (ep->diepctl >> 22) & 15;
+    if (fifo > 0 && fifo <= 4) status->in_fifo_config = regs->dieptxf[fifo - 1];
+  }
 }
 
 void tud_network_recv_renew(void)
@@ -153,10 +173,20 @@ void tud_network_recv_renew(void)
 static void do_in_xfer(uint8_t *buf, uint16_t len)
 {
   can_xmit = false;
-  if (!usbd_edpt_xfer(0, _netd_itf.ep_in, buf, len)) {
+  // The bundled dcd_esp32sx multi-packet IN path can stop with bytes=0
+  // but packets still pending. Keep each DCD submission to one USB packet.
+  // Full packets do not terminate the host's bulk read; only the final
+  // short packet (or a ZLP for an exact multiple) terminates the frame.
+  uint16_t chunk = tu_min16(len, CFG_TUD_NET_ENDPOINT_SIZE);
+  in_remaining = len - chunk;
+  in_next = buf ? buf + chunk : NULL;
+  in_submit_len = chunk;
+  if (!usbd_edpt_xfer(0, _netd_itf.ep_in, buf, chunk)) {
     // Submit failed, so no completion callback will ever arrive. Restore
     // can_xmit rather than deadlocking transmit for good.
     ++in_xfer_fail;
+    in_remaining = 0;
+    in_next = NULL;
     can_xmit = true;
   }
 }
@@ -176,6 +206,9 @@ void netd_report(uint8_t *buf, uint16_t len)
 //--------------------------------------------------------------------+
 void netd_init(void)
 {
+  in_remaining = 0;
+  in_next = NULL;
+  can_xmit = false;
   tu_memclr(&_netd_itf, sizeof(_netd_itf));
 }
 
@@ -439,9 +472,14 @@ bool netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_
   if ( ep_addr == _netd_itf.ep_in )
   {
     ++in_xfer_done;
+    in_complete_len = xferred_bytes;
     /* TinyUSB requires the class driver to implement ZLP (since ZLP usage is class-specific) */
 
-    if ( xferred_bytes && (0 == (xferred_bytes % CFG_TUD_NET_ENDPOINT_SIZE)) )
+    if (in_remaining)
+    {
+      do_in_xfer(in_next, in_remaining);
+    }
+    else if ( xferred_bytes && (0 == (xferred_bytes % CFG_TUD_NET_ENDPOINT_SIZE)) )
     {
       do_in_xfer(NULL, 0); /* a ZLP is needed */
     }

@@ -7,6 +7,224 @@ Status: **the full FPVGate web UI now loads over USB-C on the AIO target**,
 but the firmware resets after sustained load. See section 5 for the exact
 state, what is proven, and what is still open.
 
+### Verification update ? 2026-09-11, follow-up session
+
+This update supersedes the causal conclusions in the earlier handoff below.
+After a user power cycle, a USB-bound HTTP request returned 200 but stalled
+at **29,925 bytes** and timed out after eight seconds. Serial was untouched
+until after that request. A single subsequent CDC capture showed:
+
+- uptime increasing from 35 to 50 seconds, `reset_reason=1` (power-on);
+- RX increasing from 715 to 730, TX frozen at 47, drops increasing 30 to 44;
+- `state=0x115`: USB ready and RNDIS data-ready, but `can_xmit` clear;
+- `in_done=45`, `in_fail=0`, `defer_lost=0` throughout.
+
+This proves a TX stall during a live boot in this run; it does not establish
+the cause of earlier USB disconnects. Identical archived dumps prove only
+that no new dump was saved, not that a panic was impossible. Re-enumeration
+alone does not distinguish a USB reset from a CPU reboot.
+
+The `in_done` increment is in the bulk IN completion branch. Its displayed
+value can be stale: snapshots are taken only after the TX queue has been idle
+for a second. The earlier assertion that the counter is misplaced is unsupported.
+
+The bundled FreeRTOS `osal_queue_send` uses an indefinite queue wait for
+non-ISR callers. Therefore `usbd_defer_func(..., false)` is not silently
+lost on a full queue as previously claimed, and the 200 ms semaphore timeout
+does not bound the preceding defer call. ISR event enqueue can fail, but queue
+flooding as the cause of this stall remains a hypothesis.
+
+A diagnostic-only firmware adds `[USB IN]` with software busy/stall flags,
+last submitted/completed lengths and read-only S3 DWC2 IN registers. It built
+successfully and was flashed at 0x10000 with hash verification. The board
+remained in the bootloader after the uploader reset; runtime validation is
+pending a normal reconnect. No TX recovery behavior has been added.
+
+### Confirmed task-watchdog reset ? follow-up load test
+
+The diagnostic firmware served 12 complete 104,486-byte pages. The thirteenth
+connection failed and CDC disconnected. After re-enumeration, one serial open
+captured `reset_reason=6` at uptime 35, 40 and 45 seconds. This confirms a
+**task-watchdog reset in this run**. It does not identify the responsible task
+or explain the earlier TX-only stall. Logs are in `.dev/verification-watchdog-confirmed.log`
+and `.dev/verification-after-failure.log`.
+
+The next diagnostic revision samples endpoint state on every TX attempt as
+well as idle periods, and reports task watchdog subscriptions, task states,
+and stack high-water marks. It does not disable or feed the watchdog. This
+revision built successfully and was flashed with hash verification; runtime
+validation is pending a normal reconnect from bootloader COM11.
+
+### Packet-pool candidate ? flashed, runtime validation pending
+
+Task diagnostics showed `async_tcp` subscribed to TWDT, while IDLE0, IDLE1,
+loopTask, usbd and usbnet_tx were not. The next run completed one page and
+stalled on the second; output stopped after the heap line, before the USB
+status line (whose first operation waits synchronously on lwIP). This narrows
+the investigation but is not a stack trace of the blocked task.
+
+Source review found a 1516-byte automatic Packet in `transmit()`, called on
+lwIP's 2560-byte stack. The candidate replaces frame-by-value queuing with a
+nine-packet static pool (eight queued plus one in flight). The compiled
+`transmit()` stack frame is now 48 bytes. It also retains each request until
+its deferred callback acknowledges completion: a 200 ms timeout records the
+delay, but cannot release/reuse a buffer that a late callback still owns.
+The worker waits in blocked semaphore calls; lwIP continues to enqueue without
+waiting, or returns an error when the pool/queue is full.
+
+This removes stack pressure and a callback lifetime race; neither is yet
+proven to cause the observed watchdog reset. Diagnostics now print task state
+and stack watermarks, including lwIP's `tiT`, before waiting on lwIP status.
+The AIO build and `git diff --check` pass. The candidate was flashed via ROM
+COM11 at 0x10000 with hash verification (`.dev/usbnet-pool-flash.log`). The
+board remains in the bootloader after uploader reset; a normal reconnect is
+needed before runtime validation.
+
+### FIFO mapping candidate ? flashed, runtime validation pending
+
+The packet-pool firmware still stalled on its first page. It remained alive
+through uptime 35 seconds, with `reset_reason=1`, lwIP `tiT` stack headroom
+1588, and USB control/RX progressing. Bulk IN reported busy=1, stalled=0,
+submit=1534, complete=102, ctl=0x80898040, size=0x00b00000, FIFO free=256.
+The captured log is `.dev/usbnet-pool-runtime.log`. Thus the pool change does
+not fix the hardware TX stall, and watchdog stability remains unproven.
+
+The map/disassembly establishes that Arduino links **dcd_esp32sx.c**, not
+portable/synopsys/dwc2/dcd_dwc2.c. The old driver selects TXFNUM using FIFO
+allocation order but writes its size/offset at `dieptxf[epnum - 1]`. These
+indices differ in this composite: RNDIS notification EP3 is assigned FIFO1,
+RNDIS bulk EP1 FIFO2, and CDC bulk EP4 FIFO3. EP5 is the dedicated notification
+endpoint in the bundled driver. This is an allocation mapping problem, not
+proof that five IN endpoints exceed the S3's capacity.
+
+Source: https://raw.githubusercontent.com/hathach/tinyusb/0.16.0/src/portable/espressif/esp32sx/dcd_esp32sx.c
+(the bundled binary also includes an EP5 special case).
+
+The AIO-only `--wrap=dcd_edpt_open` candidate in `usbnet_fifo.c` records the
+size/offset produced by the original driver and restores it to the selected
+FIFO after each open. Previously assigned FIFOs are restored too, because a
+subsequent open can overwrite them. The first FIFO allocation clears saved
+state after reset/close-all. No framework package files are patched. Hardware
+validation is still pending; this mapping bug is not yet a proven explanation
+for all earlier failures.
+
+Validation: AIO build passed; disassembly confirms `usbd_edpt_open` calls the
+wrapper. A host C harness compiled the actual wrapper with simulated registers
+and passed composite mapping, overwrite restoration, dedicated EP5/OUT/EP0,
+failed-open and reset cases. `git diff --check` passed. The candidate was flashed
+at 0x10000 via COM11 with hash verification (`.dev/usbnet-fifo-flash.log`).
+The device remains in the bootloader and needs a normal reconnect for testing.
+
+### FIFO candidate runtime ? still failing
+
+The FIFO wrapper firmware loaded three complete pages (104,486 bytes each),
+then the fourth timed out before a response. Serial output stopped too, but
+CDC COM18 remained present. A subsequent USB-bound GET /status timed out and
+ping failed 2/2. This run does not establish whether the CPU rebooted.
+
+Before load, the IN snapshot showed `config=0x002f0073`, FIFO free=47, versus
+256 in the preceding stalled build. Thus the intended register change took
+effect, but the wrapper is **not a validated stability fix**. The run used
+continuous serial capture. Next comparison: power-cycle and load-test with
+CDC completely closed, before making any additional firmware changes.
+Log: `.dev/usbnet-fifo-runtime.log`.
+
+### Serial-closed test and single-packet candidate
+
+With CDC unopened throughout the load, the FIFO-wrapper build completed 17
+pages before request 18 timed out. A single subsequent serial capture showed
+uptime 55?60 seconds, reset_reason=1, continued RX, sent=1481, in_done=1480,
+and bulk IN busy on submit=1534 with size=0x00b00000. lwIP stack headroom
+remained 1588. This proves the TX-only stall also occurs without CDC capture.
+Logs: `.dev/usbnet-network-only.log`, `.dev/usbnet-network-only-after.log`.
+
+The next candidate splits RNDIS bulk IN into one 64-byte USB packet per DCD
+submission, advancing on completion. Only the final short packet or ZLP ends
+the frame. This avoids the old controller driver's multi-packet refill path;
+it is a workaround under test, not a proven root-cause fix. It retains the
+packet pool and FIFO wrapper for a controlled comparison against this run.
+
+Build passed. A host harness using the production submission/completion code
+passed lengths 0, 1, 63, 64, 65, 128 and 1534, payload ordering, final short/ZLP,
+and submission failure. Firmware was flashed at 0x10000 with hash verification
+(`.dev/usbnet-single-packet-flash.log`). Device remains on ROM COM11 and needs
+a normal reconnect before the next serial-closed load test.
+
+### Single-packet result and USB task affinity candidate
+
+The single-packet firmware completed 41 pages, then request 42 timed out.
+CDC remained unopened during load. Afterwards, uptime 80?85 seconds and
+reset_reason=1 confirmed the same boot. IN was busy on submit=64, complete=64,
+size=0x00080040, FIFO free=47. RX/control still progressed and lwIP retained
+1588 bytes of stack headroom. Logs: `.dev/usbnet-single-packet-runtime.log`
+and `.dev/usbnet-single-packet-after.log`. Splitting transfers therefore did
+not eliminate the stall; the pending submission had not filled its FIFO.
+
+The next candidate pins Arduino's `usbd` task to its creator's core. The
+configured main task runs on CPU0 and installs TinyUSB/its interrupt before
+creating an unpinned `usbd`. The legacy DCD ISR continues examining transfer
+state after queuing a completion; an unpinned USB task can process that event
+and re-arm the endpoint concurrently on the other core. This is a plausible
+race matching the empty, enabled endpoint, not yet a proven runtime cause.
+
+`usbnet_task.c` wraps xTaskCreatePinnedToCore only for an unpinned task named
+usbd. Other tasks and explicit affinities pass through unchanged. Host tests
+of the actual wrapper passed task selection, argument/result forwarding and
+preservation of explicit affinity. Task diagnostics now print affinity.
+The packet pool, FIFO wrapper and single-packet submissions remain in this
+candidate to change only affinity for the next comparison. The AIO build
+passed, and disassembly confirms tinyusb_init calls the task wrapper. Firmware
+was flashed at 0x10000 with hash verification (`.dev/usbnet-affinity-flash.log`).
+Runtime validation is pending a normal reconnect from ROM COM11.
+
+### USB task affinity runtime - best result so far, not a proven fix
+
+The affinity firmware was load-tested in three configurations.
+
+Network-only (CDC never opened): 60 consecutive 104,486-byte pages, all
+HTTP 200, ~1.0 s each, no failure. The test ended because it ran out of
+iterations, not because the device stalled. Previous best was 41.
+Log: `.dev/usbnet-affinity-network-only.log`.
+
+Mixed traffic with CDC capture active: HTML, JavaScript (322,198 bytes),
+CSS and API endpoints in rotation. Request 12 timed out after 299,008 of
+322,198 bytes. Bulk IN showed the familiar busy=1, stalled=0, submit=64,
+size=0x00080000. Log: `.dev/usbnet-affinity-mixed.log`.
+
+Mixed traffic with CDC never opened: 80 requests completed, roughly 9.5 MB,
+before request 81 failed with a TCP reset rather than a timeout. The device
+recovered on its own: ping 1 ms, `/status` 200 three times, and two complete
+322,198-byte `/script.js` transfers immediately afterwards. A single serial
+capture then showed `reset_reason=6` at uptime 30 s. The failure was therefore
+a task-watchdog reset the device recovered from, not the unrecoverable TX
+stall seen in every earlier run. Logs: `.dev/usbnet-affinity-mixed-noserial.log`,
+`.dev/usbnet-affinity-mixed-noserial-after.log`.
+
+Evidence pointing away from USB for this particular failure: `async_tcp` is the
+only task subscribed to the TWDT (`wdt=ESP_OK`); IDLE0, IDLE1, loopTask, tiT,
+usbd and usbnet_tx all report `ESP_ERR_NOT_FOUND`. Heap minimum-free-ever fell
+from 140 KB to 66 KB during the post-failure window, with `dropped=43` and
+`pending=3`. The `usbd` stack high-water mark stayed healthy at 2868-2952.
+
+Limits of this evidence. This is one run per configuration. The affinity change
+sits on top of the packet pool, the FIFO wrapper and single-packet submissions,
+all still enabled, so the improvement cannot be attributed to any single
+candidate. One snapshot at uptime 40 s showed `busy=1 size=0x00080000` again,
+which a single sample cannot distinguish from a normal in-flight transfer, so
+the TX stall is not established as eliminated. No stack trace names the task
+that tripped the watchdog; async_tcp is a correlation, not a confirmed cause.
+
+User-reported bench behaviour: ordinary interactive use of the page with a
+serial terminal open behaves normally, but the serial monitor silently stopped
+and needed a disconnect/reconnect while the web page kept working. That matches
+the one-directional silent stall signature and is consistent with the CDC
+channel stalling rather than the board resetting, though it was not measured.
+
+Next planned step: repeat the CDC-closed mixed test two to three times. Failure
+clustering near 80 requests with `reset_reason=6` and a ~66 KB heap floor would
+isolate async_tcp heap pressure as the remaining blocker, separate from USB.
+
+
 USB uses `192.168.7.1/24`, deliberately distinct from the WiFi SoftAP's
 `192.168.4.1/24`.
 

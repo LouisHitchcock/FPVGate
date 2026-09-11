@@ -9,6 +9,7 @@
 #include "esp_netif_net_stack.h"
 #include "lwip/netif.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "lwip/ip4_addr.h"
@@ -33,6 +34,7 @@ static std::atomic<bool> netifReady{false};
 static esp_err_t startupResult = ESP_FAIL;
 static esp_err_t registrationResult = ESP_FAIL;
 static QueueHandle_t txQueue;
+static QueueHandle_t txFreePackets;
 static SemaphoreHandle_t txDone;
 static std::atomic<uint32_t> rxPackets{0}, txQueued{0}, txSent{0}, txDropped{0};
 static std::atomic<uint32_t> txCallbacks{0};
@@ -42,10 +44,13 @@ static std::atomic<uint32_t> rxArmFailures{0}, rxErrors{0}, lastRxLength{0}, end
 static std::atomic<uint32_t> ctrlCalls{0}, reportCalls{0}, rndisMsgs{0};
 static std::atomic<uint32_t> lastRndisMsg{0}, rndisState{0};
 static std::atomic<uint32_t> inXferFail{0}, inXferDone{0};
-// Defers dropped by a full TinyUSB event queue, or USB task stalls.
+// Deferred callbacks that did not signal within the semaphore timeout.
 static std::atomic<uint32_t> txDeferLost{0};
 
-static void sampleOnUsbTask(void *) {
+static std::atomic<uint32_t> inBusy{0}, inStalled{0}, inSubmitLen{0}, inCompleteLen{0};
+static std::atomic<uint32_t> inCtl{0}, inInt{0}, inSize{0}, inFifo{0}, inFifoConfig{0};
+
+static void sampleDriverStatus() {
     usbnet_driver_status_t status = {};
     usbnet_driver_status(&status);
     rxArmFailures = status.arm_failures;
@@ -59,6 +64,15 @@ static void sampleOnUsbTask(void *) {
     rndisState = status.rndis_state;
     inXferFail = status.in_xfer_fail;
     inXferDone = status.in_xfer_done;
+    inBusy = status.in_busy; inStalled = status.in_stalled;
+    inSubmitLen = status.in_submit_len; inCompleteLen = status.in_complete_len;
+    inCtl = status.in_ctl; inInt = status.in_int;
+    inSize = status.in_size; inFifo = status.in_fifo;
+    inFifoConfig = status.in_fifo_config;
+}
+
+static void sampleOnUsbTask(void *) {
+    sampleDriverStatus();
     xSemaphoreGive(txDone);
 }
 struct Packet {
@@ -121,55 +135,65 @@ static void sendOnUsbTask(void *arg) {
         tud_network_xmit(attempt->packet, attempt->packet->length);
         ++txSent;
     }
+    sampleDriverStatus();
     xSemaphoreGive(txDone);
 }
 
-// One TinyUSB event queue (CFG_TUD_TASK_QUEUE_SZ, 16) carries BOTH our
-// usbd_defer_func() requests and DCD events such as XFER_COMPLETE. The
-// completion event is what re-arms can_xmit, so flooding the queue with retry
-// defers starves the very event we are waiting for - a self-reinforcing
-// deadlock. usbd_defer_func() also returns void, so a full queue drops the
-// request silently and a portMAX_DELAY wait would block forever.
-//
-// Hence: few attempts, spaced well apart, and never an unbounded wait. The
-// buffers are file-static because a late callback must not write into a stack
-// frame that has already been reused.
-static Packet txPacket;
+// Defer requests share TinyUSB's event queue with DCD completions. Limit
+// retries to reduce traffic while the endpoint is busy. In this FreeRTOS
+// build, posting a defer from a task itself waits indefinitely for queue
+// space; the semaphore timeout below only bounds the wait AFTER that post.
+// The pool owns queued and in-flight frames; only an acknowledged callback
+// permits reuse. A stalled callback stops the worker without blocking lwIP.
+static Packet txPackets[9];
 static SendAttempt txAttempt;
 
 static void txTask(void *) {
     for (;;) {
-        if (xQueueReceive(txQueue, &txPacket, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        Packet *packet = nullptr;
+        if (xQueueReceive(txQueue, &packet, pdMS_TO_TICKS(1000)) != pdTRUE) {
             usbd_defer_func(sampleOnUsbTask, nullptr, false);
-            // Bounded: a dropped defer must not wedge the diagnostics path.
-            xSemaphoreTake(txDone, pdMS_TO_TICKS(200));
+            // Bound completion waiting after the defer has been posted.
+            if (xSemaphoreTake(txDone, pdMS_TO_TICKS(200)) != pdTRUE) {
+                ++txDeferLost;
+                // Keep ownership until this callback acknowledges completion.
+                while (xSemaphoreTake(txDone, pdMS_TO_TICKS(200)) != pdTRUE) {}
+            }
             continue;
         }
-        txAttempt.packet = &txPacket;
+        txAttempt.packet = packet;
         txAttempt.sent = false;
         for (int attempt = 0; attempt < 3 && !txAttempt.sent; ++attempt) {
             if (attempt) vTaskDelay(pdMS_TO_TICKS(10));
             usbd_defer_func(sendOnUsbTask, &txAttempt, false);
             if (xSemaphoreTake(txDone, pdMS_TO_TICKS(200)) != pdTRUE) {
-                // The defer was dropped or the USB task is stalled. Give up on
-                // this packet; TCP will retransmit. Never block indefinitely.
                 ++txDeferLost;
+                // A timeout does not cancel a queued callback. Reusing its
+                // packet or semaphore would race a later request.
+                while (xSemaphoreTake(txDone, pdMS_TO_TICKS(200)) != pdTRUE) {}
                 break;
             }
         }
         if (!txAttempt.sent) ++txDropped;
+        xQueueSend(txFreePackets, &packet, 0);
     }
 }
 
 static esp_err_t transmit(void *, void *buffer, size_t len) {
     if (!txQueue || len > CFG_TUD_NET_MTU) return ESP_ERR_INVALID_SIZE;
-    Packet packet;
-    packet.length = len;
-    memcpy(packet.bytes, buffer, len);
+    // Called on lwIP's 2560-byte stack. Never put a 1516-byte frame on it.
+    Packet *packet = nullptr;
+    if (xQueueReceive(txFreePackets, &packet, 0) != pdTRUE) {
+        ++txDropped;
+        return ESP_ERR_NO_MEM;
+    }
+    packet->length = len;
+    memcpy(packet->bytes, buffer, len);
     if (xQueueSend(txQueue, &packet, 0) == pdTRUE) {
         ++txQueued;
         return ESP_OK;
     }
+    xQueueSend(txFreePackets, &packet, 0);
     ++txDropped;
     return ESP_ERR_NO_MEM;
 }
@@ -213,6 +237,16 @@ static esp_err_t readNetStatus(void *arg) {
 
 void usbnet_print_status(void) {
     if (!netif) return;
+    // Inspect subscriptions instead of assuming startup deinitialised TWDT.
+    const char *tasks[] = {"IDLE0", "IDLE1", "loopTask", "tiT", "async_tcp", "usbd", "usbnet_tx"};
+    for (const char *name : tasks) {
+        TaskHandle_t task = xTaskGetHandle(name);
+        if (task) {
+            Serial.printf("[USB TASK] %s wdt=%s state=%d core=%d stack=%u\n", name,
+                esp_err_to_name(esp_task_wdt_status(task)), (int)eTaskGetState(task), (int)xTaskGetAffinity(task),
+                (unsigned)uxTaskGetStackHighWaterMark(task));
+        }
+    }
     NetStatus status = {};
     esp_netif_tcpip_exec(readNetStatus, &status);
     Serial.printf("[USB] start=%s flags=0x%x http=%u rx=%u queued=%u sent=%u dropped=%u callbacks=%u pending=%u\n",
@@ -226,6 +260,9 @@ void usbnet_print_status(void) {
         lastRndisMsg.load(), rndisState.load());
     Serial.printf("[USB TX] in_fail=%u in_done=%u defer_lost=%u\n",
         inXferFail.load(), inXferDone.load(), txDeferLost.load());
+    Serial.printf("[USB IN] busy=%u stalled=%u submit=%u complete=%u ctl=%08x int=%08x size=%08x fifo=%u config=%08x\n",
+        inBusy.load(), inStalled.load(), inSubmitLen.load(), inCompleteLen.load(),
+        inCtl.load(), inInt.load(), inSize.load(), inFifo.load(), inFifoConfig.load());
     // Reset reason is repeated every cycle rather than only in the boot
     // banner, because the banner is easy to miss on a board that resets
     // under load. 4=PANIC 5=INT_WDT 6=TASK_WDT 7=WDT 9=BROWNOUT.
@@ -244,14 +281,21 @@ esp_err_t usbnet_begin(void) {
     // Idempotent. FPVGate normally gets this via WiFi, but USB must not
     // depend on WiFi having initialised the stack first.
     esp_netif_init();
-    txQueue = xQueueCreate(8, sizeof(Packet));
+    txQueue = xQueueCreate(8, sizeof(Packet *));
+    txFreePackets = xQueueCreate(9, sizeof(Packet *));
     txDone = xSemaphoreCreateBinary();
-    if (!txQueue || !txDone) {
+    if (!txQueue || !txFreePackets || !txDone) {
         if (txQueue) vQueueDelete(txQueue);
+        if (txFreePackets) vQueueDelete(txFreePackets);
         if (txDone) vSemaphoreDelete(txDone);
         txQueue = nullptr;
+        txFreePackets = nullptr;
         txDone = nullptr;
         return ESP_ERR_NO_MEM;
+    }
+    for (auto &packet : txPackets) {
+        Packet *entry = &packet;
+        xQueueSend(txFreePackets, &entry, 0);
     }
     esp_netif_ip_info_t ip = {};
     IP4_ADDR(&ip.ip, 192, 168, 7, 1);
@@ -276,8 +320,10 @@ esp_err_t usbnet_begin(void) {
     if (!created || xTaskCreate(txTask, "usbnet_tx", 4096, nullptr, 4, nullptr) != pdPASS) {
         if (created) esp_netif_destroy(created);
         vQueueDelete(txQueue);
+        vQueueDelete(txFreePackets);
         vSemaphoreDelete(txDone);
         txQueue = nullptr;
+        txFreePackets = nullptr;
         txDone = nullptr;
         return ESP_ERR_NO_MEM;
     }
