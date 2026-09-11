@@ -314,8 +314,98 @@
 
 .marshal-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) 260px 240px;
   gap: 16px;
+}
+
+/* Race details sit beside the pass list, sharing its card styling. */
+.marshal-details-col {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--background-color);
+}
+
+.marshal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.marshal-field label {
+  font-size: 12px;
+  color: var(--secondary-color);
+}
+
+.marshal-field input,
+.marshal-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background-color: var(--bg-primary, var(--background-color));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.marshal-field textarea {
+  resize: vertical;
+  min-height: 68px;
+}
+
+/* Typed lap entry, used only when a race has no graph to edit on. */
+.marshal-lap-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  margin-bottom: 6px;
+  background: var(--bg-secondary, var(--background-color));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.marshal-lap-edit-row .marshal-lap-edit-label {
+  min-width: 52px;
+  font-size: 12px;
+  color: var(--secondary-color);
+}
+
+.marshal-lap-edit-row.is-gate .marshal-lap-edit-label {
+  font-weight: bold;
+  color: var(--accent-color);
+}
+
+.marshal-lap-edit-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background-color: var(--bg-primary, var(--background-color));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.marshal-lap-edit-row input.is-invalid {
+  border-color: #e74c3c;
+}
+
+/* Shown instead of the graph for races recorded without RSSI history. */
+.marshal-no-history {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 24px;
+  text-align: center;
+  color: var(--secondary-color);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
 }
 
 .marshal-chart-wrap {
@@ -526,9 +616,22 @@
   color: var(--secondary-color);
 }
 
+@media (max-width: 1180px) {
+  /* Not enough width for three columns: the rail stacks under the graph. */
+  .marshal-layout {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+  .marshal-details-col {
+    grid-column: 2;
+  }
+}
+
 @media (max-width: 860px) {
   .marshal-layout {
     grid-template-columns: 1fr;
+  }
+  .marshal-details-col {
+    grid-column: auto;
   }
   .marshal-laps-list {
     max-height: 240px;

@@ -5467,12 +5467,10 @@ function renderRaceHistory() {
       pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;">${i18n.t("history.item_pilot", { n: pilotCallsign })}</div>`;
     }
 
-    const canMarshal = !!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount));
     html += `
       <div class="race-item" data-race-index="${index}">
         <div class="race-item-buttons">
           <button class="race-item-button" data-action="edit" data-index="${index}">${i18n.t("history.edit")}</button>
-          ${canMarshal ? `<button class="race-item-button" data-action="marshal" data-index="${index}" style="border-color: var(--accent-color); color: var(--accent-color);">${i18n.t("history.marshal")}</button>` : ""}
           <button class="race-item-button" data-action="download" data-timestamp="${race.timestamp}">${i18n.t("history.download")}</button>
           <button class="race-item-button" style="border-color: #e74c3c; color: #e74c3c;" data-action="delete" data-timestamp="${race.timestamp}">${i18n.t("history.delete")}</button>
         </div>
@@ -5547,12 +5545,9 @@ function setupRaceHistoryEventHandlers() {
       event.stopPropagation();
       const action = button.getAttribute("data-action");
       
-      if (action === "edit") {
+      if (action === "edit" || action === "marshal") {
         const index = parseInt(button.getAttribute("data-index"));
-        openEditModal(index);
-      } else if (action === "marshal") {
-        const index = parseInt(button.getAttribute("data-index"));
-        openMarshalModal(index);
+        openRaceEditor(index);
       } else if (action === "download") {
         const timestamp = parseInt(button.getAttribute("data-timestamp"));
         downloadSingleRace(timestamp);
@@ -6425,177 +6420,6 @@ function downloadSingleRace(timestamp) {
   window.open("/races/downloadOne?timestamp=" + timestamp, "_blank");
 }
 
-let editingRaceIndex = null;
-
-function openEditModal(index) {
-  editingRaceIndex = index;
-  const race = raceHistoryData[index];
-
-  document.getElementById("raceName").value = race.name || "";
-  document.getElementById("raceTag").value = race.tag || "";
-  document.getElementById("raceDistance").value = race.totalDistance || 0;
-  document.getElementById("raceEditNotes").value = race.notes || "";
-
-  // Populate lap times for marshalling mode
-  renderEditLapsList(race.lapTimes);
-
-  document.getElementById("editRaceModal").style.display = "flex";
-}
-
-function renderEditLapsList(lapTimes) {
-  const container = document.getElementById("editLapsList");
-  let html = "";
-
-  lapTimes.forEach((lapTime, index) => {
-    const lapSeconds = (lapTime / 1000).toFixed(3);
-    const lapLabel = index === 0 ? i18n.t("race.gate1") : i18n.t("race.lap_counter", { n: index });
-    html += `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background-color: var(--bg-secondary); border-radius: 4px;">
-        <span style="min-width: 60px; font-weight: ${index === 0 ? "bold" : "normal"}; color: ${index === 0 ? "var(--accent-color)" : "var(--primary-color)"}">${lapLabel}</span>
-        <input type="number" step="0.001" min="0" value="${lapSeconds}" 
-               data-lap-index="${index}" 
-               style="flex: 1; padding: 6px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--primary-color);" 
-               title="Edit lap time in seconds" />
-        <span style="min-width: 20px;">s</span>
-        <button onclick="deleteLapFromEdit(${index})" 
-                style="padding: 4px 10px; background-color: var(--danger-color); border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 18px; line-height: 1;" 
-                title="Delete this lap">&times;</button>
-      </div>
-    `;
-  });
-
-  container.innerHTML = html;
-}
-
-function deleteLapFromEdit(index) {
-  if (editingRaceIndex === null) return;
-  const race = raceHistoryData[editingRaceIndex];
-
-  if (race.lapTimes.length <= 1) {
-    alert(i18n.t("history.edit_lap_last_error"));
-    return;
-  }
-
-  if (confirm(i18n.t("history.edit_lap_delete_confirm"))) {
-    race.lapTimes.splice(index, 1);
-    renderEditLapsList(race.lapTimes);
-  }
-}
-
-function addNewLapToEdit() {
-  if (editingRaceIndex === null) return;
-  const race = raceHistoryData[editingRaceIndex];
-
-  // Add a new lap with a default value (average of existing laps)
-  let defaultValue = 0;
-  if (race.lapTimes.length > 0) {
-    const sum = race.lapTimes.reduce((a, b) => a + b, 0);
-    defaultValue = Math.round(sum / race.lapTimes.length);
-  } else {
-    defaultValue = 10000; // 10 seconds default
-  }
-
-  race.lapTimes.push(defaultValue);
-  renderEditLapsList(race.lapTimes);
-
-  // Scroll to bottom to show the new lap
-  const container = document.getElementById("editLapsList");
-  container.scrollTop = container.scrollHeight;
-}
-
-function closeEditModal() {
-  document.getElementById("editRaceModal").style.display = "none";
-  editingRaceIndex = null;
-}
-
-function closeEditModalOnBackdrop(event) {
-  // Only close if clicking the backdrop (not the modal content)
-  if (event.target.id === "editRaceModal") {
-    closeEditModal();
-  }
-}
-
-function saveRaceEdit() {
-  if (editingRaceIndex === null) return;
-
-  const race = raceHistoryData[editingRaceIndex];
-  const name = document.getElementById("raceName").value;
-  const tag = document.getElementById("raceTag").value;
-  const distance = parseFloat(document.getElementById("raceDistance").value) || 0;
-  const notes = document.getElementById("raceEditNotes").value.trim();
-
-  // Collect updated lap times from inputs
-  const lapInputs = document.querySelectorAll('#editLapsList input[type="number"]');
-  const updatedLapTimes = [];
-  let hasError = false;
-
-  lapInputs.forEach((input) => {
-    const value = parseFloat(input.value);
-    if (isNaN(value) || value <= 0) {
-      hasError = true;
-      input.style.borderColor = "#e74c3c";
-    } else {
-      input.style.borderColor = "";
-      // Convert seconds to milliseconds
-      updatedLapTimes.push(Math.round(value * 1000));
-    }
-  });
-
-  if (hasError) {
-    alert(i18n.t("messages.race_edit_invalid_laps"));
-    return;
-  }
-
-  if (updatedLapTimes.length === 0) {
-    alert(i18n.t("messages.race_edit_no_laps"));
-    return;
-  }
-
-  // First update metadata (name/tag/distance)
-  const formData = new URLSearchParams();
-  formData.append("timestamp", race.timestamp);
-  formData.append("name", name);
-  formData.append("tag", tag);
-  formData.append("totalDistance", distance);
-  formData.append("notes", notes);
-
-  fetch("/races/update", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: formData,
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Race metadata updated:", data);
-
-      // Then update lap times if they changed
-      return fetch("/races/updateLaps", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          timestamp: race.timestamp,
-          lapTimes: updatedLapTimes,
-        }),
-      });
-    })
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Race laps updated:", data);
-      const ts = race.timestamp;
-      closeEditModal();
-      return loadRaceHistory(() => refreshRaceHistoryViews(ts));
-    })
-    .catch((error) => {
-      console.error("Error updating race:", error);
-      alert(i18n.t("messages.race_update_error"));
-    });
-}
-
 function importRaces(input) {
   const file = input.files[0];
   if (!file) return;
@@ -6770,17 +6594,108 @@ function bindMarshalCanvasHandlers() {
   });
 }
 
-function openMarshalModal(index) {
-  const race = raceHistoryData[index];
-  if (!race) return;
-  if (!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount))) {
-    alert(i18n.t("history.marshal_no_history"));
+// Shows or hides everything that only makes sense with an RSSI trace. Races
+// recorded before the marshal feature, or with no SD card in, still need to
+// open so their name, tag, distance and notes can be edited.
+function setMarshalGraphVisible(visible) {
+  const shown = visible ? "" : "none";
+  ["marshalChartWrap", "marshalLegend", "marshalThresholds", "marshalGuide"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = shown;
+  });
+  const placeholder = document.getElementById("marshalNoHistory");
+  if (placeholder) placeholder.style.display = visible ? "none" : "flex";
+  ["marshalRecalcBtn", "marshalDeleteBtn"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !visible;
+  });
+  const status = document.getElementById("marshalSelectionStatus");
+  if (status) status.style.display = shown;
+
+  // The graph-linked pass list and the typed list are alternatives; exactly one
+  // of them is on screen, so the panel never gets cluttered with both.
+  ["marshalLapsList", "marshalListHint"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = shown;
+  });
+  ["marshalLapEditList", "marshalLapEditHint", "marshalAddLapBtn"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? "none" : "";
+  });
+}
+
+// Typed lap entry for races with no RSSI trace. Edits a copy held on
+// marshalState, never raceHistoryData, so closing without saving discards them.
+function renderLapEditList() {
+  const container = document.getElementById("marshalLapEditList");
+  if (!container || !marshalState) return;
+  container.innerHTML = marshalState.editLaps
+    .map((ms, i) => {
+      const label = i === 0 ? i18n.t("race.gate1") : i18n.t("race.lap_counter", { n: i });
+      return `
+      <div class="marshal-lap-edit-row${i === 0 ? " is-gate" : ""}">
+        <span class="marshal-lap-edit-label">${label}</span>
+        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} time in seconds" />
+        <span>s</span>
+        <button type="button" class="marshal-btn marshal-btn-danger" onclick="deleteLapFromEditor(${i})" title="${i18n.t("history.delete")}">&times;</button>
+      </div>`;
+    })
+    .join("");
+}
+
+// Keeps typed values through a re-render, so adding or deleting a row does not
+// silently discard edits made to the other rows.
+function readLapEditInputs() {
+  return [...document.querySelectorAll("#marshalLapEditList input[type=\"number\"]")].map((input) => {
+    const seconds = parseFloat(input.value);
+    return { ms: Math.round(seconds * 1000), valid: !isNaN(seconds) && seconds > 0, input };
+  });
+}
+
+function syncLapEditState() {
+  if (!marshalState) return;
+  const rows = readLapEditInputs();
+  if (rows.length === marshalState.editLaps.length) {
+    rows.forEach((row, i) => {
+      if (row.valid) marshalState.editLaps[i] = row.ms;
+    });
+  }
+}
+
+function addLapToEditor() {
+  if (!marshalState) return;
+  syncLapEditState();
+  const laps = marshalState.editLaps;
+  const average = laps.length ? Math.round(laps.reduce((a, b) => a + b, 0) / laps.length) : 10000;
+  laps.push(average);
+  renderLapEditList();
+  const container = document.getElementById("marshalLapEditList");
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function deleteLapFromEditor(index) {
+  if (!marshalState) return;
+  if (marshalState.editLaps.length <= 1) {
+    alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
+  if (!confirm(i18n.t("history.edit_lap_delete_confirm"))) return;
+  syncLapEditState();
+  marshalState.editLaps.splice(index, 1);
+  renderLapEditList();
+}
+
+function openRaceEditor(index) {
+  const race = raceHistoryData[index];
+  if (!race) return;
+  const hasHistory = !!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount));
 
   marshalState = {
     index,
     race,
+    hasHistory,
+    // A copy, so closing without saving leaves raceHistoryData untouched.
+    editLaps: (race.lapTimes || []).slice(),
     raceTimestamp: race.timestamp,
     samples: [],
     intervalMs: 20,
@@ -6795,7 +6710,16 @@ function openMarshalModal(index) {
     suppressClick: false,
   };
 
-  document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_loading");
+  document.getElementById("raceName").value = race.name || "";
+  document.getElementById("raceTag").value = race.tag || "";
+  document.getElementById("raceDistance").value = race.totalDistance || 0;
+  document.getElementById("raceEditNotes").value = race.notes || "";
+
+  setMarshalGraphVisible(hasHistory);
+  if (!hasHistory) renderLapEditList();
+  document.getElementById("marshalMeta").textContent = hasHistory
+    ? i18n.t("history.marshal_loading")
+    : i18n.t("history.marshal_no_history");
   document.getElementById("marshalEnter").value = marshalState.enter;
   document.getElementById("marshalExit").value = marshalState.exit;
   document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
@@ -6805,6 +6729,10 @@ function openMarshalModal(index) {
   applyMarshalGuidePreference();
   renderMarshalLapsList();
   bindMarshalCanvasHandlers();
+
+  if (!hasHistory) {
+    return;
+  }
 
   fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
     .then((r) => {
@@ -7383,35 +7311,68 @@ function refreshRaceHistoryViews(timestamp) {
   }
 }
 
-function marshalSaveLaps() {
+// Both endpoints answer 200 with {"status":"ERROR"} on a failed write, so the
+// HTTP status alone never proves anything was saved.
+function assertSaved(data, what) {
+  if (!data || data.status !== "OK") {
+    throw new Error(what + " not saved: " + JSON.stringify(data));
+  }
+  return data;
+}
+
+function saveRaceChanges() {
   if (!marshalState) return;
-  const segs = absPassesToSegments(marshalState.absPasses);
+  const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
+
+  const details = new URLSearchParams();
+  details.append("timestamp", ts);
+  details.append("name", document.getElementById("raceName").value);
+  details.append("tag", document.getElementById("raceTag").value);
+  details.append("totalDistance", parseFloat(document.getElementById("raceDistance").value) || 0);
+  details.append("notes", document.getElementById("raceEditNotes").value.trim());
+
+  // Lap times come from the graph when there is one, and from the typed list
+  // when there is not.
+  let segs;
+  if (marshalState.hasHistory) {
+    segs = absPassesToSegments(marshalState.absPasses);
+  } else {
+    const rows = readLapEditInputs();
+    rows.forEach((row) => row.input.classList.toggle("is-invalid", !row.valid));
+    if (rows.some((row) => !row.valid)) {
+      alert(i18n.t("messages.race_edit_invalid_laps"));
+      return;
+    }
+    segs = rows.map((row) => row.ms);
+  }
   if (!segs.length) {
     alert(i18n.t("messages.race_edit_no_laps"));
     return;
   }
-  const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
-  fetch("/races/updateLaps", {
+
+  fetch("/races/update", {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: details,
   })
     .then((r) => r.json())
-    .then((data) => {
-      // The endpoint answers 200 with {"status":"ERROR"} on a failed write, so
-      // the HTTP status alone does not tell us the laps were actually saved.
-      if (!data || data.status !== "OK") {
-        console.error("Marshal laps not saved", data);
-        alert(i18n.t("messages.race_update_error"));
-        return;
-      }
-      console.log("Marshal laps saved", data);
+    .then((data) => assertSaved(data, "Race details"))
+    .then(() => {
+      return fetch("/races/updateLaps", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
+      })
+        .then((r) => r.json())
+        .then((data) => assertSaved(data, "Lap times"));
+    })
+    .then(() => {
       alert(i18n.t("history.marshal_saved"));
       closeMarshalModal();
       return loadRaceHistory(() => refreshRaceHistoryViews(ts));
     })
     .catch((err) => {
-      console.error(err);
+      console.error("Error saving race:", err);
       alert(i18n.t("messages.race_update_error"));
     });
 }
