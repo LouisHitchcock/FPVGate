@@ -1,7 +1,23 @@
 # Name,   Type, SubType, Offset,  Size, Flags
-# Optimized for SD card storage - web interface + config only
+# 8MB layout. nvs/otadata/app0/app1 offsets and sizes are unchanged from the
+# original table, so an OTA app update onto an existing device still lands in
+# the right place and its saved settings survive.
+#
+# spiffs was 0x100000 (1MB) and is now 0x3E0000 (3.875MB). It was sized when
+# data/ was around 650KB; by v1.7.3 data/ is 907KB, which LittleFS cannot fit
+# into 1MB once each file is rounded up to a 4096-byte block. Nothing was using
+# the 2.94MB past 0x510000, and the 4MB board already gives spiffs 1.4MB, so the
+# 8MB boards were getting the smallest filesystem of any target.
+#
+# The offset stays 0x410000, so the documented esptool flash command and the
+# release FLASH_INSTRUCTIONS.txt do not change.
+#
+# NOTE: a device that OTA-updates only the app keeps its old 1MB spiffs. Those
+# devices need one full reflash (bootloader + partitions + firmware + littlefs)
+# before they can take a filesystem image built against this table.
 nvs,      data, nvs,     0x9000,  0x5000,
 otadata,  data, ota,     0xe000,  0x2000,
 app0,     app,  ota_0,   0x10000, 0x200000,
 app1,     app,  ota_1,   0x210000,0x200000,
-spiffs,   data, spiffs,  0x410000,0x100000,
+spiffs,   data, spiffs,  0x410000,0x3E0000,
+coredump, data, coredump,0x7F0000,0x10000,
