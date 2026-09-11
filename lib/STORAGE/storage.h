@@ -25,6 +25,9 @@ class Storage {
     bool appendBinaryFile(const String& path, const uint8_t* data, size_t len);
     bool readFile(const String& path, String& data);
     bool readBinaryFile(const String& path, std::vector<uint8_t>& out);
+    // Overwrite len bytes at offset without rewriting the rest of the file.
+    bool patchBinaryFile(const String& path, size_t offset, const uint8_t* data, size_t len);
+    bool fileSize(const String& path, size_t& out);
     bool deleteFile(const String& path);
     bool renameFile(const String& fromPath, const String& toPath);
     bool exists(const String& path);

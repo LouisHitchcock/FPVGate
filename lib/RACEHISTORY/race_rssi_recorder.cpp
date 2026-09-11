@@ -10,12 +10,114 @@ RaceRssiRecorder::RaceRssiRecorder()
       intervalMs(RACE_RSSI_INTERVAL_MS),
       sampleCount(0),
       lastSampleMs(0),
-      stagingCount(0) {
-    memset(staging, 0, sizeof(staging));
+      stagingCount(0),
+      dropped(0),
+      activeBuffer(-1),
+      writeQueue(nullptr),
+      freeBuffers(nullptr),
+      writerTask(nullptr),
+      writeFailed(false) {
+    memset(buffers, 0, sizeof(buffers));
 }
 
 void RaceRssiRecorder::init(Storage* storageBackend) {
     storage = storageBackend;
+    if (writerTask) {
+        return;
+    }
+    writeQueue = xQueueCreate(RACE_RSSI_BUFFER_COUNT, sizeof(WriteJob));
+    freeBuffers = xQueueCreate(RACE_RSSI_BUFFER_COUNT, sizeof(uint8_t));
+    if (!writeQueue || !freeBuffers) {
+        DEBUG("[RssiRec] Queue allocation failed - capture disabled\n");
+        return;
+    }
+    for (uint8_t i = 0; i < RACE_RSSI_BUFFER_COUNT; i++) {
+        xQueueSend(freeBuffers, &i, 0);
+    }
+    // Low priority: this must never preempt lap detection. It only ever runs
+    // when a buffer is full, so it is idle for most of a race.
+    if (xTaskCreate(writerTaskEntry, "rssi_write", 3072, this, 1, &writerTask) != pdPASS) {
+        DEBUG("[RssiRec] Writer task creation failed - capture disabled\n");
+        writerTask = nullptr;
+    }
+}
+
+void RaceRssiRecorder::writerTaskEntry(void* arg) {
+    static_cast<RaceRssiRecorder*>(arg)->runWriter();
+}
+
+// Owns every SD append for the capture. The sampling path only ever posts a
+// buffer index here, so a slow card cannot stall lap detection.
+void RaceRssiRecorder::runWriter() {
+    for (;;) {
+        WriteJob job;
+        if (xQueueReceive(writeQueue, &job, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        if (storage && job.length > 0) {
+            if (!storage->appendBinaryFile(RACE_RSSI_ACTIVE_PATH, buffers[job.index], job.length)) {
+                writeFailed = true;
+                DEBUG("[RssiRec] SD append failed\n");
+            }
+        }
+        xQueueSend(freeBuffers, &job.index, 0);
+    }
+}
+
+bool RaceRssiRecorder::acquireBuffer(TickType_t wait) {
+    if (!freeBuffers) {
+        return false;
+    }
+    uint8_t index = 0;
+    if (xQueueReceive(freeBuffers, &index, wait) != pdTRUE) {
+        return false;
+    }
+    activeBuffer = (int8_t)index;
+    stagingCount = 0;
+    return true;
+}
+
+bool RaceRssiRecorder::postActiveBuffer() {
+    if (activeBuffer < 0 || !writeQueue) {
+        return false;
+    }
+    WriteJob job = {(uint8_t)activeBuffer, stagingCount};
+    activeBuffer = -1;
+    stagingCount = 0;
+    if (xQueueSend(writeQueue, &job, 0) != pdTRUE) {
+        // Queue is sized to the buffer count, so this should be unreachable.
+        xQueueSend(freeBuffers, &job.index, 0);
+        return false;
+    }
+    return true;
+}
+
+// Hands the active buffer back without writing it. waitForWriterIdle counts
+// buffers in the free pool, so an unreleased active buffer would hang it.
+void RaceRssiRecorder::releaseActiveBuffer() {
+    if (activeBuffer < 0 || !freeBuffers) {
+        return;
+    }
+    uint8_t index = (uint8_t)activeBuffer;
+    activeBuffer = -1;
+    stagingCount = 0;
+    xQueueSend(freeBuffers, &index, 0);
+}
+
+// Blocks until every buffer is back in the free pool, i.e. the writer has
+// drained. Only called from endRace, never from the sampling path.
+bool RaceRssiRecorder::waitForWriterIdle(TickType_t wait) {
+    if (!freeBuffers) {
+        return false;
+    }
+    TickType_t deadline = xTaskGetTickCount() + wait;
+    while (uxQueueMessagesWaiting(freeBuffers) < RACE_RSSI_BUFFER_COUNT) {
+        if ((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    return true;
 }
 
 String RaceRssiRecorder::sidecarBasenameForTimestamp(uint32_t timestamp) {
@@ -49,6 +151,7 @@ void RaceRssiRecorder::discardPending() {
     sampleCount = 0;
     truncated = false;
     stagingCount = 0;
+    dropped = 0;
 }
 
 bool RaceRssiRecorder::writeHeaderPlaceholder() {
@@ -69,55 +172,50 @@ bool RaceRssiRecorder::writeHeaderPlaceholder() {
     return storage->writeBinaryFile(RACE_RSSI_ACTIVE_PATH, hdr, sizeof(hdr));
 }
 
-bool RaceRssiRecorder::flushStaging() {
-    if (!storage || stagingCount == 0) {
-        return true;
-    }
-    bool ok = storage->appendBinaryFile(RACE_RSSI_ACTIVE_PATH, staging, stagingCount);
-    if (ok) {
-        stagingCount = 0;
-    }
-    return ok;
-}
-
 bool RaceRssiRecorder::finalizeHeader() {
     if (!storage) {
         return false;
     }
-    // Rewrite full file header by reading payload is expensive; instead rewrite header bytes only
-    // by reading whole file if small enough, or rewrite header via temp.
-    std::vector<uint8_t> data;
-    if (!storage->readBinaryFile(RACE_RSSI_ACTIVE_PATH, data)) {
+    // Patch the 12 header bytes in place. Reading the whole sidecar back just
+    // to rewrite its first 12 bytes would cost a 45 KB allocation plus a full
+    // rewrite at the end of every race.
+    size_t fileBytes = 0;
+    if (!storage->fileSize(RACE_RSSI_ACTIVE_PATH, fileBytes) || fileBytes < RACE_RSSI_HEADER_SIZE) {
         return false;
     }
-    if (data.size() < RACE_RSSI_HEADER_SIZE) {
-        return false;
+    // The file is the authority on how many samples actually landed. If a write
+    // failed mid-race, trust the bytes on disk rather than the counter.
+    uint32_t onDisk = (uint32_t)(fileBytes - RACE_RSSI_HEADER_SIZE);
+    if (onDisk != sampleCount) {
+        DEBUG("[RssiRec] Sample count %u does not match %u on disk - trusting disk\n",
+              sampleCount, onDisk);
+        truncated = true;
+        sampleCount = onDisk;
     }
-    data[0] = 'F';
-    data[1] = 'G';
-    data[2] = 'R';
-    data[3] = 'H';
-    data[4] = RACE_RSSI_VERSION;
-    data[5] = (uint8_t)(intervalMs & 0xFF);
-    data[6] = (uint8_t)((intervalMs >> 8) & 0xFF);
-    data[7] = (uint8_t)(sampleCount & 0xFF);
-    data[8] = (uint8_t)((sampleCount >> 8) & 0xFF);
-    data[9] = (uint8_t)((sampleCount >> 16) & 0xFF);
-    data[10] = (uint8_t)((sampleCount >> 24) & 0xFF);
-    data[11] = truncated ? 1 : 0;
 
-    // Ensure payload length matches sampleCount (header + samples)
-    size_t expected = RACE_RSSI_HEADER_SIZE + sampleCount;
-    if (data.size() > expected) {
-        data.resize(expected);
-    }
-    if (!storage->writeBinaryFile(RACE_RSSI_ACTIVE_PATH, data.data(), data.size())) {
+    uint8_t hdr[RACE_RSSI_HEADER_SIZE];
+    hdr[0] = 'F';
+    hdr[1] = 'G';
+    hdr[2] = 'R';
+    hdr[3] = 'H';
+    hdr[4] = RACE_RSSI_VERSION;
+    hdr[5] = (uint8_t)(intervalMs & 0xFF);
+    hdr[6] = (uint8_t)((intervalMs >> 8) & 0xFF);
+    hdr[7] = (uint8_t)(sampleCount & 0xFF);
+    hdr[8] = (uint8_t)((sampleCount >> 8) & 0xFF);
+    hdr[9] = (uint8_t)((sampleCount >> 16) & 0xFF);
+    hdr[10] = (uint8_t)((sampleCount >> 24) & 0xFF);
+    hdr[11] = truncated ? 1 : 0;
+    if (!storage->patchBinaryFile(RACE_RSSI_ACTIVE_PATH, 0, hdr, sizeof(hdr))) {
         return false;
     }
     storage->deleteFile(RACE_RSSI_PENDING_PATH);
     if (!storage->renameFile(RACE_RSSI_ACTIVE_PATH, RACE_RSSI_PENDING_PATH)) {
-        // Fallback copy
-        if (!storage->writeBinaryFile(RACE_RSSI_PENDING_PATH, data.data(), data.size())) {
+        // Fallback copy. Only reached if the backend cannot rename; it costs a
+        // full read of the sidecar, which is why rename is tried first.
+        std::vector<uint8_t> data;
+        if (!storage->readBinaryFile(RACE_RSSI_ACTIVE_PATH, data) ||
+            !storage->writeBinaryFile(RACE_RSSI_PENDING_PATH, data.data(), data.size())) {
             return false;
         }
         storage->deleteFile(RACE_RSSI_ACTIVE_PATH);
@@ -138,23 +236,41 @@ void RaceRssiRecorder::beginRace() {
         return;
     }
 
+    if (!writerTask) {
+        DEBUG("[RssiRec] Writer task unavailable - marshal capture disabled\n");
+        return;
+    }
+
+    // Drain the previous race's writes BEFORE deleting its files, otherwise a
+    // queued append would recreate the active sidecar after discardPending.
+    recording = false;
+    releaseActiveBuffer();
+    waitForWriterIdle(pdMS_TO_TICKS(2000));
     discardPending();
-    recording = true;
     pendingReady = false;
     truncated = false;
+    writeFailed = false;
     intervalMs = RACE_RSSI_INTERVAL_MS;
     sampleCount = 0;
     lastSampleMs = 0;
-    stagingCount = 0;
+    dropped = 0;
     storage->mkdir("/races");
     if (!writeHeaderPlaceholder()) {
         DEBUG("[RssiRec] Failed to create active RSSI file\n");
-        recording = false;
         return;
     }
+    if (!acquireBuffer(pdMS_TO_TICKS(100))) {
+        DEBUG("[RssiRec] No staging buffer available\n");
+        return;
+    }
+    recording = true;
     DEBUG("[RssiRec] Capture started\n");
 }
 
+// Runs on the lap-detection loop. Every path here is non-blocking: a full
+// buffer is handed to the writer task and a fresh one taken with zero wait.
+// If the writer has not kept up the sample is dropped rather than stalling
+// lap detection, and the capture is flagged truncated.
 void RaceRssiRecorder::addSample(uint8_t rssi, uint32_t nowMs) {
     if (!recording || !storage) {
         return;
@@ -171,18 +287,20 @@ void RaceRssiRecorder::addSample(uint8_t rssi, uint32_t nowMs) {
     }
     lastSampleMs = nowMs;
 
-    staging[stagingCount++] = rssi;
+    if (activeBuffer < 0 && !acquireBuffer(0)) {
+        // Writer is still behind. Count the loss instead of counting a sample
+        // that never reaches the file, which would skew the graph time axis.
+        dropped++;
+        truncated = true;
+        return;
+    }
+
+    buffers[activeBuffer][stagingCount++] = rssi;
     sampleCount++;
 
     if (stagingCount >= RACE_RSSI_STAGING_SIZE) {
-        if (!flushStaging()) {
-            // Keep trying; if staging full and flush fails, drop oldest half to avoid blocking
-            if (stagingCount >= RACE_RSSI_STAGING_SIZE) {
-                memmove(staging, staging + (RACE_RSSI_STAGING_SIZE / 2), RACE_RSSI_STAGING_SIZE / 2);
-                stagingCount = RACE_RSSI_STAGING_SIZE / 2;
-                truncated = true;
-            }
-        }
+        postActiveBuffer();
+        acquireBuffer(0);  // Failure is handled on the next sample.
     }
 }
 
@@ -194,8 +312,21 @@ void RaceRssiRecorder::endRace() {
     if (!storage) {
         return;
     }
-    if (!flushStaging()) {
-        DEBUG("[RssiRec] Final flush failed\n");
+    // The buffer must go back to the pool either way, or waitForWriterIdle
+    // below can never see all of them free and will always time out.
+    if (stagingCount > 0) {
+        postActiveBuffer();
+    } else {
+        releaseActiveBuffer();
+    }
+    // Off the sampling path, so waiting here is safe and keeps the sidecar
+    // complete before the header is finalized.
+    if (!waitForWriterIdle(pdMS_TO_TICKS(5000))) {
+        DEBUG("[RssiRec] Writer did not drain in time\n");
+        truncated = true;
+    }
+    if (writeFailed) {
+        truncated = true;
     }
     if (!finalizeHeader()) {
         DEBUG("[RssiRec] Finalize failed\n");
@@ -203,7 +334,8 @@ void RaceRssiRecorder::endRace() {
         storage->deleteFile(RACE_RSSI_ACTIVE_PATH);
         return;
     }
-    DEBUG("[RssiRec] Capture ended: %u samples truncated=%d\n", sampleCount, (int)truncated);
+    DEBUG("[RssiRec] Capture ended: %u samples dropped=%u truncated=%d\n",
+          sampleCount, dropped, (int)truncated);
 }
 
 bool RaceRssiRecorder::attachToRace(uint32_t timestamp, RaceRssiMeta& outMeta) {
@@ -279,7 +411,11 @@ bool RaceRssiRecorder::loadSamples(Storage* storage, const String& basename, Rac
     if (count > avail) {
         count = (uint32_t)avail;
     }
-    samples.assign(data.begin() + RACE_RSSI_HEADER_SIZE, data.begin() + RACE_RSSI_HEADER_SIZE + count);
+    // Reuse the buffer we already read rather than allocating a second one of
+    // the same size. At the 45000-sample cap the copy would double peak heap.
+    data.resize(RACE_RSSI_HEADER_SIZE + count);
+    data.erase(data.begin(), data.begin() + RACE_RSSI_HEADER_SIZE);
+    samples.swap(data);
     meta.sampleCount = count;
     meta.hasHistory = count > 0;
     return meta.hasHistory;

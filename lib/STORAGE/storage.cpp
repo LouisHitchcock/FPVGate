@@ -308,6 +308,65 @@ bool Storage::readBinaryFile(const String& path, std::vector<uint8_t>& out) {
     return true;
 }
 
+bool Storage::patchBinaryFile(const String& path, size_t offset, const uint8_t* data, size_t len) {
+    if (!data || len == 0) {
+        return true;
+    }
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) {
+            return false;
+        }
+        // "r+" keeps the existing contents; FILE_WRITE ("w") would truncate.
+        File file = SD.open(path, "r+");
+        if (!file) {
+            spiMutexGive();
+            return false;
+        }
+        bool ok = file.seek(offset);
+        size_t written = ok ? file.write(data, len) : 0;
+        file.close();
+        spiMutexGive();
+        return ok && written == len;
+    }
+#endif
+    File file = LittleFS.open(path, "r+");
+    if (!file) {
+        return false;
+    }
+    bool ok = file.seek(offset);
+    size_t written = ok ? file.write(data, len) : 0;
+    file.close();
+    return ok && written == len;
+}
+
+bool Storage::fileSize(const String& path, size_t& out) {
+    out = 0;
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) {
+            return false;
+        }
+        File file = SD.open(path, FILE_READ);
+        if (!file) {
+            spiMutexGive();
+            return false;
+        }
+        out = file.size();
+        file.close();
+        spiMutexGive();
+        return true;
+    }
+#endif
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+        return false;
+    }
+    out = file.size();
+    file.close();
+    return true;
+}
+
 bool Storage::renameFile(const String& fromPath, const String& toPath) {
 #ifdef HAS_SD_CARD_SUPPORT
     if (sdAvailable) {

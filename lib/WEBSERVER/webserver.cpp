@@ -8,6 +8,7 @@
 #include <LittleFS.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
+#include <memory>
 #include <vector>
 
 #include "debug.h"
@@ -1192,23 +1193,23 @@ EEPROM:\n\
         }
         DEBUG("[Marshal] Serving %u RSSI samples for ts=%u\n", (unsigned)samples.size(), timestamp);
 
-        String out;
-        out.reserve(samples.size() * 4 + 96);
-        out += "{\"timestamp\":";
-        out += String(timestamp);
-        out += ",\"intervalMs\":";
-        out += String(meta.intervalMs);
-        out += ",\"sampleCount\":";
-        out += String((uint32_t)samples.size());
-        out += ",\"truncated\":";
-        out += meta.truncated ? "true" : "false";
-        out += ",\"samples\":[";
-        for (size_t i = 0; i < samples.size(); i++) {
-            if (i) out += ',';
-            out += String(samples[i]);
-        }
-        out += "]}";
-        request->send(200, "application/json", out);
+        // Stream the sample array instead of building it in one String. A
+        // 15-minute capture is 45000 samples, which as "255," text is ~180 KB
+        // on top of the sample vector and the copy request->send() would make
+        // of it. That does not fit in heap. The chunk callback emits a few
+        // hundred bytes at a time and keeps only the samples themselves.
+        auto stream = std::make_shared<MarshalRssiStream>();
+        stream->samples.swap(samples);
+        stream->head = String("{\"timestamp\":") + String(timestamp) +
+                       ",\"intervalMs\":" + String(meta.intervalMs) +
+                       ",\"sampleCount\":" + String((uint32_t)stream->samples.size()) +
+                       ",\"truncated\":" + (meta.truncated ? "true" : "false") +
+                       ",\"samples\":[";
+        request->send(request->beginChunkedResponse(
+            "application/json",
+            [stream](uint8_t *buffer, size_t maxLen, size_t) -> size_t {
+                return stream->fill(buffer, maxLen);
+            }));
         led->on(200);
     });
 

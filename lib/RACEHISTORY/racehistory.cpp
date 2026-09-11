@@ -1,4 +1,4 @@
-﻿#include "racehistory.h"
+#include "racehistory.h"
 #include <algorithm>
 #include <time.h>
 #include "debug.h"

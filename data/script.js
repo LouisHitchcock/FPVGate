@@ -7398,6 +7398,13 @@ function marshalSaveLaps() {
   })
     .then((r) => r.json())
     .then((data) => {
+      // The endpoint answers 200 with {"status":"ERROR"} on a failed write, so
+      // the HTTP status alone does not tell us the laps were actually saved.
+      if (!data || data.status !== "OK") {
+        console.error("Marshal laps not saved", data);
+        alert(i18n.t("messages.race_update_error"));
+        return;
+      }
       console.log("Marshal laps saved", data);
       alert(i18n.t("history.marshal_saved"));
       closeMarshalModal();
