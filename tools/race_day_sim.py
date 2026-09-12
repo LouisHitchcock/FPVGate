@@ -47,7 +47,6 @@ import argparse
 import http.client
 import json
 import random
-import statistics
 import sys
 import time
 from datetime import datetime
@@ -400,9 +399,14 @@ class Harness:
         g = self.primary
         c = Check("tracks", "create and list")
         try:
-            name = f"Sim Track {int(time.time()) % 100000}"
+            # /tracks/create takes trackId from the client rather than assigning
+            # one, so it must be supplied and must be unique. Omitting it gives
+            # every track id 0, which then cannot be deleted individually.
+            track_id = int(time.time()) % 2_000_000_000
+            name = f"Sim Track {track_id % 100000}"
             status, body = g.post_json("/tracks/create",
-                                       {"name": name, "distance": 150.5, "tags": "sim"})
+                                       {"trackId": track_id, "name": name,
+                                        "distance": 150.5, "tags": "sim"})
             if status != 200:
                 c.fail(f"create returned {status} {body[:80]}", "HTTP 200")
             else:
@@ -413,8 +417,12 @@ class Harness:
                 if not found:
                     c.fail("created track not listed", "the new track appears in /tracks")
                 else:
-                    self.created_tracks.append(found.get("trackId") or found.get("id"))
-                    c.ok(f"created and listed '{name}'")
+                    self.created_tracks.append(track_id)
+                    if found.get("trackId") != track_id:
+                        c.fail(f"track stored with id {found.get('trackId')}, sent {track_id}",
+                               "the supplied trackId is preserved")
+                    else:
+                        c.ok(f"created and listed '{name}' with id {track_id}")
         except Exception as exc:
             c.fail(str(exc), "tracks createable")
         self.add(c)
@@ -477,20 +485,32 @@ class Harness:
 
     def cleanup(self):
         if self.args.keep_races:
-            if self.created:
-                self.log(f"  --keep-races: leaving {len(self.created)} simulated race(s) on the device")
+            self.log(f"  --keep-races: leaving {len(self.created)} race(s) and "
+                     f"{len(self.created_tracks)} track(s) on the device")
             return
-        if not self.created:
-            return
-        self.log(f"  removing {len(self.created)} simulated race(s)...")
-        removed = 0
-        for ts in list(self.created):
-            try:
-                self.primary.post_form("/races/delete", {"timestamp": ts})
-                removed += 1
-            except Exception as exc:
-                self.log(f"    could not delete {ts}: {exc}")
-        self.log(f"  removed {removed} of {len(self.created)}")
+        if self.created:
+            self.log(f"  removing {len(self.created)} simulated race(s)...")
+            removed = 0
+            for ts in list(self.created):
+                try:
+                    self.primary.post_form("/races/delete", {"timestamp": ts})
+                    removed += 1
+                except Exception as exc:
+                    self.log(f"    could not delete race {ts}: {exc}")
+            self.log(f"  removed {removed} of {len(self.created)} race(s)")
+
+        if self.created_tracks:
+            self.log(f"  removing {len(self.created_tracks)} simulated track(s)...")
+            removed = 0
+            for tid in list(self.created_tracks):
+                if not tid:
+                    continue  # id 0 is not addressable; never create one
+                try:
+                    self.primary.post_form("/tracks/delete", {"trackId": tid})
+                    removed += 1
+                except Exception as exc:
+                    self.log(f"    could not delete track {tid}: {exc}")
+            self.log(f"  removed {removed} of {len(self.created_tracks)} track(s)")
 
 
 def main():
