@@ -303,6 +303,68 @@ async function loadInitialSyncState() {
 }
 
 // Add localized validation message for IP pattern
+// The preload skeleton is inlined in index.html so it can paint before
+// style.css and the head scripts arrive. It is removed once the real shell is
+// ready. A skeleton that never clears is worse than no skeleton at all, so this
+// is deliberately hard to get stuck: it runs on DOMContentLoaded, again on
+// window load, and behind a timeout, and any one of them is enough.
+let skeletonCleared = false;
+
+// The theme lives on the device and arrives with /config, so the page used to
+// paint in the default theme and then repaint once the fetch landed. Caching it
+// here lets the inline script in index.html apply it before first paint. The
+// device stays the source of truth; this is only a hint for the next load.
+function cacheThemeForPreload(theme) {
+  try {
+    if (!theme) return;
+    localStorage.setItem("theme", theme);
+    if (theme === "custom") {
+      // Read the resolved custom-* variables rather than the settings inputs.
+      // --custom-primary-dark is derived at apply time and --custom-border is
+      // not an input at all, so reading the inputs would miss both.
+      const cs = getComputedStyle(document.documentElement);
+      const custom = {};
+      ["--custom-background", "--custom-primary", "--custom-primary-dark",
+       "--custom-secondary", "--custom-menu", "--custom-text",
+       "--custom-border"].forEach((name) => {
+        const value = cs.getPropertyValue(name).trim();
+        if (value) custom[name] = value;
+      });
+      localStorage.setItem("themeCustomColors", JSON.stringify(custom));
+    } else {
+      localStorage.removeItem("themeCustomColors");
+    }
+    // Cache the resolved surface colours so the preload skeleton can match the
+    // theme instead of using its hardcoded neutrals.
+    const cs = getComputedStyle(document.documentElement);
+    const surfaces = {
+      bg: cs.getPropertyValue("--background-color").trim(),
+      panel: cs.getPropertyValue("--tabcontent-bg").trim(),
+      border: cs.getPropertyValue("--border-color").trim(),
+    };
+    if (surfaces.bg) localStorage.setItem("themeSurfaces", JSON.stringify(surfaces));
+  } catch (e) {
+    // localStorage can throw in private browsing. A flash is not worth an error.
+  }
+}
+
+function hideAppSkeleton() {
+  if (skeletonCleared) return;
+  const el = document.getElementById("appSkeleton");
+  if (!el) return;
+  skeletonCleared = true;
+  el.classList.add("is-hidden");
+  // Remove rather than leave it hidden, so its fixed overlay cannot intercept
+  // clicks if the fade is interrupted.
+  setTimeout(() => el.remove(), 300);
+}
+
+document.addEventListener("DOMContentLoaded", hideAppSkeleton);
+window.addEventListener("load", hideAppSkeleton);
+// Backstop: if an init step throws before either listener fires, the user still
+// gets a usable page rather than staring at a shimmer.
+setTimeout(hideAppSkeleton, 8000);
+
 document.addEventListener("DOMContentLoaded", () => {
   // Fetch version on page load
   fetchVersion();
@@ -1213,6 +1275,7 @@ onload = async function (e) {
       }
       
       updateThemeLogos(savedTheme);
+      cacheThemeForPreload(savedTheme);
     }
 
     // Load LED settings from config (if available)
@@ -4125,6 +4188,7 @@ function changeTheme() {
     document.documentElement.setAttribute("data-theme", theme);
   }
   updateThemeLogos(theme);
+  cacheThemeForPreload(theme);
   autoSaveConfig(); // Save to device
 }
 

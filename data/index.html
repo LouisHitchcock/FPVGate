@@ -5,15 +5,157 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FPVGate Lap Timer</title>
     <link rel="icon" type="image/svg+xml" href="logo-white.svg" id="favicon" />
+    <script>
+      // Runs before first paint, deliberately inline and not deferred. The theme
+      // is stored on the device and arrives with /config, so without this the
+      // page paints in the default theme and visibly repaints once that fetch
+      // lands. script.js caches the last known theme after every apply; this
+      // only replays it. The device remains the source of truth and will
+      // correct this if it disagrees.
+      (function () {
+        try {
+          var theme = localStorage.getItem("theme");
+          var root = document.documentElement;
+          if (theme === "custom") {
+            // The custom block resolves every colour through a var() fallback,
+            // so setting data-theme="custom" without the cached colours paints
+            // the fallbacks - a teal green - until /config lands. Worse than
+            // leaving it alone. Only commit to custom if we have the colours.
+            var custom = JSON.parse(localStorage.getItem("themeCustomColors") || "{}");
+            var names = Object.keys(custom);
+            if (names.length) {
+              names.forEach(function (name) {
+                if (custom[name]) root.style.setProperty(name, custom[name]);
+              });
+              root.setAttribute("data-theme", "custom");
+            }
+          } else if (theme && theme !== "lighter") {
+            root.setAttribute("data-theme", theme);
+          }
+          // Match the loading skeleton to the theme's own surfaces, so the
+          // handover to the real UI is not a colour jump.
+          var surfaces = JSON.parse(localStorage.getItem("themeSurfaces") || "null");
+          if (surfaces && surfaces.bg) {
+            root.style.setProperty("--sk-bg", surfaces.bg);
+            if (surfaces.panel) root.style.setProperty("--sk-panel", surfaces.panel);
+            if (surfaces.border) root.style.setProperty("--sk-shimmer", surfaces.border);
+          }
+        } catch (e) {
+          // First visit, or localStorage unavailable. The default theme is fine.
+        }
+      })();
+    </script>
+    <style>
+      /* Critical skeleton styles. Inlined so the loading state paints while
+         style.css and the 182KB of head scripts are still in flight. Colours are
+         hardcoded rather than themed, because the theme is applied by script.js
+         which has not run yet; prefers-color-scheme keeps it bearable either way. */
+      :root {
+        --sk-bg: #1a1d21;
+        --sk-panel: #23272d;
+        --sk-shimmer: #2e333a;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --sk-bg: #f4f5f7;
+          --sk-panel: #e4e6ea;
+          --sk-shimmer: #d2d5da;
+        }
+      }
+      html, body { margin: 0; padding: 0; }
+      body { background: var(--sk-bg); }
+      #appSkeleton {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: var(--sk-bg);
+        padding: 16px;
+        box-sizing: border-box;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #appSkeleton.is-hidden { opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+      .sk {
+        background: var(--sk-panel);
+        border-radius: 6px;
+        position: relative;
+        overflow: hidden;
+      }
+      /* One shared shimmer, so adding blocks costs no extra animation work. */
+      .sk::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, var(--sk-shimmer), transparent);
+        animation: sk-shimmer 1.4s infinite;
+      }
+      @keyframes sk-shimmer { 100% { transform: translateX(100%); } }
+      @media (prefers-reduced-motion: reduce) {
+        .sk::after { animation: none; }
+      }
+      .sk-row { display: flex; align-items: center; gap: 12px; }
+      .sk-header { justify-content: space-between; margin-bottom: 20px; }
+      .sk-logo { width: 64px; height: 32px; }
+      .sk-pill { width: 150px; height: 28px; border-radius: 14px; }
+      .sk-tabs { gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+      .sk-tab { width: 104px; height: 30px; }
+      .sk-timer { width: min(420px, 90%); height: 64px; margin: 0 auto 20px; }
+      .sk-buttons { justify-content: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+      .sk-btn { width: 132px; height: 42px; border-radius: 8px; }
+      .sk-card { height: 58px; margin-bottom: 10px; }
+      /* Tighter on phones: the header stacks and the tab strip scrolls, so the
+         skeleton should not imply a layout the real page will not use. */
+      @media (max-width: 768px) {
+        #appSkeleton { padding: 12px; }
+        .sk-tab { width: calc(50% - 4px); }
+        .sk-timer { height: 52px; }
+        .sk-card { height: 66px; }
+      }
+      @media (max-width: 420px) {
+        .sk-pill { width: 96px; }
+        .sk-btn { width: calc(50% - 6px); }
+      }
+      /* Short landscape, e.g. a phone turned sideways: drop the lower cards
+         rather than overflow. */
+      @media (max-height: 520px) {
+        .sk-card:nth-of-type(n + 3) { display: none; }
+      }
+    </style>
     <link rel="stylesheet" type="text/css" href="style.css" />
     <link rel="stylesheet" type="text/css" href="calib-styles.css" />
-    <script src="jquery-3.7.1.min.js"></script>
-    <script src="i18n.js"></script>
-    <script src="audio-announcer.js"></script>
-    <script src="smoothie.js"></script>
+    <script src="jquery-3.7.1.min.js" defer></script>
+    <script src="i18n.js" defer></script>
+    <script src="audio-announcer.js" defer></script>
+    <script src="smoothie.js" defer></script>
   </head>
 
   <body>
+    <!-- Removed by script.js once the app has initialised. Mirrors the real
+         shell - header, tab strip, timer, controls, list - so the layout does
+         not jump when the content replaces it. -->
+    <div id="appSkeleton" role="status" aria-live="polite" aria-label="Loading FPVGate">
+      <div class="sk-row sk-header">
+        <div class="sk sk-logo"></div>
+        <div class="sk sk-pill"></div>
+      </div>
+      <div class="sk-row sk-tabs">
+        <div class="sk sk-tab"></div>
+        <div class="sk sk-tab"></div>
+        <div class="sk sk-tab"></div>
+        <div class="sk sk-tab"></div>
+      </div>
+      <div class="sk sk-timer"></div>
+      <div class="sk-row sk-buttons">
+        <div class="sk sk-btn"></div>
+        <div class="sk sk-btn"></div>
+      </div>
+      <div class="sk sk-card"></div>
+      <div class="sk sk-card"></div>
+      <div class="sk sk-card"></div>
+      <div class="sk sk-card"></div>
+    </div>
+
     <header>
       <nav>
         <div class="logo">
@@ -1634,7 +1776,7 @@
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js" defer></script>
   </body>
 </html>
 
