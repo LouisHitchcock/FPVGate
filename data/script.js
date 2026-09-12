@@ -1,7 +1,3 @@
-// Transport manager for WiFi/USB connectivity
-let transportManager = null;
-let currentConnectionMode = "auto"; // 'auto', 'wifi', 'usb'
-let usbConnected = false;
 let eventSource = null;
 let eventSourceReconnectTimer = null;
 let eventSourceReconnectAttempts = 0;
@@ -307,6 +303,68 @@ async function loadInitialSyncState() {
 }
 
 // Add localized validation message for IP pattern
+// The preload skeleton is inlined in index.html so it can paint before
+// style.css and the head scripts arrive. It is removed once the real shell is
+// ready. A skeleton that never clears is worse than no skeleton at all, so this
+// is deliberately hard to get stuck: it runs on DOMContentLoaded, again on
+// window load, and behind a timeout, and any one of them is enough.
+let skeletonCleared = false;
+
+// The theme lives on the device and arrives with /config, so the page used to
+// paint in the default theme and then repaint once the fetch landed. Caching it
+// here lets the inline script in index.html apply it before first paint. The
+// device stays the source of truth; this is only a hint for the next load.
+function cacheThemeForPreload(theme) {
+  try {
+    if (!theme) return;
+    localStorage.setItem("theme", theme);
+    if (theme === "custom") {
+      // Read the resolved custom-* variables rather than the settings inputs.
+      // --custom-primary-dark is derived at apply time and --custom-border is
+      // not an input at all, so reading the inputs would miss both.
+      const cs = getComputedStyle(document.documentElement);
+      const custom = {};
+      ["--custom-background", "--custom-primary", "--custom-primary-dark",
+       "--custom-secondary", "--custom-menu", "--custom-text",
+       "--custom-border"].forEach((name) => {
+        const value = cs.getPropertyValue(name).trim();
+        if (value) custom[name] = value;
+      });
+      localStorage.setItem("themeCustomColors", JSON.stringify(custom));
+    } else {
+      localStorage.removeItem("themeCustomColors");
+    }
+    // Cache the resolved surface colours so the preload skeleton can match the
+    // theme instead of using its hardcoded neutrals.
+    const cs = getComputedStyle(document.documentElement);
+    const surfaces = {
+      bg: cs.getPropertyValue("--background-color").trim(),
+      panel: cs.getPropertyValue("--tabcontent-bg").trim(),
+      border: cs.getPropertyValue("--border-color").trim(),
+    };
+    if (surfaces.bg) localStorage.setItem("themeSurfaces", JSON.stringify(surfaces));
+  } catch (e) {
+    // localStorage can throw in private browsing. A flash is not worth an error.
+  }
+}
+
+function hideAppSkeleton() {
+  if (skeletonCleared) return;
+  const el = document.getElementById("appSkeleton");
+  if (!el) return;
+  skeletonCleared = true;
+  el.classList.add("is-hidden");
+  // Remove rather than leave it hidden, so its fixed overlay cannot intercept
+  // clicks if the fade is interrupted.
+  setTimeout(() => el.remove(), 300);
+}
+
+document.addEventListener("DOMContentLoaded", hideAppSkeleton);
+window.addEventListener("load", hideAppSkeleton);
+// Backstop: if an init step throws before either listener fires, the user still
+// gets a usable page rather than staring at a shimmer.
+setTimeout(hideAppSkeleton, 8000);
+
 document.addEventListener("DOMContentLoaded", () => {
   // Fetch version on page load
   fetchVersion();
@@ -353,7 +411,7 @@ function _releaseWifiResourcesOnUnload() {
   }
   // Best-effort request to stop the RSSI stream if we had it running so the
   // device isn't still transmitting into a dead TCP connection.
-  if (rssiSending && !usbConnected) {
+  if (rssiSending) {
     try {
       fetch("/timer/rssiStop", {
         method: "POST",
@@ -391,96 +449,10 @@ function normalizeVoiceSelectionValue(value) {
 // Initialize hybrid audio announcer
 const audioAnnouncer = new AudioAnnouncer();
 
-// Transport initialization functions
+// Transport initialization
 async function initializeTransport() {
-  // Check if we have USB transport available (Electron or Web Serial API)
-  const hasUSB = typeof window.electronAPI !== "undefined" || "serial" in navigator;
-  console.log("[Init] USB available:", hasUSB, "Mode:", currentConnectionMode);
-  console.log("[Init] electronAPI:", typeof window.electronAPI);
-
-  if (!hasUSB || currentConnectionMode === "wifi") {
-    // WiFi-only mode
-    console.log("[Init] Initializing WiFi-only mode");
-    setupWiFiEvents();
-    updateConnectionStatus("WiFi", true);
-    return;
-  }
-
-  // Try USB first in auto/usb mode
-  if (currentConnectionMode === "auto" || currentConnectionMode === "usb") {
-    try {
-      console.log("[Init] Creating USBTransport...");
-      transportManager = new USBTransport();
-
-      // List available ports and auto-connect in auto mode
-      console.log("[Init] Listing ports...");
-      const ports = await transportManager.listPorts();
-      console.log("[Init] Found ports:", ports);
-
-      if (ports.length > 0) {
-        // Populate COM port dropdown
-        const comPortSelect = document.getElementById("comPort");
-        comPortSelect.innerHTML = `<option value="">${i18n.t("settings.wifi.port_option")}</option>`;
-        ports.forEach((port) => {
-          console.log("[Init] Adding port:", port.path, port.manufacturer);
-          const option = document.createElement("option");
-          option.value = port.path;
-          option.textContent = `${port.path}${port.manufacturer ? " - " + port.manufacturer : ""}`;
-          comPortSelect.appendChild(option);
-        });
-
-        // Auto-connect to first FPVGate device in auto mode
-        if (currentConnectionMode === "auto") {
-          // Try to find by manufacturer first
-          let fpvgatePort = ports.find((p) => p.manufacturer && (p.manufacturer.includes("Espressif") || p.manufacturer.includes("Silicon Labs")));
-
-          // If not found, look for COM12 specifically (common FPVGate port on Windows)
-          if (!fpvgatePort) {
-            fpvgatePort = ports.find((p) => p.path === "COM12");
-          }
-
-          console.log("[Init] FPVGate port found:", fpvgatePort);
-          if (fpvgatePort) {
-            await connectUSB(fpvgatePort.path);
-            return;
-          }
-        }
-      } else {
-        console.log("[Init] No ports found");
-      }
-    } catch (err) {
-      console.error("[Init] USB initialization failed:", err);
-    }
-  }
-
-  // Fall back to WiFi if USB failed and in auto mode
-  if (currentConnectionMode === "auto" && !usbConnected) {
-    console.log("USB not available, falling back to WiFi");
-    setupWiFiEvents();
-    updateConnectionStatus("WiFi", true);
-  } else if (currentConnectionMode === "usb" && !usbConnected) {
-    updateConnectionStatus("USB", false);
-  }
-}
-
-async function connectUSB(portPath) {
-  try {
-    await transportManager.connect(portPath);
-    usbConnected = true;
-    setupUSBEvents();
-    updateConnectionStatus("USB", true);
-
-    // Update COM port dropdown to show selected port
-    const comPortSelect = document.getElementById("comPort");
-    comPortSelect.value = portPath;
-
-    console.log("Connected to USB:", portPath);
-  } catch (err) {
-    console.error("Failed to connect USB:", err);
-    usbConnected = false;
-    updateConnectionStatus("USB", false);
-    throw err;
-  }
+  setupWiFiEvents();
+  updateConnectionStatus("WiFi", true);
 }
 
 function setupWiFiEvents() {
@@ -1057,36 +1029,6 @@ function updateRaceButtons() {
   }
 }
 
-function setupUSBEvents() {
-  if (!transportManager) return;
-
-  transportManager.on("rssi", (data) => {
-    rssiBuffer.push(data);
-    if (rssiBuffer.length > 10) {
-      rssiBuffer.shift();
-    }
-    console.log("USB rssi", data, "buffer size", rssiBuffer.length);
-  });
-
-  transportManager.on("lap", (data) => {
-    var lap = (parseFloat(data) / 1000).toFixed(2);
-    addLap(lap);
-    console.log("USB lap raw:", data, " formatted:", lap);
-  });
-
-  transportManager.on("disconnect", () => {
-    console.log("USB disconnected");
-    usbConnected = false;
-    updateConnectionStatus("USB", false);
-
-    // Auto-fallback to WiFi if in auto mode
-    if (currentConnectionMode === "auto") {
-      setupWiFiEvents();
-      updateConnectionStatus("WiFi", true);
-    }
-  });
-}
-
 async function updateConnectionStatus(mode, connected) {
   // Update header indicator
   const indicator = document.getElementById("connectionIndicator");
@@ -1136,62 +1078,6 @@ async function updateConnectionStatus(mode, connected) {
       detailsEl.innerHTML = details;
     }
   }
-
-  // Update settings panel status (USB only)
-  const statusEl = document.getElementById("comPortStatus");
-  if (statusEl) {
-    statusEl.style.display = "block";
-    const statusText = connected ? i18n.t("race.status_connected") : i18n.t("race.status_disconnected");
-    statusEl.textContent = i18n.t("race.status_label", { status: statusText, mode: mode });
-    statusEl.style.color = connected ? "var(--success-color, #4CAF50)" : "var(--error-color, #f44336)";
-  }
-}
-
-async function changeConnectionMode() {
-  const modeSelect = document.getElementById("connectionMode");
-  currentConnectionMode = modeSelect.value;
-
-  const comPortSection = document.getElementById("comPortSection");
-
-  // Show COM port selector in USB mode
-  if (currentConnectionMode === "usb") {
-    comPortSection.style.display = "flex";
-  } else {
-    comPortSection.style.display = "none";
-  }
-
-  // Disconnect current connection
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
-  if (transportManager && usbConnected) {
-    await transportManager.disconnect();
-    usbConnected = false;
-  }
-
-  // Reinitialize with new mode
-  await initializeTransport();
-}
-
-async function selectComPort() {
-  const comPortSelect = document.getElementById("comPort");
-  const portPath = comPortSelect.value;
-
-  if (!portPath) return;
-
-  // Disconnect if already connected
-  if (transportManager && usbConnected) {
-    await transportManager.disconnect();
-    usbConnected = false;
-  }
-
-  // Connect to selected port
-  if (!transportManager) {
-    transportManager = new USBTransport();
-  }
-
-  await connectUSB(portPath);
 }
 
 onload = async function (e) {
@@ -1221,12 +1107,8 @@ onload = async function (e) {
   // Fetch config using appropriate transport
   let configData;
   try {
-    if (usbConnected && transportManager) {
-      configData = await transportManager.sendCommand("config", "GET");
-    } else {
-      const response = await fetch("/config");
-      configData = await response.json();
-    }
+    const response = await fetch("/config");
+    configData = await response.json();
     console.log(configData);
   } catch (err) {
     console.error("[Script] Failed to fetch config:", err);
@@ -1393,6 +1275,7 @@ onload = async function (e) {
       }
       
       updateThemeLogos(savedTheme);
+      cacheThemeForPreload(savedTheme);
     }
 
     // Load LED settings from config (if available)
@@ -1567,12 +1450,8 @@ async function getBatteryVoltage() {
   
   try {
     let configData = null;
-    if (usbConnected && transportManager) {
-      configData = await transportManager.sendCommand("config", "GET");
-    } else {
-      const resp = await fetch("/config");
-      configData = await resp.json();
-    }
+    const resp = await fetch("/config");
+    configData = await resp.json();
 
     if (configData && configData.batteryVoltage !== undefined) {
       const totalVoltage = configData.batteryVoltage;
@@ -2026,26 +1905,14 @@ function updateDebugOverlay() {
 
 function startRssiStreaming() {
   if (rssiSending) return;
-  if (usbConnected && transportManager) {
-    transportManager.sendCommand("timer/rssiStart", "POST")
-      .then(function() { rssiSending = true; })
-      .catch(function(err) { console.error("Failed to start RSSI:", err); });
-  } else {
-    fetch("/timer/rssiStart", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
-      .then(function(r) { if (r.ok) rssiSending = true; });
-  }
+  fetch("/timer/rssiStart", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
+    .then(function(r) { if (r.ok) rssiSending = true; });
 }
 
 function stopRssiStreaming() {
   if (!rssiSending) return;
-  if (usbConnected && transportManager) {
-    transportManager.sendCommand("timer/rssiStop", "POST")
-      .then(function() { rssiSending = false; })
-      .catch(function(err) { console.error("Failed to stop RSSI:", err); });
-  } else {
-    fetch("/timer/rssiStop", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
-      .then(function(r) { if (r.ok) rssiSending = false; });
-  }
+  fetch("/timer/rssiStop", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" } })
+    .then(function(r) { if (r.ok) rssiSending = false; });
 }
 function updateRaceNotesIndicator() {
   if (!raceNotesIndicator || !raceNotesInput) return;
@@ -2371,21 +2238,16 @@ async function saveConfig() {
     })(),
   };
 
-  if (usbConnected && transportManager) {
-    const response = await transportManager.sendCommand("config", "POST", configData);
-    console.log("/config:", response);
-  } else {
-    fetch("/config", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(configData),
-    })
-      .then((response) => response.json())
-      .then((response) => console.log("/config:" + JSON.stringify(response)));
-  }
+  fetch("/config", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(configData),
+  })
+    .then((response) => response.json())
+    .then((response) => console.log("/config:" + JSON.stringify(response)));
 }
 
 // Populate band selector based on selected system
@@ -2608,12 +2470,8 @@ async function refreshConfigFromDevice() {
   clearTimeout(saveTimeout);
   try {
     let configData;
-    if (usbConnected && transportManager) {
-      configData = await transportManager.sendCommand("config", "GET");
-    } else {
-      const response = await fetch("/config");
-      configData = await response.json();
-    }
+    const response = await fetch("/config");
+    configData = await response.json();
     
     // Device is authoritative for system/band/channel + frequency; write
     // them straight into the UI via the shared applier. Any unsaved local
@@ -2933,22 +2791,15 @@ function startTimer() {
     updateCurrentLapTimer();
   }, 10);
 
-  if (usbConnected && transportManager) {
-    transportManager
-      .sendCommand("timer/start", "POST")
-      .then((response) => console.log("/timer/start:", response))
-      .catch((err) => console.error("Failed to start timer:", err));
-  } else {
-    fetch("/timer/start", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-    })
-      .then((response) => response.json())
-      .then((response) => console.log("/timer/start:" + JSON.stringify(response)));
-  }
+  fetch("/timer/start", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((response) => response.json())
+    .then((response) => console.log("/timer/start:" + JSON.stringify(response)));
 }
 
 function queueSpeak(obj) {
@@ -3087,54 +2938,30 @@ function updateBatteryVoltageDivider(value) {
   autoSaveConfig();
 }
 
-// Generic fetch wrapper that works with both WiFi and USB
+// Fetch wrapper that decodes JSON or text based on the Accept header
 async function transportFetch(url, options = {}) {
-  const method = options.method || "GET";
-  const path = url.startsWith("/") ? url.substring(1) : url;
-
-  if (usbConnected && transportManager) {
-    // Parse body if JSON
-    let data = null;
-    if (options.body) {
-      if (options.headers && options.headers["Content-Type"] === "application/json") {
-        data = JSON.parse(options.body);
-      } else if (options.body instanceof URLSearchParams || typeof options.body === "string") {
-        // Parse form data
-        const params = new URLSearchParams(options.body);
-        data = Object.fromEntries(params.entries());
-      }
-    }
-
-    return transportManager.sendCommand(path, method, data);
+  const response = await fetch(url, options);
+  if (options.headers && options.headers["Accept"] === "application/json") {
+    return response.json();
   } else {
-    // Standard WiFi fetch
-    const response = await fetch(url, options);
-    if (options.headers && options.headers["Accept"] === "application/json") {
-      return response.json();
-    } else {
-      return response.text();
-    }
+    return response.text();
   }
 }
 
 // Helper function for LED commands
 async function sendLedCommand(endpoint, params) {
-  if (usbConnected && transportManager) {
-    return transportManager.sendCommand(`led/${endpoint}`, "POST", params);
-  } else {
-    const body = Object.entries(params)
-      .map(([k, v]) => `${k}=${v}`)
-      .join("&");
-    const response = await fetch(`/led/${endpoint}`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: body,
-    });
-    return response.json();
-  }
+  const body = Object.entries(params)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  const response = await fetch(`/led/${endpoint}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body,
+  });
+  return response.json();
 }
 
 // LED control functions
@@ -3587,7 +3414,8 @@ function stopRace() {
 
   const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
   const afterStop = () => {
-    // Auto-save after stop so device can finalize RSSI capture before attach
+    // Auto-save after stop so the device can finalize its RSSI capture before
+    // saveCurrentRace attaches the sidecar to the race.
     if (lapTimes.length > 0) {
       return saveCurrentRace().then(() => {
         if (shouldOpenRaceNotes) {
@@ -3601,35 +3429,22 @@ function stopRace() {
     return Promise.resolve();
   };
 
-  if (usbConnected && transportManager) {
-    transportManager
-      .sendCommand("timer/stop", "POST")
-      .then((response) => {
-        console.log("/timer/stop:", response);
-        return afterStop();
-      })
-      .catch((err) => {
-        console.error("Failed to stop timer:", err);
-        return afterStop();
-      });
-  } else {
-    fetch("/timer/stop", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
+  fetch("/timer/stop", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((response) => response.json())
+    .then((response) => {
+      console.log("/timer/stop:" + JSON.stringify(response));
+      return afterStop();
     })
-      .then((response) => response.json())
-      .then((response) => {
-        console.log("/timer/stop:" + JSON.stringify(response));
-        return afterStop();
-      })
-      .catch((err) => {
-        console.error("Failed to stop timer:", err);
-        return afterStop();
-      });
-  }
+    .catch((err) => {
+      console.error("Failed to stop timer:", err);
+      return afterStop();
+    });
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
   // This allows the lap analysis to remain visible after the race ends
@@ -3689,22 +3504,15 @@ function clearLaps() {
   document.getElementById("statBest3Laps").textContent = "";
   
   // Broadcast clearLaps event to OSD and other clients
-  if (usbConnected && transportManager) {
-    transportManager
-      .sendCommand("timer/clearLaps", "POST")
-      .then((response) => console.log("/timer/clearLaps:", response))
-      .catch((err) => console.error("Failed to clear laps:", err));
-  } else {
-    fetch("/timer/clearLaps", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-    })
-      .then((response) => response.json())
-      .then((response) => console.log("/timer/clearLaps:" + JSON.stringify(response)));
-  }
+  fetch("/timer/clearLaps", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((response) => response.json())
+    .then((response) => console.log("/timer/clearLaps:" + JSON.stringify(response)));
   
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
@@ -4380,6 +4188,7 @@ function changeTheme() {
     document.documentElement.setAttribute("data-theme", theme);
   }
   updateThemeLogos(theme);
+  cacheThemeForPreload(theme);
   autoSaveConfig(); // Save to device
 }
 
@@ -4519,24 +4328,17 @@ function addManualLap() {
   console.log("[Manual Lap] Recording lap time:", lapTimeMs, "ms (", (lapTimeMs / 1000).toFixed(2), "s)");
 
   // Send lap to backend to broadcast to all clients (including OSD)
-  if (usbConnected && transportManager) {
-    transportManager
-      .sendCommand("timer/addLap", "POST", { lapTime: lapTimeMs })
-      .then((data) => console.log("Manual lap broadcasted:", data))
-      .catch((err) => console.error("Failed to broadcast manual lap:", err));
-  } else {
-    fetch("/timer/addLap", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ lapTime: lapTimeMs }),
-    })
-      .then((response) => response.json())
-      .then((data) => console.log("Manual lap broadcasted:", data))
-      .catch((err) => console.error("Failed to broadcast manual lap:", err));
-  }
+  fetch("/timer/addLap", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ lapTime: lapTimeMs }),
+  })
+    .then((response) => response.json())
+    .then((data) => console.log("Manual lap broadcasted:", data))
+    .catch((err) => console.error("Failed to broadcast manual lap:", err));
 
   // Note: The lap will be added via EventSource lap event
   // No need to call addLap() here as it will come back through the event stream
@@ -5497,23 +5299,37 @@ function renderRaceHistory() {
     `;
   });
 
-  // Preserve the raceDetails div if it exists and has been moved
+  // The details element lives inside whichever card is expanded, so it has to be
+  // detached before innerHTML replaces the list or it would be destroyed along
+  // with its card. Remember which race was open so it can be restored by
+  // timestamp - indices shift when the list is re-sorted or a race is deleted.
   const existingRaceDetails = document.getElementById("raceDetails");
-  const raceDetailsParent = existingRaceDetails ? existingRaceDetails.parentNode : null;
-  const raceDetailsNextSibling = existingRaceDetails ? existingRaceDetails.nextSibling : null;
-  
-  // Remove raceDetails temporarily if it's in the list container
-  if (existingRaceDetails && raceDetailsParent === listContainer) {
-    listContainer.removeChild(existingRaceDetails);
+  const openTimestamp = currentDetailRace ? currentDetailRace.timestamp : null;
+  const wasOpen = existingRaceDetails && existingRaceDetails.style.display !== "none";
+  if (existingRaceDetails && existingRaceDetails.parentNode) {
+    existingRaceDetails.parentNode.removeChild(existingRaceDetails);
   }
-  
+
   // Update the list
   listContainer.innerHTML = html;
-  
-  // Restore raceDetails if it was in the list
-  if (existingRaceDetails && raceDetailsParent === listContainer) {
-    // Put it back at the end of the list
-    listContainer.appendChild(existingRaceDetails);
+
+  if (existingRaceDetails) {
+    let host = null;
+    if (wasOpen && openTimestamp !== null) {
+      const idx = raceHistoryData.findIndex((r) => r.timestamp === openTimestamp);
+      if (idx >= 0) {
+        host = listContainer.querySelector(`.race-item[data-race-index="${idx}"]`);
+      }
+    }
+    if (host) {
+      host.appendChild(existingRaceDetails);
+      host.classList.add("is-expanded");
+    } else {
+      // Its race is gone, or nothing was open. Park it at the end, hidden.
+      existingRaceDetails.style.display = "none";
+      listContainer.appendChild(existingRaceDetails);
+      if (wasOpen) currentDetailRace = null;
+    }
   }
   
   // Add event delegation for race item clicks
@@ -5558,11 +5374,19 @@ function setupRaceHistoryEventHandlers() {
       return;
     }
     
+    // Clicks inside the expanded details belong to the details, not the card.
+    if (event.target.closest("#raceDetails")) {
+      return;
+    }
+
     // Handle race item click
     if (raceItem) {
       const index = parseInt(raceItem.getAttribute("data-race-index"));
-      console.log("Opening race details for index:", index);
-      viewRaceDetails(index);
+      if (raceItem.classList.contains("is-expanded")) {
+        closeRaceDetails();
+      } else {
+        viewRaceDetails(index);
+      }
     }
   };
   
@@ -5602,17 +5426,23 @@ function viewRaceDetails(index) {
   // Get the clicked race item element
   const raceItem = document.querySelector(`.race-item[data-race-index="${index}"]`);
 
-  // Remove from current position
+  // The details live INSIDE the clicked card rather than in a separate panel
+  // below it, so the card reads as one box that expands.
   if (detailsDiv.parentNode) {
     detailsDiv.parentNode.removeChild(detailsDiv);
   }
+  document.querySelectorAll(".race-item.is-expanded").forEach((el) => el.classList.remove("is-expanded"));
 
-  // Insert after the clicked race item
-  if (raceItem && raceItem.parentNode) {
-    raceItem.parentNode.insertBefore(detailsDiv, raceItem.nextSibling);
+  if (raceItem) {
+    raceItem.appendChild(detailsDiv);
+    raceItem.classList.add("is-expanded");
+  } else {
+    // No matching card on screen; fall back to the end of the list so the
+    // details are still reachable rather than silently lost.
+    const listContainer = document.getElementById("raceHistoryList");
+    if (listContainer) listContainer.appendChild(detailsDiv);
   }
 
-  // Show the details div first
   detailsDiv.style.display = "block";
 
   // Now update the content (elements should be accessible)
@@ -5754,7 +5584,9 @@ function renderRaceTimeline(race) {
 
 function closeRaceDetails() {
   stopPlayback(); // Stop any ongoing playback
-  document.getElementById("raceDetails").style.display = "none";
+  const detailsDiv = document.getElementById("raceDetails");
+  if (detailsDiv) detailsDiv.style.display = "none";
+  document.querySelectorAll(".race-item.is-expanded").forEach((el) => el.classList.remove("is-expanded"));
   currentDetailRace = null;
 }
 
@@ -8462,26 +8294,17 @@ function applyWiFiSettings() {
   // Give a moment for save to complete
   setTimeout(() => {
     // Send reboot command
-    if (usbConnected && transportManager) {
-      transportManager
-        .sendCommand("reboot", "POST")
-        .then(() => {
-          alert(i18n.t("messages.wifi_applied_restarting"));
-        })
-        .catch((err) => console.error("Failed to restart device:", err));
-    } else {
-      fetch("/reboot", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
+    fetch("/reboot", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    })
+      .then(() => {
+        alert(i18n.t("messages.wifi_applied_restarting"));
       })
-        .then(() => {
-          alert(i18n.t("messages.wifi_applied_restarting"));
-        })
-        .catch((err) => console.error("Failed to restart device:", err));
-    }
+      .catch((err) => console.error("Failed to restart device:", err));
   }, 500);
 }
 
@@ -8491,23 +8314,13 @@ function resetWiFiSettings() {
   }
 
   // Reload config from device
-  if (usbConnected && transportManager) {
-    transportManager
-      .sendCommand("config", "GET")
-      .then((configData) => {
-        if (configData.ssid !== undefined) document.getElementById("ssid").value = configData.ssid;
-        if (configData.pwd !== undefined) document.getElementById("pwd").value = configData.pwd;
-      })
-      .catch((err) => console.error("Failed to fetch config:", err));
-  } else {
-    fetch("/config")
-      .then((response) => response.json())
-      .then((configData) => {
-        if (configData.ssid !== undefined) document.getElementById("ssid").value = configData.ssid;
-        if (configData.pwd !== undefined) document.getElementById("pwd").value = configData.pwd;
-      })
-      .catch((err) => console.error("Failed to fetch config:", err));
-  }
+  fetch("/config")
+    .then((response) => response.json())
+    .then((configData) => {
+      if (configData.ssid !== undefined) document.getElementById("ssid").value = configData.ssid;
+      if (configData.pwd !== undefined) document.getElementById("pwd").value = configData.pwd;
+    })
+    .catch((err) => console.error("Failed to fetch config:", err));
 }
 
 // Settings Modal Functions

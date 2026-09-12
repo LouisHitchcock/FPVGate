@@ -87,3 +87,79 @@ voice_<...>/
 - `../docs/VOICE_GENERATION_README.md`
 - `../docs/MULTI_VOICE_SETUP.md`
 - `../docs/SD_CARD_MIGRATION_GUIDE.md`
+
+## Validating a device
+
+Four harnesses, in the order you would use them. **If you have been asked to
+validate a device and nothing else, read `VALIDATION_PLAN.md` first** — it says
+what each layer proves and, more usefully, what it does not.
+
+| Script | Writes to device? | Duration | Use it to |
+|---|---|---|---|
+| `race_day_sim.py --components-only` | **yes** | ~2 min | check every component once |
+| `race_day_sim.py` | **yes** | 1-4 h | simulate a full race day |
+| `reliability_check.py` | no | 4 h+ | prove it stays up under load |
+| `stress_test.py` | no | minutes | concurrency and throughput |
+| `soak_test.py` | no | hours | liveness across both transports |
+
+All of them take `--usb <gate ip> --bind <host ip>` and/or `--wifi <gate ip>`, and
+need at least one. The gate is always `192.168.7.1` over USB; `--bind` is your
+own address on the USB network adapter, normally `192.168.7.2`. **Without
+`--bind`, USB requests can leave via the wrong interface and appear to fail.**
+
+Every one of them exits `0` for pass, `1` for fail, `2` for could-not-run.
+Exit `2` is not a firmware failure — it means the check never got far enough to
+judge, usually a wrong address or an unplugged cable.
+
+### Start here
+
+```
+# 1. Is the device healthy and is every component working?   ~2 min
+python tools/race_day_sim.py --usb 192.168.7.1 --bind 192.168.7.2     --wifi 192.168.0.225 --i-know-this-writes --components-only
+
+# 2. Does it stay up under sustained load?                    4 h
+python tools/reliability_check.py --usb 192.168.7.1 --bind 192.168.7.2     --wifi 192.168.0.225 --duration 14400
+```
+
+Step 1 must pass before step 2 is worth starting.
+
+### race_day_sim.py
+
+Drives real heats — start timer, post laps, stop, save — then verifies the race
+persisted, the RSSI sidecar was written and serves correctly, lap editing
+recalculates the statistics, history is ordered newest-first, and deletion
+removes both race and sidecar. Also checks config round-trips and that both
+transports serve identical data.
+
+**This creates and deletes races.** It refuses to run without
+`--i-know-this-writes`, and removes everything it created afterwards, including
+on Ctrl-C. Do not point it at a gate holding results that matter.
+
+### reliability_check.py
+
+Read-only. Preflight, the device's own 18-check self test, an endpoint probe,
+then hours of sustained mixed load with liveness probing. Reaches its own
+PASS/FAIL verdict against explicit criteria. See `RELIABILITY_RUNBOOK.md` for
+running it unattended and what to report back.
+
+Safe against a gate with real race data, since it mutates nothing.
+
+### stress_test.py
+
+Concurrency and throughput across both transports at once, verifying every
+response against its `Content-Length`. Useful for comparing USB against WiFi, or
+for reproducing load-dependent faults quickly.
+
+### soak_test.py
+
+Long liveness watch: probes both transports on an interval, with periodic bursts
+of race-shaped traffic, and reports outages and whether they recovered unaided.
+
+### Why Content-Length is checked everywhere
+
+The RNDIS transmit stall presents as a response body that stops partway with
+**HTTP 200 already sent**. A status-only check reports success on exactly the
+fault being hunted, so every harness compares bytes received against the declared
+length. For the same reason the load mixes are weighted towards large transfers:
+small requests keep working right through a stall.
+

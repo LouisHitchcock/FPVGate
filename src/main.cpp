@@ -12,8 +12,11 @@
 #include <vector>
 #include "selftest.h"
 #include "transport.h"
+#ifdef FPVGATE_USB_NET
+#include "usbnet.h"
+#include "usbnet_boot.h"
+#endif
 #include "trackmanager.h"
-#include "usb.h"
 #include "webhook.h"
 #include "rotorhazard.h"
 // DISABLED FOR NOW: #include "nodemode.h"
@@ -75,7 +78,6 @@ static Config config;
 static Storage storage;
 static SelfTest selfTest;
 static Webserver ws;
-static USBTransport usbTransport;
 static TransportManager transportManager;
 static Buzzer buzzer;
 static Led led;
@@ -169,7 +171,6 @@ static void parallelTask(void *pvArgs) {
         rgbLed.handleRgbLed(currentTimeMs);
 #endif
         ws.handleWebUpdate(currentTimeMs);
-        usbTransport.update(currentTimeMs);
         config.handleEeprom(currentTimeMs);
         rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
 #ifdef HAS_BATTERY_MONITOR
@@ -243,6 +244,11 @@ static void onSdCardReady() {
 }
 
 void setup() {
+#ifdef FPVGATE_USB_NET
+    // Reports the PREVIOUS boot's last stage and this boot's reset reason.
+    // Must be first: a boot loop leaves only a short window to talk.
+    usbnet_boot_report();
+#endif
 #ifdef ENABLE_POWER_SWITCH
 #if defined(WAVESHARE_ESP32S3_LCD2) && defined(LCD_BACKLIGHT)
     powerManager.init(PIN_POWER_SWITCH, LCD_BACKLIGHT);
@@ -262,6 +268,9 @@ void setup() {
     
     // Initialize storage first (LittleFS only at boot)
     storage.init();
+#ifdef FPVGATE_USB_NET
+    usbnet_boot_mark(USBNET_BOOT_STORAGE_READY);
+#endif
     
     // Initialize config and connect to storage for SD backup/restore
     config.setStorage(&storage);
@@ -458,21 +467,20 @@ void setup() {
     ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
 #endif
     
-    // Initialize USB transport
-#ifdef HAS_BATTERY_MONITOR
-    usbTransport.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager);
-#else
-    usbTransport.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager);
-#endif
-    
     // Register transports with TransportManager
     transportManager.addTransport(&ws);
-    transportManager.addTransport(&usbTransport);
     
     // Set TransportManager in webserver for event broadcasting
     ws.setTransportManager(&transportManager);
     
     DEBUG("Transport system initialized (WiFi + USB)\n");
+#ifdef FPVGATE_USB_NET
+    usbnet_boot_mark(USBNET_BOOT_TRANSPORT_READY);
+    usbnet_boot_mark(USBNET_BOOT_USBNET_CALLING);
+    esp_err_t usbNetResult = usbnet_begin();
+    usbnet_boot_mark(USBNET_BOOT_USBNET_RETURNED);
+    DEBUG("USB networking: %s (http://192.168.7.1/)\n", esp_err_to_name(usbNetResult));
+#endif
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Initialize LCD band/channel display from config
@@ -510,6 +518,9 @@ void setup() {
         // NO buzzer beep (silent operation)
     }
     */
+#ifdef FPVGATE_USB_NET
+    usbnet_boot_mark(USBNET_BOOT_SETUP_COMPLETE);
+#endif
 }
 
 #ifdef ENABLE_POWER_SWITCH
@@ -556,6 +567,11 @@ static void shutdownForDeepSleep() {
 #endif
 
 void loop() {
+#ifdef FPVGATE_USB_NET
+    // Marked once; a boot that never reaches here died in setup().
+    static bool markedRunning = false;
+    if (!markedRunning) { markedRunning = true; usbnet_boot_mark(USBNET_BOOT_LOOP_RUNNING); }
+#endif
     uint32_t nowMs = millis();
     uint32_t currentTimeMs = nowMs;
     
@@ -571,6 +587,9 @@ void loop() {
         
         DEBUG("[HEAP] Free: %u KB / %u KB (%.1f%% used) | Min Free Ever: %u KB\n", 
               freeHeap / 1024, heapSize / 1024, usedPercent, minFreeHeap / 1024);
+#ifdef FPVGATE_USB_NET
+        usbnet_print_status();
+#endif
         
         // Check for low memory condition
         if (freeHeap < 50000) {  // Less than 50KB free
