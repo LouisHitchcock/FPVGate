@@ -1624,28 +1624,55 @@
               </div>
 
               <div class="ota-panel">
-                <div class="ota-row">
-                  <label for="otaFirmwareFile" data-i18n="settings.firmware.file_firmware">Firmware (firmware.bin):</label>
-                  <input type="file" id="otaFirmwareFile" accept=".bin" />
+                <div id="otaSourceOnline">
+                  <div class="ota-line">
+                    <select id="otaVersionSelect" onchange="onOtaVersionChange()" aria-label="Version">
+                      <option value="" data-i18n="settings.firmware.loading_versions">Loading versions...</option>
+                    </select>
+                    <label class="ota-checkbox">
+                      <input type="checkbox" id="otaPreReleaseToggle" onchange="loadOtaVersions()" />
+                      <span data-i18n="settings.firmware.show_prerelease">Pre-release</span>
+                    </label>
+                  </div>
+                  <details id="otaNotesWrap" class="ota-notes" style="display: none">
+                    <summary data-i18n="settings.firmware.whats_new">What's new</summary>
+                    <div id="otaReleaseNotes"></div>
+                  </details>
                 </div>
-                <div class="ota-row">
-                  <label for="otaFilesystemFile" data-i18n="settings.firmware.file_filesystem">Filesystem (littlefs.bin):</label>
-                  <input type="file" id="otaFilesystemFile" accept=".bin" />
+
+                <div id="otaSourceFile" style="display: none">
+                  <div class="ota-line">
+                    <label for="otaFirmwareFile" data-i18n="settings.firmware.file_firmware_short">Firmware</label>
+                    <input type="file" id="otaFirmwareFile" accept=".bin" />
+                  </div>
+                  <div class="ota-line">
+                    <label for="otaFilesystemFile" data-i18n="settings.firmware.file_filesystem_short">Filesystem</label>
+                    <input type="file" id="otaFilesystemFile" accept=".bin" />
+                  </div>
                 </div>
-                <p class="ota-hint" data-i18n="settings.firmware.hint">Choose either or both. When both are given the filesystem is written first, then the firmware, and the gate restarts once at the end.</p>
 
                 <div id="otaWarning" class="ota-warning" style="display: none"></div>
 
                 <div class="ota-actions">
                   <button type="button" id="otaStartBtn" onclick="startOtaUpdate()" data-i18n="settings.firmware.install">Install Update</button>
+                  <span id="otaHint" class="ota-hint" data-i18n="settings.firmware.hint_online">Downloaded by your browser and passed to the gate, so the gate needs no internet of its own.</span>
+                  <!-- Downloading is the normal path, so it needs no control of
+                       its own. Supplying files by hand is the exception and gets
+                       a link rather than a tab. -->
+                  <button type="button" id="otaSourceToggle" class="ota-link" onclick="toggleOtaSource()" data-i18n="settings.firmware.source_file">Use my own files</button>
                 </div>
 
-                <div id="otaProgressWrap" class="ota-progress-wrap" style="display: none">
+                <!-- Progress and log stay out of the layout until an update is
+                     actually running, so the resting panel is just source,
+                     version and one button. -->
+                <div id="otaRunning" class="ota-running" style="display: none">
                   <div class="ota-progress-track"><div id="otaProgressBar" class="ota-progress-bar"></div></div>
                   <div id="otaProgressText" class="ota-progress-text"></div>
+                  <details id="otaLogWrap" class="ota-notes">
+                    <summary data-i18n="settings.firmware.details">Details</summary>
+                    <div id="otaLog" class="ota-log"></div>
+                  </details>
                 </div>
-
-                <div id="otaLog" class="ota-log" style="display: none"></div>
               </div>
 
               <div class="config-item" style="margin-top: 16px">

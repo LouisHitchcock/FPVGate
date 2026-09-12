@@ -1227,7 +1227,16 @@ EEPROM:\n\
     });
     
     // Serve other static files from LittleFS only
-    server.serveStatic("/", LittleFS, "/").setCacheControl("max-age=600");
+    // "no-cache" means revalidate, not "do not cache". The browser keeps the
+    // file and asks whether it has changed; the server answers 304 and sends
+    // nothing when it has not, so repeat loads stay cheap.
+    //
+    // max-age=600 was actively wrong once updates could be installed from the
+    // web UI: after an update the browser would serve the previous script.js
+    // against the new index.html for up to ten minutes, which presents as a
+    // broken page rather than a stale one. Correctness beats saving a
+    // conditional request on a link this short.
+    server.serveStatic("/", LittleFS, "/").setCacheControl("no-cache");
 
     events.onConnect([this](AsyncEventSourceClient *client) {
         if (client->lastId()) {

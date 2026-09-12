@@ -7220,11 +7220,196 @@ function saveRaceChanges() {
 // to /ota/upload.
 
 let otaDeviceInfo = null;
+let otaSource = "online";
+let otaReleases = [];
+
+// Where published firmware lives. Both of these send
+// Access-Control-Allow-Origin, so the browser can fetch them even though this
+// page is served by the gate on a different origin. The gate never needs
+// internet access of its own, which matters because it usually has none: as a
+// WiFi access point it has no upstream, and over USB it is given no default
+// route deliberately.
+const OTA_SITE = "https://fpvgate.xyz";
+const OTA_RELEASES_API = "https://api.github.com/repos/LouisHitchcock/FPVGate/releases";
+
+// Releases from this version on use the standardised per-board layout:
+// <board>/firmware.bin rather than <Board-Dir>/<Prefix>_firmware.bin. This
+// mirrors MODERN_FIRMWARE_LAYOUT_VERSION in the web flasher; the two must agree
+// or a device will ask for files that are not there.
+const OTA_MODERN_LAYOUT_FROM = "v1.7.3";
+
+// Compares tags like v1.8.0-beta-1. Anything after the first dash is a
+// pre-release label and plays no part in ordering.
+function otaVersionParts(tag) {
+  const cleaned = (tag || "").replace(/^[^0-9]*/, "").split("-")[0];
+  return cleaned ? cleaned.split(".").map((n) => parseInt(n, 10) || 0) : [];
+}
+
+function otaVersionAtLeast(tag, minimum) {
+  const a = otaVersionParts(tag);
+  const b = otaVersionParts(minimum);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return true;
+}
+
+function toggleOtaSource() {
+  setOtaSource(otaSource === "online" ? "file" : "online");
+}
+
+function setOtaSource(source) {
+  otaSource = source;
+  const online = document.getElementById("otaSourceOnline");
+  const file = document.getElementById("otaSourceFile");
+  const toggle = document.getElementById("otaSourceToggle");
+  if (online) online.style.display = source === "online" ? "block" : "none";
+  if (file) file.style.display = source === "file" ? "block" : "none";
+  // The link offers the other mode, so it reads as an action rather than a
+  // label for where you already are.
+  if (toggle) {
+    toggle.textContent = i18n.t(
+      source === "online" ? "settings.firmware.source_file" : "settings.firmware.source_online"
+    );
+  }
+  const hint = document.getElementById("otaHint");
+  if (hint) {
+    hint.textContent = i18n.t(
+      source === "online" ? "settings.firmware.hint_online" : "settings.firmware.hint"
+    );
+  }
+  showOtaWarning("");
+}
+
+// Builds the URLs for one release, for this device's board. The board comes
+// from the device itself rather than being guessed, because flashing another
+// board's firmware bricks it.
+function otaBuildUrls(release) {
+  const board = otaDeviceInfo && otaDeviceInfo.board;
+  if (!board || board === "unknown") return null;
+  const folder = release.prerelease ? "preRelease" : "firmware";
+  const modern = otaVersionAtLeast(release.tag, OTA_MODERN_LAYOUT_FROM);
+  if (!modern) {
+    // Older releases used per-board directory names and prefixed filenames that
+    // do not follow from the board id, so they cannot be addressed from here.
+    return null;
+  }
+  const base = `${OTA_SITE}/${folder}/${release.tag}/${board}/`;
+  return { firmware: base + "firmware.bin", filesystem: base + "littlefs.bin" };
+}
+
+function loadOtaVersions() {
+  const select = document.getElementById("otaVersionSelect");
+  const includePre = document.getElementById("otaPreReleaseToggle");
+  if (!select) return Promise.resolve();
+  select.innerHTML = `<option value="">${i18n.t("settings.firmware.loading_versions")}</option>`;
+
+  const wantPre = includePre && includePre.checked;
+  const jobs = [
+    fetch(OTA_RELEASES_API)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) =>
+        (list || [])
+          .filter((r) => !r.draft && !r.prerelease)
+          .map((r) => ({ tag: r.tag_name, name: r.name || r.tag_name, prerelease: false, notes: r.body || "" }))
+      )
+      .catch(() => []),
+  ];
+  if (wantPre) {
+    jobs.push(
+      fetch(`${OTA_SITE}/preRelease/index.json`)
+        .then((r) => (r.ok ? r.json() : { versions: [] }))
+        .then((d) =>
+          (d.versions || []).map((v) => ({ tag: v.tag, name: `${v.tag} (pre-release)`, prerelease: true, notes: v.notes || "" }))
+        )
+        .catch(() => [])
+    );
+  }
+
+  return Promise.all(jobs).then((groups) => {
+    // Pre-releases first: someone who asked to see them is usually after the
+    // newest thing, not the newest stable.
+    otaReleases = [].concat(...groups.reverse());
+    const usable = otaReleases.filter((r) => otaBuildUrls(r));
+    select.innerHTML = "";
+    if (!usable.length) {
+      select.innerHTML = `<option value="">${i18n.t("settings.firmware.no_versions")}</option>`;
+      return;
+    }
+    usable.forEach((r, i) => {
+      const opt = document.createElement("option");
+      opt.value = r.tag;
+      opt.textContent = r.name + (i === 0 ? ` ${i18n.t("settings.firmware.newest")}` : "");
+      select.appendChild(opt);
+    });
+    select.value = usable[0].tag;
+    onOtaVersionChange();
+  });
+}
+
+function onOtaVersionChange() {
+  const select = document.getElementById("otaVersionSelect");
+  const notes = document.getElementById("otaReleaseNotes");
+  const notesWrap = document.getElementById("otaNotesWrap");
+  const release = otaReleases.find((r) => r.tag === (select && select.value));
+  showOtaWarning("");
+  if (!notes || !notesWrap) return;
+  if (release && release.notes) {
+    notes.textContent = release.notes.trim();
+    notesWrap.style.display = "block";
+    notesWrap.open = false;
+  } else {
+    notesWrap.style.display = "none";
+  }
+  if (release && otaDeviceInfo && release.tag.replace(/^v/, "") === (otaDeviceInfo.version || "")) {
+    showOtaWarning(i18n.t("settings.firmware.warn_same_version"));
+  }
+}
+
+// Downloads one part in the browser and hands back a File, so the upload path
+// is identical whether the bytes came from the internet or from disk.
+function otaFetchPart(url, name, label, expectedSize) {
+  otaProgress(0, `${i18n.t("settings.firmware.label_downloading")} ${label}`);
+  return fetch(url, { cache: "no-store" }).then((r) => {
+    if (!r.ok) throw new Error(`${label}: HTTP ${r.status}`);
+    return r.blob().then((blob) => {
+      // Content-Length is deliberately NOT used here. The host serves these
+      // gzipped, so the header carries the compressed length while blob.size is
+      // the decompressed length, and comparing them fails every time. fetch
+      // already rejects a genuinely truncated response.
+      //
+      // Where a size is known independently it is worth checking. A filesystem
+      // image is always exactly the size of the partition it targets, so a
+      // mismatch means the wrong file or the wrong board.
+      if (expectedSize && blob.size !== expectedSize) {
+        throw new Error(
+          i18n.t("settings.firmware.err_wrong_size", {
+            label: label,
+            got: formatBytes(blob.size),
+            want: formatBytes(expectedSize),
+          })
+        );
+      }
+      if (blob.size < 65536) {
+        throw new Error(`${label}: ${formatBytes(blob.size)} is too small to be a valid image`);
+      }
+      return new File([blob], name);
+    });
+  });
+}
 
 function otaLog(message, isError) {
   const box = document.getElementById("otaLog");
   if (!box) return;
-  box.style.display = "block";
+  const running = document.getElementById("otaRunning");
+  if (running) running.style.display = "block";
+  // Open the details only when something has gone wrong. A successful update
+  // does not need its log read, but a failure should not have to be hunted for.
+  const wrap = document.getElementById("otaLogWrap");
+  if (wrap && isError) wrap.open = true;
   const line = document.createElement("div");
   if (isError) line.className = "ota-log-error";
   line.textContent = message;
@@ -7233,7 +7418,7 @@ function otaLog(message, isError) {
 }
 
 function otaProgress(percent, text) {
-  const wrap = document.getElementById("otaProgressWrap");
+  const wrap = document.getElementById("otaRunning");
   const bar = document.getElementById("otaProgressBar");
   const label = document.getElementById("otaProgressText");
   if (!wrap) return;
@@ -7267,16 +7452,16 @@ function loadOtaDeviceInfo() {
       const fsSize = info.filesystem ? info.filesystem.size : null;
       const appSize = info.app ? info.app.updateSize || info.app.size : null;
       box.innerHTML =
-        `<strong>${info.board || "unknown board"}</strong> &middot; ` +
-        `${i18n.t("settings.firmware.running")} ${info.version || "?"}<br>` +
-        `<span class="ota-device-sizes">` +
-        `${i18n.t("settings.firmware.space_app")} ${formatBytes(appSize)} &middot; ` +
-        `${i18n.t("settings.firmware.space_fs")} ${formatBytes(fsSize)}` +
-        `</span>`;
+        `<span class="ota-device-name">${info.board || "unknown board"}</span>` +
+        `<span class="ota-device-sizes">${info.version || "?"}</span>` +
+        `<span class="ota-device-sizes">&middot; ${formatBytes(appSize)} + ${formatBytes(fsSize)}</span>`;
       if (info.board === "unknown") {
         showOtaWarning(i18n.t("settings.firmware.warn_unknown_board"));
       }
       if (button) button.disabled = false;
+      // The version list depends on knowing the board, so it is only fetched
+      // once the device has said what it is.
+      loadOtaVersions();
       return info;
     })
     .catch((err) => {
@@ -7370,29 +7555,73 @@ function waitForReboot(timeoutMs) {
   return new Promise((r) => setTimeout(r, 4000)).then(attempt);
 }
 
-function startOtaUpdate() {
-  const firmwareInput = document.getElementById("otaFirmwareFile");
-  const filesystemInput = document.getElementById("otaFilesystemFile");
-  const button = document.getElementById("otaStartBtn");
-  const firmwareFile = firmwareInput && firmwareInput.files[0];
-  const filesystemFile = filesystemInput && filesystemInput.files[0];
-
-  if (!firmwareFile && !filesystemFile) {
-    alert(i18n.t("settings.firmware.err_no_file"));
-    return;
+// Resolves whichever source is selected down to the same pair of Files.
+function collectOtaFiles() {
+  if (otaSource === "file") {
+    const firmwareInput = document.getElementById("otaFirmwareFile");
+    const filesystemInput = document.getElementById("otaFilesystemFile");
+    const firmware = firmwareInput && firmwareInput.files[0];
+    const filesystem = filesystemInput && filesystemInput.files[0];
+    if (!firmware && !filesystem) return Promise.reject(new Error(i18n.t("settings.firmware.err_no_file")));
+    return Promise.resolve({ firmware, filesystem });
   }
 
+  const select = document.getElementById("otaVersionSelect");
+  const release = otaReleases.find((r) => r.tag === (select && select.value));
+  if (!release) return Promise.reject(new Error(i18n.t("settings.firmware.err_no_version")));
+  const urls = otaBuildUrls(release);
+  if (!urls) return Promise.reject(new Error(i18n.t("settings.firmware.err_no_build")));
+
+  otaLog(i18n.t("settings.firmware.log_downloading", { version: release.tag }));
+  // Both parts are fetched before anything is written. Downloading the firmware
+  // only to fail fetching the filesystem, after the filesystem had already been
+  // flashed, would leave the device mismatched.
+  // A filesystem image is always exactly the size of the partition it is built
+  // for, so the device's own reported size is a precise expectation.
+  const expectedFsSize = otaDeviceInfo && otaDeviceInfo.filesystem ? otaDeviceInfo.filesystem.size : 0;
+  return otaFetchPart(urls.filesystem, "littlefs.bin", i18n.t("settings.firmware.label_fs"), expectedFsSize)
+    .then((filesystem) =>
+      otaFetchPart(urls.firmware, "firmware.bin", i18n.t("settings.firmware.label_fw")).then((firmware) => ({
+        firmware,
+        filesystem,
+      }))
+    );
+}
+
+function startOtaUpdate() {
+  const button = document.getElementById("otaStartBtn");
+  button.disabled = true;
+  otaProgress(0, "");
+  showOtaWarning("");
+
+  collectOtaFiles()
+    .then(({ firmware, filesystem }) => runOtaUpdate(firmware, filesystem, button))
+    .catch((err) => {
+      // Say so in the log and on the progress line as well as the warning box.
+      // A failure that only updates the warning leaves the progress bar sitting
+      // at whatever it last showed, which reads as a hang rather than an error.
+      console.error("OTA preparation failed:", err);
+      otaLog(i18n.t("settings.firmware.log_failed", { error: err.message }), true);
+      otaProgress(0, i18n.t("settings.firmware.label_failed"));
+      showOtaWarning(err.message);
+      button.disabled = false;
+    });
+}
+
+function runOtaUpdate(firmwareFile, filesystemFile, button) {
   const problems = checkOtaSizes(firmwareFile, filesystemFile);
   if (problems.length) {
     showOtaWarning(problems.join(" "));
+    button.disabled = false;
     return;
   }
   showOtaWarning("");
 
-  if (!confirm(i18n.t("settings.firmware.confirm"))) return;
+  if (!confirm(i18n.t("settings.firmware.confirm"))) {
+    button.disabled = false;
+    return;
+  }
 
-  button.disabled = true;
-  otaProgress(0, "");
   otaLog(i18n.t("settings.firmware.log_start"));
 
   // Filesystem first. If the firmware went first and the filesystem upload then
@@ -7424,7 +7653,17 @@ function startOtaUpdate() {
     .then(() => waitForReboot())
     .then((version) => {
       otaLog(i18n.t("settings.firmware.log_done", { version: (version || "").trim() }));
+      // Updating from a build that served assets with max-age cannot be fixed
+      // from here: that browser will not re-request script.js for the rest of
+      // its cache lifetime, whatever this page does. Say so rather than let a
+      // stale page look like a failed update.
+      otaLog(i18n.t("settings.firmware.log_hard_refresh"));
       otaProgress(100, i18n.t("settings.firmware.label_done"));
+      // A plain reload, deliberately. Adding a cache-busting query string here
+      // would force a fresh index.html while script.js stayed cached, which is
+      // worse than both being stale: new markup calling functions the old
+      // script does not define. Assets are served with no-cache so the browser
+      // revalidates them anyway.
       setTimeout(() => window.location.reload(), 2500);
     })
     .catch((err) => {
