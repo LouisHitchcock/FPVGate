@@ -138,9 +138,15 @@ From a healthy AIO on 1.8.0-dev, for comparison:
 | Measure | USB | WiFi |
 |---|---|---|
 | `/status` median | ~30 ms | ~110 ms |
-| 60-request burst | 34–38 s | 13 s |
-| Heap floor under load | 106–125 KB | same device |
+| 60-request burst, **this script** | 78–81 s | 22–23 s |
+| 60-request burst, `soak_test.py` | 34–38 s | 13 s |
+| Heap floor under load | 85–125 KB | same device |
 
-USB bulk transfer running roughly 2.7x slower than WiFi is **expected** and not a
-failure. A USB burst taking dramatically longer than 40 s, or heap floor below
-about 45 KB, is worth reporting even if the verdict is PASS.
+The two burst figures differ because the two scripts send different mixes. This
+one is weighted far more heavily towards `/script.js`, which is 358 KB, so its
+bursts move roughly three times the data. **Do not compare a burst time from one
+script against the reference for the other.**
+
+USB bulk transfer running roughly 3x slower than WiFi is **expected** and not a
+failure. Worth reporting even on a PASS: a USB burst well over 90 s, a heap floor
+below about 45 KB, or a heap trend more negative than a few KB/hour.
