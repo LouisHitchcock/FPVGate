@@ -1,6 +1,7 @@
 #include "laptimer.h"
 #include "trackmanager.h"
 #include "webhook.h"
+#include "race_rssi_recorder.h"
 
 #include "debug.h"
 
@@ -95,6 +96,10 @@ void LapTimer::init(Config *config, RX5808 *rx5808, Buzzer *buzzer, Led *l, Webh
 
 }
 
+void LapTimer::setRssiRecorder(RaceRssiRecorder *recorder) {
+    rssiRecorder = recorder;
+}
+
 void LapTimer::start() {
     DEBUG("\n=== RACE STARTED ===\n");
     DEBUG("Current Thresholds:\n");
@@ -136,10 +141,18 @@ void LapTimer::start() {
     if (webhooks && conf->getGateLEDsEnabled() && conf->getWebhookRaceStart()) {
         webhooks->triggerRaceStart();
     }
+
+    if (rssiRecorder) {
+        rssiRecorder->beginRace();
+    }
 }
 
 void LapTimer::stop() {
     DEBUG("LapTimer stopped\n");
+    // Finalize RSSI capture before clearing race state so save paths can attach sidecar
+    if (rssiRecorder) {
+        rssiRecorder->endRace();
+    }
     state = STOPPED;
     lapCountWraparound = false;
     lapCount = 0;
@@ -306,6 +319,11 @@ void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
 
     // Store final value used by lap logic
     rssi[rssiCount] = out;
+
+    // Stream filtered RSSI to SD-backed marshal capture (batched; no large RAM buffer)
+    if (state == RUNNING && rssiRecorder) {
+        rssiRecorder->addSample(out, currentTimeMs);
+    }
 
     // Debug/state tracking (raw/kalman/ma)
     lastRawRssi = rawRssi;

@@ -42,6 +42,11 @@ class I18n {
       }
       this.locales[lang] = await response.json();
       console.log(`[i18n] Loaded locale: ${lang}`);
+      // Keep English resident so t() can fall back per key for strings that
+      // exist in en.json but have not been translated yet.
+      if (lang !== this.fallbackLang) {
+        await this.loadLocale(this.fallbackLang);
+      }
     } catch (error) {
       console.error(`[i18n] Failed to load locale: ${lang}`, error);
       if (lang !== this.fallbackLang) {
@@ -51,23 +56,39 @@ class I18n {
     }
   }
 
-  t(key, params = {}) {
-    const keys = key.split(".");
-    let value = this.locales[this.currentLang] || this.locales[this.fallbackLang];
-
-    // Guard against both locales being undefined
-    if (!value) {
-      console.warn(`No locales loaded, returning key: ${key}`);
-      return key;
-    }
-
+  // Walk a dotted key through one locale table. Returns undefined if any
+  // segment is missing, so the caller can decide whether to fall back.
+  resolve(locale, keys) {
+    let value = locale;
     for (const k of keys) {
       if (value && value[k]) {
         value = value[k];
       } else {
-        value = key;
-        break;
+        return undefined;
       }
+    }
+    return value;
+  }
+
+  t(key, params = {}) {
+    const keys = key.split(".");
+    const current = this.locales[this.currentLang];
+    const fallback = this.locales[this.fallbackLang];
+
+    // Guard against both locales being undefined
+    if (!current && !fallback) {
+      console.warn(`No locales loaded, returning key: ${key}`);
+      return key;
+    }
+
+    // Fall back per key, not per file. A translation added to en.json but not
+    // yet to de/es/fr/zh-CN would otherwise render as the raw dotted key.
+    let value = this.resolve(current, keys);
+    if (value === undefined) {
+      value = this.resolve(fallback, keys);
+    }
+    if (value === undefined) {
+      value = key;
     }
 
     if (typeof value === "string") {
