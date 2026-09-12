@@ -1072,6 +1072,19 @@ footer {
   box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 
+/* An expanded card holds its own details, so it grows rather than dropping a
+   separate panel underneath. It must not lift on hover like a clickable card,
+   and the cursor belongs to the header rather than the whole open card. */
+.race-item.is-expanded {
+  border-color: var(--primary-color);
+  cursor: default;
+}
+
+.race-item.is-expanded:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .race-item-header {
   display: flex;
   justify-content: space-between;
@@ -1103,6 +1116,8 @@ footer {
   color: var(--text-color);
 }
 
+/* Standalone styling, kept for any context where the details are not nested
+   inside a card. */
 .race-details {
   margin-top: 24px;
   padding: 20px;
@@ -1110,6 +1125,18 @@ footer {
   border: 2px solid var(--primary-color);
   border-radius: 8px;
   position: relative;
+}
+
+/* Nested inside its race card: no border, no radius, no background of its own,
+   so the card reads as a single box that expanded. A rule and the card's own
+   padding separate it from the summary above. */
+.race-item .race-details {
+  margin: 16px -16px -16px -16px;
+  padding: 16px;
+  background-color: transparent;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  border-radius: 0 0 8px 8px;
 }
 
 .race-details h3 {

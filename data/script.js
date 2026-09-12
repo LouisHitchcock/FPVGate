@@ -5235,23 +5235,37 @@ function renderRaceHistory() {
     `;
   });
 
-  // Preserve the raceDetails div if it exists and has been moved
+  // The details element lives inside whichever card is expanded, so it has to be
+  // detached before innerHTML replaces the list or it would be destroyed along
+  // with its card. Remember which race was open so it can be restored by
+  // timestamp - indices shift when the list is re-sorted or a race is deleted.
   const existingRaceDetails = document.getElementById("raceDetails");
-  const raceDetailsParent = existingRaceDetails ? existingRaceDetails.parentNode : null;
-  const raceDetailsNextSibling = existingRaceDetails ? existingRaceDetails.nextSibling : null;
-  
-  // Remove raceDetails temporarily if it's in the list container
-  if (existingRaceDetails && raceDetailsParent === listContainer) {
-    listContainer.removeChild(existingRaceDetails);
+  const openTimestamp = currentDetailRace ? currentDetailRace.timestamp : null;
+  const wasOpen = existingRaceDetails && existingRaceDetails.style.display !== "none";
+  if (existingRaceDetails && existingRaceDetails.parentNode) {
+    existingRaceDetails.parentNode.removeChild(existingRaceDetails);
   }
-  
+
   // Update the list
   listContainer.innerHTML = html;
-  
-  // Restore raceDetails if it was in the list
-  if (existingRaceDetails && raceDetailsParent === listContainer) {
-    // Put it back at the end of the list
-    listContainer.appendChild(existingRaceDetails);
+
+  if (existingRaceDetails) {
+    let host = null;
+    if (wasOpen && openTimestamp !== null) {
+      const idx = raceHistoryData.findIndex((r) => r.timestamp === openTimestamp);
+      if (idx >= 0) {
+        host = listContainer.querySelector(`.race-item[data-race-index="${idx}"]`);
+      }
+    }
+    if (host) {
+      host.appendChild(existingRaceDetails);
+      host.classList.add("is-expanded");
+    } else {
+      // Its race is gone, or nothing was open. Park it at the end, hidden.
+      existingRaceDetails.style.display = "none";
+      listContainer.appendChild(existingRaceDetails);
+      if (wasOpen) currentDetailRace = null;
+    }
   }
   
   // Add event delegation for race item clicks
@@ -5296,11 +5310,19 @@ function setupRaceHistoryEventHandlers() {
       return;
     }
     
+    // Clicks inside the expanded details belong to the details, not the card.
+    if (event.target.closest("#raceDetails")) {
+      return;
+    }
+
     // Handle race item click
     if (raceItem) {
       const index = parseInt(raceItem.getAttribute("data-race-index"));
-      console.log("Opening race details for index:", index);
-      viewRaceDetails(index);
+      if (raceItem.classList.contains("is-expanded")) {
+        closeRaceDetails();
+      } else {
+        viewRaceDetails(index);
+      }
     }
   };
   
@@ -5340,17 +5362,23 @@ function viewRaceDetails(index) {
   // Get the clicked race item element
   const raceItem = document.querySelector(`.race-item[data-race-index="${index}"]`);
 
-  // Remove from current position
+  // The details live INSIDE the clicked card rather than in a separate panel
+  // below it, so the card reads as one box that expands.
   if (detailsDiv.parentNode) {
     detailsDiv.parentNode.removeChild(detailsDiv);
   }
+  document.querySelectorAll(".race-item.is-expanded").forEach((el) => el.classList.remove("is-expanded"));
 
-  // Insert after the clicked race item
-  if (raceItem && raceItem.parentNode) {
-    raceItem.parentNode.insertBefore(detailsDiv, raceItem.nextSibling);
+  if (raceItem) {
+    raceItem.appendChild(detailsDiv);
+    raceItem.classList.add("is-expanded");
+  } else {
+    // No matching card on screen; fall back to the end of the list so the
+    // details are still reachable rather than silently lost.
+    const listContainer = document.getElementById("raceHistoryList");
+    if (listContainer) listContainer.appendChild(detailsDiv);
   }
 
-  // Show the details div first
   detailsDiv.style.display = "block";
 
   // Now update the content (elements should be accessible)
@@ -5492,7 +5520,9 @@ function renderRaceTimeline(race) {
 
 function closeRaceDetails() {
   stopPlayback(); // Stop any ongoing playback
-  document.getElementById("raceDetails").style.display = "none";
+  const detailsDiv = document.getElementById("raceDetails");
+  if (detailsDiv) detailsDiv.style.display = "none";
+  document.querySelectorAll(".race-item.is-expanded").forEach((el) => el.classList.remove("is-expanded"));
   currentDetailRace = null;
 }
 
