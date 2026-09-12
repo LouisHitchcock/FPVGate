@@ -107,6 +107,25 @@ PASS requires all of:
 - every outage recovers unaided within `--max-outage` seconds (default 60)
 - request failure rate at or below `--max-failure-rate` percent (default 0.5)
 - heap minimum at or above `--min-heap` bytes (default 40000)
+- **the device never restarts during the run**
+- free heap not trending down faster than `--max-heap-leak` bytes/hour (default 10240)
+
+### How a restart is detected
+
+There is no uptime or reset reason exposed over HTTP. A restart is inferred from
+min-heap-ever, which only falls while the device is running and resets on boot —
+so an **increase** means it restarted.
+
+This matters more than it sounds. Without it a silent watchdog reset looks like a
+short outage followed by recovery, which every other criterion would pass. If you
+see `REBOOT` in the log, that is the finding, whatever else the run says.
+
+### Heap trend
+
+Free heap is fitted against time across the whole run and reported in KB/hour. A
+slow leak that never reaches the floor threshold inside the run would otherwise
+pass; a sustained downward slope fails instead. A reading within a few KB/hour of
+zero is normal jitter, not a leak.
 
 The `Content-Length` check matters more than it looks. The transmit stall
 presents as a body that stops partway with **HTTP 200 already sent**, so a

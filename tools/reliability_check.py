@@ -19,6 +19,13 @@ PASS requires ALL of the following:
   * every outage recovers unaided within --max-outage seconds
   * request failure rate stays at or below --max-failure-rate percent
   * heap minimum stays at or above --min-heap bytes
+  * the device never restarts during the run
+  * free heap is not trending down faster than --max-heap-leak bytes per hour
+
+There is no uptime or reset reason over HTTP, so a restart is detected by
+watching min-heap-ever: it only falls while the device runs, and resets on boot,
+so an increase means it restarted. Without this a silent watchdog reset looks
+like a brief outage followed by recovery, and passes.
 
 Anything else is FAIL. A truncated body counts as a failure even though the
 HTTP status was 200 -- that is the signature of the RNDIS transmit stall, and a
@@ -83,6 +90,9 @@ class Transport:
         self.heap_floor = None
         self.down_since = None
         self.outages = []
+        self.heap_samples = []     # (elapsed_s, free, min_ever)
+        self.reboots = []          # elapsed_s at which a reset was detected
+        self.last_min = None
         self.selftest_failed = []
         self.endpoint_failures = []
 
@@ -114,6 +124,25 @@ class Transport:
             return False, total, time.time() - t0, f"{type(exc).__name__}: {exc}", b""
         finally:
             conn.close()
+
+
+def heap_trend(samples):
+    """Least-squares slope of free heap against time, in bytes per hour.
+
+    A leak that never crosses the floor threshold inside the run would otherwise
+    pass, so the slope is judged as well as the minimum.
+    """
+    usable = [(t, f) for t, f, _ in samples if f]
+    if len(usable) < 10:
+        return None
+    n = len(usable)
+    mean_t = sum(t for t, _ in usable) / n
+    mean_f = sum(f for _, f in usable) / n
+    denom = sum((t - mean_t) ** 2 for t, _ in usable)
+    if denom == 0:
+        return None
+    slope = sum((t - mean_t) * (f - mean_f) for t, f in usable) / denom
+    return slope * 3600.0
 
 
 def make_logger(path):
@@ -273,9 +302,22 @@ def soak(transports, args, log, result):
             t.probes += 1
             if ok:
                 t.latencies.append(dt)
-                _, minimum = parse_heap(body.decode("utf-8", "replace"))
+                free, minimum = parse_heap(body.decode("utf-8", "replace"))
                 if minimum:
+                    # Min-heap-ever only ever falls while the device is running,
+                    # and resets on boot. An increase therefore means it
+                    # restarted. There is no uptime or reset reason over HTTP,
+                    # so this is the only way to catch a silent watchdog reset -
+                    # which otherwise reads as a brief blip and passes.
+                    if t.last_min is not None and minimum > t.last_min + 2048:
+                        at = time.time() - start
+                        t.reboots.append(round(at, 1))
+                        log(f"  REBOOT     {t.name} restarted: min-heap rose "
+                            f"{t.last_min} -> {minimum}, which only happens on boot")
+                    t.last_min = minimum
                     t.heap_floor = minimum if t.heap_floor is None else min(t.heap_floor, minimum)
+                if free:
+                    t.heap_samples.append((round(time.time() - start, 1), free, minimum))
                 if not t.alive:
                     down = time.time() - t.down_since
                     t.outages.append(round(down, 1))
@@ -346,6 +388,14 @@ def verdict(transports, args, log, result, diagnostics_ok, log_path, json_path):
         if t.outages:
             log(f"           {len(t.outages)} outage(s): "
                 + ", ".join(f"{o:.0f}s" for o in t.outages))
+        slope = heap_trend(t.heap_samples)
+        if slope is not None:
+            direction = "falling" if slope < 0 else "steady or rising"
+            log(f"           heap trend {slope / 1024:+.1f} KB/h ({direction}), "
+                f"{len(t.heap_samples)} samples")
+        if t.reboots:
+            log(f"           {len(t.reboots)} REBOOT(S) detected at "
+                + ", ".join(f"{r / 60:.0f} min" for r in t.reboots))
 
         if not t.alive:
             reasons.append(f"{t.name.strip()} was down at the end of the run")
@@ -362,6 +412,15 @@ def verdict(transports, args, log, result, diagnostics_ok, log_path, json_path):
                                f"{args.max_outage}s limit")
         if t.heap_floor is not None and t.heap_floor < args.min_heap:
             reasons.append(f"{t.name.strip()} heap floor {t.heap_floor} below {args.min_heap}")
+        # A device that restarted did not stay up, however well it served
+        # requests either side of the restart.
+        if t.reboots:
+            reasons.append(f"{t.name.strip()} restarted {len(t.reboots)} time(s) during the run "
+                           f"(min-heap rose, which only happens on boot)")
+        slope = heap_trend(t.heap_samples)
+        if slope is not None and slope < -args.max_heap_leak:
+            reasons.append(f"{t.name.strip()} heap is leaking at {slope / 1024:.1f} KB/h, "
+                           f"worse than the {args.max_heap_leak / 1024:.0f} KB/h limit")
 
     if not diagnostics_ok and not reasons:
         reasons.append("diagnostics reported problems")
@@ -384,6 +443,9 @@ def verdict(transports, args, log, result, diagnostics_ok, log_path, json_path):
                 "requests": t.requests + t.probes,
                 "failures": t.request_failures + t.probe_failures,
                 "bytes": t.bytes, "outages_s": t.outages, "heap_floor": t.heap_floor,
+                "reboots_at_s": t.reboots,
+                "heap_trend_bytes_per_hour": heap_trend(t.heap_samples),
+                "heap_samples": t.heap_samples[-200:],
             } for t in transports],
             "failures": result.failures[:200],
         }, fh, indent=2)
@@ -418,6 +480,8 @@ def main():
     ap.add_argument("--max-outage", type=int, default=60, help="longest tolerable unaided outage")
     ap.add_argument("--max-failure-rate", type=float, default=0.5, help="percent")
     ap.add_argument("--min-heap", type=int, default=40000, help="bytes")
+    ap.add_argument("--max-heap-leak", type=int, default=10240,
+                    help="bytes per hour of sustained heap loss before failing")
     ap.add_argument("--log", default="reliability.log")
     ap.add_argument("--report", default="reliability.json")
     ap.add_argument("--skip-soak", action="store_true", help="preflight and diagnostics only")
