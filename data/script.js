@@ -7209,6 +7209,233 @@ function saveRaceChanges() {
     });
 }
 
+// ---- Firmware updates over the air ----
+//
+// A full update is two uploads against ElegantOTA: the filesystem first, then
+// the firmware, then one reboot. ElegantOTA's own auto-reboot is disabled in
+// firmware precisely so the order can be controlled here; restarting between
+// the two would leave new firmware running against the old filesystem.
+//
+// The contract is GET /ota/start?mode=fs|firmware followed by a multipart POST
+// to /ota/upload.
+
+let otaDeviceInfo = null;
+
+function otaLog(message, isError) {
+  const box = document.getElementById("otaLog");
+  if (!box) return;
+  box.style.display = "block";
+  const line = document.createElement("div");
+  if (isError) line.className = "ota-log-error";
+  line.textContent = message;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function otaProgress(percent, text) {
+  const wrap = document.getElementById("otaProgressWrap");
+  const bar = document.getElementById("otaProgressBar");
+  const label = document.getElementById("otaProgressText");
+  if (!wrap) return;
+  wrap.style.display = "block";
+  if (bar) bar.style.width = Math.max(0, Math.min(100, percent)) + "%";
+  if (label) label.textContent = text || "";
+}
+
+function formatBytes(n) {
+  if (!n && n !== 0) return "unknown";
+  if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
+  if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
+  return n + " B";
+}
+
+// Reads what the device is and how much room it has. Everything the update
+// path refuses to do depends on this, so a failure here disables the button
+// rather than letting an unchecked update proceed.
+function loadOtaDeviceInfo() {
+  const box = document.getElementById("otaDeviceInfo");
+  const button = document.getElementById("otaStartBtn");
+  if (!box) return Promise.resolve(null);
+
+  return fetch("/api/system/info")
+    .then((r) => {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then((info) => {
+      otaDeviceInfo = info;
+      const fsSize = info.filesystem ? info.filesystem.size : null;
+      const appSize = info.app ? info.app.updateSize || info.app.size : null;
+      box.innerHTML =
+        `<strong>${info.board || "unknown board"}</strong> &middot; ` +
+        `${i18n.t("settings.firmware.running")} ${info.version || "?"}<br>` +
+        `<span class="ota-device-sizes">` +
+        `${i18n.t("settings.firmware.space_app")} ${formatBytes(appSize)} &middot; ` +
+        `${i18n.t("settings.firmware.space_fs")} ${formatBytes(fsSize)}` +
+        `</span>`;
+      if (info.board === "unknown") {
+        showOtaWarning(i18n.t("settings.firmware.warn_unknown_board"));
+      }
+      if (button) button.disabled = false;
+      return info;
+    })
+    .catch((err) => {
+      console.error("Could not read device info:", err);
+      // Older firmware has no /api/system/info. Updating without knowing the
+      // board or the partition sizes is exactly how a device gets bricked, so
+      // this path stays disabled rather than guessing.
+      box.textContent = i18n.t("settings.firmware.info_unavailable");
+      if (button) button.disabled = true;
+      return null;
+    });
+}
+
+function showOtaWarning(message) {
+  const el = document.getElementById("otaWarning");
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = message ? "block" : "none";
+}
+
+// Refuses an image that cannot fit the partition it is destined for. Without
+// this the write fails part way through, which for the firmware slot means a
+// device that will not boot.
+function checkOtaSizes(firmwareFile, filesystemFile) {
+  const problems = [];
+  if (!otaDeviceInfo) return problems;
+  const appSize = otaDeviceInfo.app
+    ? otaDeviceInfo.app.updateSize || otaDeviceInfo.app.size
+    : null;
+  const fsSize = otaDeviceInfo.filesystem ? otaDeviceInfo.filesystem.size : null;
+
+  if (firmwareFile && appSize && firmwareFile.size > appSize) {
+    problems.push(
+      i18n.t("settings.firmware.err_too_big_app", {
+        size: formatBytes(firmwareFile.size),
+        max: formatBytes(appSize),
+      })
+    );
+  }
+  if (filesystemFile && fsSize && filesystemFile.size > fsSize) {
+    problems.push(
+      i18n.t("settings.firmware.err_too_big_fs", {
+        size: formatBytes(filesystemFile.size),
+        max: formatBytes(fsSize),
+      })
+    );
+  }
+  return problems;
+}
+
+// One upload. XMLHttpRequest rather than fetch because fetch still cannot
+// report upload progress, and a multi-megabyte write with no feedback looks
+// indistinguishable from a hang.
+function otaUpload(file, mode, label) {
+  return fetch(`/ota/start?mode=${mode}`)
+    .then((r) => {
+      if (!r.ok) return r.text().then((t) => { throw new Error(`start failed: ${t || r.status}`); });
+      return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/ota/upload");
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = (e.loaded / e.total) * 100;
+          otaProgress(pct, `${label} ${Math.round(pct)}% (${formatBytes(e.loaded)} of ${formatBytes(e.total)})`);
+        };
+        xhr.onload = () => {
+          if (xhr.status === 200) resolve();
+          else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error("connection lost during upload"));
+        xhr.ontimeout = () => reject(new Error("upload timed out"));
+        xhr.timeout = 180000;
+        xhr.send(form);
+      });
+    });
+}
+
+// Polls until the gate answers again, so the user is told when it is back
+// rather than being left to guess.
+function waitForReboot(timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 45000);
+  const attempt = () =>
+    fetch("/version", { cache: "no-store" })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("not ready"))))
+      .catch(() => {
+        if (Date.now() > deadline) throw new Error("gate did not come back in time");
+        return new Promise((r) => setTimeout(r, 1500)).then(attempt);
+      });
+  return new Promise((r) => setTimeout(r, 4000)).then(attempt);
+}
+
+function startOtaUpdate() {
+  const firmwareInput = document.getElementById("otaFirmwareFile");
+  const filesystemInput = document.getElementById("otaFilesystemFile");
+  const button = document.getElementById("otaStartBtn");
+  const firmwareFile = firmwareInput && firmwareInput.files[0];
+  const filesystemFile = filesystemInput && filesystemInput.files[0];
+
+  if (!firmwareFile && !filesystemFile) {
+    alert(i18n.t("settings.firmware.err_no_file"));
+    return;
+  }
+
+  const problems = checkOtaSizes(firmwareFile, filesystemFile);
+  if (problems.length) {
+    showOtaWarning(problems.join(" "));
+    return;
+  }
+  showOtaWarning("");
+
+  if (!confirm(i18n.t("settings.firmware.confirm"))) return;
+
+  button.disabled = true;
+  otaProgress(0, "");
+  otaLog(i18n.t("settings.firmware.log_start"));
+
+  // Filesystem first. If the firmware went first and the filesystem upload then
+  // failed, the device would be left running new firmware against an old web
+  // UI, which is harder to recover from than the reverse.
+  let chain = Promise.resolve();
+  if (filesystemFile) {
+    chain = chain.then(() => {
+      otaLog(`${i18n.t("settings.firmware.log_fs")} (${formatBytes(filesystemFile.size)})`);
+      return otaUpload(filesystemFile, "fs", i18n.t("settings.firmware.label_fs"));
+    });
+  }
+  if (firmwareFile) {
+    chain = chain.then(() => {
+      otaLog(`${i18n.t("settings.firmware.log_fw")} (${formatBytes(firmwareFile.size)})`);
+      return otaUpload(firmwareFile, "firmware", i18n.t("settings.firmware.label_fw"));
+    });
+  }
+
+  chain
+    .then(() => {
+      otaLog(i18n.t("settings.firmware.log_rebooting"));
+      otaProgress(100, i18n.t("settings.firmware.label_rebooting"));
+      return fetch("/api/system/reboot", { method: "POST" }).catch(() => {
+        // The device may drop the connection as it goes down; that is not a
+        // failure of the update itself.
+      });
+    })
+    .then(() => waitForReboot())
+    .then((version) => {
+      otaLog(i18n.t("settings.firmware.log_done", { version: (version || "").trim() }));
+      otaProgress(100, i18n.t("settings.firmware.label_done"));
+      setTimeout(() => window.location.reload(), 2500);
+    })
+    .catch((err) => {
+      console.error("OTA update failed:", err);
+      otaLog(i18n.t("settings.firmware.log_failed", { error: err.message }), true);
+      otaProgress(0, i18n.t("settings.firmware.label_failed"));
+      showOtaWarning(i18n.t("settings.firmware.err_recovery"));
+      button.disabled = false;
+    });
+}
+
 function clearAllRaces() {
   if (!confirm(i18n.t("messages.confirm_clear_history"))) return;
 
@@ -9471,6 +9698,10 @@ function openSettingsModal() {
   if (modal) {
   modal.classList.add("active");
     syncOpenRaceNotesOnRaceEndToggle();
+
+    // Refresh each time the modal opens rather than once at page load, so the
+    // panel reflects the device after an update without needing a reload.
+    loadOtaDeviceInfo();
 
     // Load full config to populate all settings
     _refreshingFromDevice = true;
