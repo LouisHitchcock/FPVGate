@@ -87,3 +87,25 @@ voice_<...>/
 - `../docs/VOICE_GENERATION_README.md`
 - `../docs/MULTI_VOICE_SETUP.md`
 - `../docs/SD_CARD_MIGRATION_GUIDE.md`
+
+## stress_test.py
+
+Whole-system stress test against a running gate. Drives every significant HTTP
+path at once, over USB networking and WiFi simultaneously if both are available,
+verifies each response against its Content-Length, and samples the device heap
+throughout.
+
+```
+python tools/stress_test.py --usb 192.168.7.1 --bind 192.168.7.2
+python tools/stress_test.py --usb 192.168.7.1 --bind 192.168.7.2     --wifi 192.168.0.225 --duration 900 --workers 3 --out report.json
+```
+
+`--bind` is required for USB: without a source address the request can leave via
+the wrong interface. The marshal RSSI endpoint is discovered automatically from
+`/races` and included if any race has a stored trace, since that is the chunked
+response path. Exits non-zero if any request failed.
+
+A truncated body is the signature of the RNDIS transmit stall and does not raise
+on its own, so responses are checked against their declared length rather than
+just their status code.
+
