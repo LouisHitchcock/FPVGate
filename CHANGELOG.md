@@ -1,6 +1,38 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
+## [Unreleased]
+
+Development towards 1.8.0. Builds from `main` report `1.8.0-dev`.
+
+### Added
+- Visual Marshal: RotorHazard-style RSSI graph for reviewing and editing lap
+  times, with the RSSI trace recorded to an SD sidecar during each race
+- Merged race editor: Edit and Marshal are now a single screen, with race
+  details alongside the graph. Races without an RSSI trace fall back to typed
+  lap entry
+- `docs/BATTERY_MONITORING.md` covering divider sizing, the settings, per-board
+  defaults, calibration and troubleshooting
+
+### Changed
+- 8MB partition table: `spiffs` grown from 1MB to 3.875MB and a `coredump`
+  partition added, using flash that was previously unallocated. `nvs`, `otadata`,
+  `app0` and `app1` keep their offsets and sizes, so OTA app updates are
+  unaffected
+- Battery monitoring documentation corrected: the low battery alert is raised by
+  the browser, not by the gate
+
+### Fixed
+- Race history is sorted newest-first. Race files are named `DDMMYY-HHMMSS`, so
+  without an explicit sort a race from 2 August ordered ahead of one from
+  11 September and recent races appeared last
+
+### Upgrade note
+Devices that update over the air receive the app only and keep their existing
+1MB partition table, so they cannot take a filesystem image built against the new
+one. Migrating requires a single full reflash of bootloader, partitions, firmware
+and filesystem.
+
 ## [1.7.3] - 2026-05-18
 
 ### Added
