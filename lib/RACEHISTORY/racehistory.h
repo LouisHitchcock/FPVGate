@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <vector>
 #include "storage.h"
+#include "race_rssi_recorder.h"
 
 #define MAX_RACES 50
 #define RACES_DIR "/races"
@@ -41,12 +42,16 @@ struct RaceSession {
     // Multi-pilot support
     uint8_t syncMode;  // 0=personal, 1=master, 2=slave
     std::vector<PilotData> pilots;  // Empty for legacy single-pilot races
+
+    // Marshal RSSI history metadata (samples live in sidecar .rssi file)
+    RaceRssiMeta rssiMeta;
 };
 
 class RaceHistory {
    public:
     RaceHistory();
     bool init(Storage* storage);
+    void setRssiRecorder(RaceRssiRecorder* recorder);
     bool saveRace(const RaceSession& race);
     bool loadRaces();
     bool deleteRace(uint32_t timestamp);
@@ -57,10 +62,17 @@ class RaceHistory {
     bool fromJsonString(const String& json);
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
+    bool getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const;
 
    private:
     std::vector<RaceSession> races;
     Storage* storage;
+    RaceRssiRecorder* rssiRecorder;
+
+    void writeRaceObject(JsonObject raceObj, const RaceSession& race) const;
+    void readRssiMeta(JsonObject raceObj, RaceSession& race) const;
+    bool writeRaceFile(const RaceSession& race);
+    void deleteSidecar(const RaceSession& race);
 };
 
 #endif

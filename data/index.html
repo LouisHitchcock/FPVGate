@@ -318,34 +318,116 @@
       </div>
     </footer>
 
-    <!-- Edit Race Modal -->
-    <div id="editRaceModal" class="modal" style="display: none" onclick="closeEditModalOnBackdrop(event)">
-      <div class="modal-content" style="max-width: 600px; max-height: 80vh; overflow-y: auto">
-        <h3 data-i18n="history.edit_modal_title">Edit Race Details & Laps (Marshalling Mode)</h3>
-        <div class="config-item">
-          <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
-          <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
-        </div>
-        <div class="config-item">
-          <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
-          <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
-        </div>
-        <div class="config-item">
-          <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
-          <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
-        </div>
-        <div class="config-item" style="align-items: flex-start">
-          <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
-          <textarea id="raceEditNotes" maxlength="300" rows="3" placeholder="Optional notes about this race..." style="flex: 1; padding: 8px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--primary-color); font-family: inherit; resize: vertical" data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
+    <!-- Marshal Visual Graph Modal -->
+    <div id="marshalModal" class="modal" style="display: none" onclick="closeMarshalModalOnBackdrop(event)" role="dialog" aria-modal="true" aria-labelledby="marshalTitle">
+      <div class="modal-content marshal-modal-content">
+        <div class="marshal-header">
+          <div>
+            <h3 id="marshalTitle" style="margin: 0" data-i18n="history.edit_modal_title">Edit Race</h3>
+            <p id="marshalMeta" class="marshal-meta" aria-live="polite"></p>
+          </div>
+          <button type="button" onclick="closeMarshalModal()" class="marshal-btn marshal-btn-secondary" data-i18n="history.close">Close</button>
         </div>
 
-        <h4 style="margin-top: 24px; margin-bottom: 12px" data-i18n="history.edit_lap_times">Lap Times</h4>
-        <div id="editLapsList" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px"></div>
-        <button onclick="addNewLapToEdit()" style="width: 100%; background-color: var(--accent-color); margin-bottom: 16px" data-i18n="history.edit_add_lap">+ Add Lap</button>
+        <div class="marshal-guide" id="marshalGuide" role="note">
+          <button type="button" id="marshalGuideToggle" class="marshal-guide-toggle" aria-expanded="true" aria-controls="marshalGuideBody" onclick="toggleMarshalGuide()">
+            <span data-i18n="history.marshal_how_title">How to use</span>
+            <span id="marshalGuideChevron" class="marshal-guide-chevron" aria-hidden="true">▾</span>
+          </button>
+          <div id="marshalGuideBody" class="marshal-guide-body">
+            <ol class="marshal-guide-list">
+              <li data-i18n="history.marshal_how_1">Blue line = recorded RSSI. Peaks are gate crossings.</li>
+              <li data-i18n="history.marshal_how_2">Click Gate 1 / Lap N in the list or graph to select. Ctrl+click to multi-select.</li>
+              <li data-i18n="history.marshal_how_3">Drag a marker left/right to move its time. Scroll to zoom, drag background to pan.</li>
+              <li data-i18n="history.marshal_how_4">Click empty space near a peak to add a missing crossing.</li>
+              <li data-i18n="history.marshal_how_5">Delete selected crossings, or Recalculate from Enter/Exit lines, then Save.</li>
+            </ol>
+          </div>
+        </div>
 
-        <div style="display: flex; gap: 12px">
-          <button onclick="saveRaceEdit()" style="flex: 1" data-i18n="history.edit_save">Save Changes</button>
-          <button onclick="closeEditModal()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="modals.track.cancel">Cancel</button>
+        <div class="marshal-layout">
+          <div class="marshal-graph-col">
+            <div class="marshal-chart-wrap" id="marshalChartWrap">
+              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select."></canvas>
+              <div class="marshal-zoom-controls">
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomReset()" data-i18n="history.marshal_zoom_reset">Reset</button>
+              </div>
+            </div>
+
+            <div id="marshalNoHistory" class="marshal-no-history" style="display: none" data-i18n="history.marshal_no_history">
+              No RSSI history for this race. Lap times can only be edited on the graph, so they are read-only here.
+            </div>
+
+            <div class="marshal-legend" id="marshalLegend" aria-hidden="false">
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-rssi"></span><span data-i18n="history.marshal_legend_rssi">RSSI signal</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-enter"></span><span data-i18n="history.marshal_legend_enter">Enter threshold</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-exit"></span><span data-i18n="history.marshal_legend_exit">Exit threshold</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-pass"></span><span data-i18n="history.marshal_legend_pass">Crossing marker</span></span>
+              <span class="marshal-legend-item"><span class="marshal-swatch marshal-swatch-selected"></span><span data-i18n="history.marshal_legend_selected">Selected crossing</span></span>
+            </div>
+
+            <p id="marshalSelectionStatus" class="marshal-selection-status" aria-live="polite" data-i18n="history.marshal_none_selected">No crossing selected. Click a list item or graph marker.</p>
+            <p id="marshalTruncated" class="marshal-truncated" style="display: none" data-i18n="history.marshal_truncated">History truncated</p>
+
+            <div class="calib-threshold-grid marshal-thresholds" id="marshalThresholds">
+              <div class="calib-threshold-item">
+                <div class="calib-threshold-header">
+                  <label for="marshalEnter" data-i18n="calib.enter_rssi">Enter RSSI</label>
+                  <span id="marshalEnterSpan" class="calib-threshold-value">120</span>
+                </div>
+                <input type="range" min="50" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="50" aria-valuemax="255" />
+                <div class="calib-threshold-hint" data-i18n="history.marshal_enter_hint">Used only for Recalculate preview (does not change device config)</div>
+              </div>
+              <div class="calib-threshold-item">
+                <div class="calib-threshold-header">
+                  <label for="marshalExit" data-i18n="calib.exit_rssi">Exit RSSI</label>
+                  <span id="marshalExitSpan" class="calib-threshold-value">100</span>
+                </div>
+                <input type="range" min="50" max="255" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="50" aria-valuemax="255" />
+                <div class="calib-threshold-hint" data-i18n="history.marshal_exit_hint">Used only for Recalculate preview (does not change device config)</div>
+              </div>
+            </div>
+
+            <div class="marshal-actions">
+              <button type="button" id="marshalRecalcBtn" onclick="marshalRecalculate()" class="marshal-btn" data-i18n="history.marshal_recalc">Recalculate Laps</button>
+              <button type="button" id="marshalDeleteBtn" onclick="marshalDeleteSelected()" class="marshal-btn marshal-btn-danger" disabled data-i18n="history.marshal_delete_pass">Delete Selected Pass</button>
+              <button type="button" onclick="saveRaceChanges()" class="marshal-btn marshal-btn-primary" data-i18n="history.edit_save">Save Changes</button>
+            </div>
+          </div>
+
+          <aside class="marshal-list-col" aria-label="Pass list">
+            <h4 class="marshal-list-title" data-i18n="history.marshal_passes_title">Lap Times</h4>
+            <p id="marshalListHint" class="marshal-list-hint" data-i18n="history.marshal_list_hint">Click a lap to locate it on the graph.</p>
+            <div id="marshalLapsList" class="marshal-laps-list" role="listbox" aria-label="Recorded gate passes"></div>
+
+            <!-- Shown only when a race has no RSSI trace. With no graph to drag
+                 markers on, typed entry is the only way to correct lap times. -->
+            <p id="marshalLapEditHint" class="marshal-list-hint" style="display: none" data-i18n="history.edit_lap_hint">No graph for this race, so lap times are typed in seconds.</p>
+            <div id="marshalLapEditList" class="marshal-laps-list" style="display: none"></div>
+            <button type="button" id="marshalAddLapBtn" class="marshal-btn" style="display: none; width: 100%; margin-top: 8px" onclick="addLapToEditor()" data-i18n="history.edit_add_lap">+ Add Lap</button>
+          </aside>
+
+          <aside class="marshal-details-col" aria-label="Race details">
+            <h4 class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</h4>
+            <div class="marshal-field">
+              <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
+              <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
+              <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
+              <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
+              <textarea id="raceEditNotes" maxlength="300" rows="4" placeholder="Optional notes about this race..." data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
+            </div>
+          </aside>
         </div>
       </div>
     </div>

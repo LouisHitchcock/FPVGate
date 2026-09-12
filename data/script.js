@@ -3342,16 +3342,6 @@ function stopRace() {
   const currentLapTimerEl = document.getElementById("currentLapTimer");
   if (currentLapTimerEl) currentLapTimerEl.textContent = "00:00:00s";
 
-  fetch("/timer/stop", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-  })
-    .then((response) => response.json())
-    .then((response) => console.log("/timer/stop:" + JSON.stringify(response)));
-
   stopRaceButton.disabled = true;
   startRaceButton.disabled = false;
   addLapButton.disabled = true;
@@ -3360,16 +3350,38 @@ function stopRace() {
   stopDistancePolling();
 
   const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
-  // Auto-save race if there are laps
-  if (lapTimes.length > 0) {
-    saveCurrentRace().then(() => {
-      if (shouldOpenRaceNotes) {
-        openRaceNotesModal();
-      }
+  const afterStop = () => {
+    // Auto-save after stop so the device can finalize its RSSI capture before
+    // saveCurrentRace attaches the sidecar to the race.
+    if (lapTimes.length > 0) {
+      return saveCurrentRace().then(() => {
+        if (shouldOpenRaceNotes) {
+          openRaceNotesModal();
+        }
+      });
+    }
+    if (shouldOpenRaceNotes) {
+      openRaceNotesModal();
+    }
+    return Promise.resolve();
+  };
+
+  fetch("/timer/stop", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  })
+    .then((response) => response.json())
+    .then((response) => {
+      console.log("/timer/stop:" + JSON.stringify(response));
+      return afterStop();
+    })
+    .catch((err) => {
+      console.error("Failed to stop timer:", err);
+      return afterStop();
     });
-  } else if (shouldOpenRaceNotes) {
-    openRaceNotesModal();
-  }
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
   // This allows the lap analysis to remain visible after the race ends
@@ -5138,14 +5150,19 @@ function saveCurrentRace(options = {}) {
   return pendingRaceSavePromise;
 }
 
-function loadRaceHistory() {
-  fetch("/races")
+function loadRaceHistory(onLoaded) {
+  return fetch("/races")
     .then((response) => response.json())
     .then((data) => {
       raceHistoryData = data.races || [];
       renderRaceHistory();
+      if (typeof onLoaded === "function") onLoaded(raceHistoryData);
+      return raceHistoryData;
     })
-    .catch((error) => console.error("Error loading races:", error));
+    .catch((error) => {
+      console.error("Error loading races:", error);
+      return null;
+    });
 }
 
 function renderRaceHistory() {
@@ -5266,9 +5283,9 @@ function setupRaceHistoryEventHandlers() {
       event.stopPropagation();
       const action = button.getAttribute("data-action");
       
-      if (action === "edit") {
+      if (action === "edit" || action === "marshal") {
         const index = parseInt(button.getAttribute("data-index"));
-        openEditModal(index);
+        openRaceEditor(index);
       } else if (action === "download") {
         const timestamp = parseInt(button.getAttribute("data-timestamp"));
         downloadSingleRace(timestamp);
@@ -6141,176 +6158,6 @@ function downloadSingleRace(timestamp) {
   window.open("/races/downloadOne?timestamp=" + timestamp, "_blank");
 }
 
-let editingRaceIndex = null;
-
-function openEditModal(index) {
-  editingRaceIndex = index;
-  const race = raceHistoryData[index];
-
-  document.getElementById("raceName").value = race.name || "";
-  document.getElementById("raceTag").value = race.tag || "";
-  document.getElementById("raceDistance").value = race.totalDistance || 0;
-  document.getElementById("raceEditNotes").value = race.notes || "";
-
-  // Populate lap times for marshalling mode
-  renderEditLapsList(race.lapTimes);
-
-  document.getElementById("editRaceModal").style.display = "flex";
-}
-
-function renderEditLapsList(lapTimes) {
-  const container = document.getElementById("editLapsList");
-  let html = "";
-
-  lapTimes.forEach((lapTime, index) => {
-    const lapSeconds = (lapTime / 1000).toFixed(3);
-    const lapLabel = index === 0 ? i18n.t("race.gate1") : i18n.t("race.lap_counter", { n: index });
-    html += `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background-color: var(--bg-secondary); border-radius: 4px;">
-        <span style="min-width: 60px; font-weight: ${index === 0 ? "bold" : "normal"}; color: ${index === 0 ? "var(--accent-color)" : "var(--primary-color)"}">${lapLabel}</span>
-        <input type="number" step="0.001" min="0" value="${lapSeconds}" 
-               data-lap-index="${index}" 
-               style="flex: 1; padding: 6px; background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--primary-color);" 
-               title="Edit lap time in seconds" />
-        <span style="min-width: 20px;">s</span>
-        <button onclick="deleteLapFromEdit(${index})" 
-                style="padding: 4px 10px; background-color: var(--danger-color); border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 18px; line-height: 1;" 
-                title="Delete this lap">&times;</button>
-      </div>
-    `;
-  });
-
-  container.innerHTML = html;
-}
-
-function deleteLapFromEdit(index) {
-  if (editingRaceIndex === null) return;
-  const race = raceHistoryData[editingRaceIndex];
-
-  if (race.lapTimes.length <= 1) {
-    alert(i18n.t("history.edit_lap_last_error"));
-    return;
-  }
-
-  if (confirm(i18n.t("history.edit_lap_delete_confirm"))) {
-    race.lapTimes.splice(index, 1);
-    renderEditLapsList(race.lapTimes);
-  }
-}
-
-function addNewLapToEdit() {
-  if (editingRaceIndex === null) return;
-  const race = raceHistoryData[editingRaceIndex];
-
-  // Add a new lap with a default value (average of existing laps)
-  let defaultValue = 0;
-  if (race.lapTimes.length > 0) {
-    const sum = race.lapTimes.reduce((a, b) => a + b, 0);
-    defaultValue = Math.round(sum / race.lapTimes.length);
-  } else {
-    defaultValue = 10000; // 10 seconds default
-  }
-
-  race.lapTimes.push(defaultValue);
-  renderEditLapsList(race.lapTimes);
-
-  // Scroll to bottom to show the new lap
-  const container = document.getElementById("editLapsList");
-  container.scrollTop = container.scrollHeight;
-}
-
-function closeEditModal() {
-  document.getElementById("editRaceModal").style.display = "none";
-  editingRaceIndex = null;
-}
-
-function closeEditModalOnBackdrop(event) {
-  // Only close if clicking the backdrop (not the modal content)
-  if (event.target.id === "editRaceModal") {
-    closeEditModal();
-  }
-}
-
-function saveRaceEdit() {
-  if (editingRaceIndex === null) return;
-
-  const race = raceHistoryData[editingRaceIndex];
-  const name = document.getElementById("raceName").value;
-  const tag = document.getElementById("raceTag").value;
-  const distance = parseFloat(document.getElementById("raceDistance").value) || 0;
-  const notes = document.getElementById("raceEditNotes").value.trim();
-
-  // Collect updated lap times from inputs
-  const lapInputs = document.querySelectorAll('#editLapsList input[type="number"]');
-  const updatedLapTimes = [];
-  let hasError = false;
-
-  lapInputs.forEach((input) => {
-    const value = parseFloat(input.value);
-    if (isNaN(value) || value <= 0) {
-      hasError = true;
-      input.style.borderColor = "#e74c3c";
-    } else {
-      input.style.borderColor = "";
-      // Convert seconds to milliseconds
-      updatedLapTimes.push(Math.round(value * 1000));
-    }
-  });
-
-  if (hasError) {
-    alert(i18n.t("messages.race_edit_invalid_laps"));
-    return;
-  }
-
-  if (updatedLapTimes.length === 0) {
-    alert(i18n.t("messages.race_edit_no_laps"));
-    return;
-  }
-
-  // First update metadata (name/tag/distance)
-  const formData = new URLSearchParams();
-  formData.append("timestamp", race.timestamp);
-  formData.append("name", name);
-  formData.append("tag", tag);
-  formData.append("totalDistance", distance);
-  formData.append("notes", notes);
-
-  fetch("/races/update", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: formData,
-  })
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Race metadata updated:", data);
-
-      // Then update lap times if they changed
-      return fetch("/races/updateLaps", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          timestamp: race.timestamp,
-          lapTimes: updatedLapTimes,
-        }),
-      });
-    })
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Race laps updated:", data);
-      loadRaceHistory();
-      closeEditModal();
-    })
-    .catch((error) => {
-      console.error("Error updating race:", error);
-      alert(i18n.t("messages.race_update_error"));
-    });
-}
-
 function importRaces(input) {
   const file = input.files[0];
   if (!file) return;
@@ -6369,6 +6216,903 @@ function deleteRace(timestamp) {
       }
     })
     .catch((error) => console.error("Error deleting race:", error));
+}
+
+// ---- Visual Marshal (RH-style RSSI history) ----
+let marshalState = null;
+
+function segmentsToAbsPasses(lapTimes) {
+  const abs = [];
+  let t = 0;
+  for (let i = 0; i < lapTimes.length; i++) {
+    t += lapTimes[i];
+    abs.push(t);
+  }
+  return abs;
+}
+
+function absPassesToSegments(absPasses) {
+  const sorted = absPasses.slice().sort((a, b) => a - b);
+  const segs = [];
+  let prev = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const dt = Math.max(1, Math.round(sorted[i] - prev));
+    segs.push(dt);
+    prev = sorted[i];
+  }
+  return segs;
+}
+
+function marshalNormalizeSelection() {
+  if (!marshalState) return;
+  if (!Array.isArray(marshalState.selected)) {
+    const legacy = typeof marshalState.selected === "number" ? marshalState.selected : -1;
+    marshalState.selected = legacy >= 0 ? [legacy] : [];
+  }
+  marshalState.selected = marshalState.selected
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < marshalState.absPasses.length)
+    .sort((a, b) => a - b);
+}
+
+function marshalIsSelected(i) {
+  marshalNormalizeSelection();
+  return marshalState.selected.indexOf(i) >= 0;
+}
+
+function marshalPrimarySelected() {
+  marshalNormalizeSelection();
+  return marshalState.selected.length ? marshalState.selected[marshalState.selected.length - 1] : -1;
+}
+
+function marshalRaceDurationMs() {
+  if (!marshalState) return 1;
+  const n = marshalState.samples.length || 1;
+  return Math.max(1, (n - 1) * (marshalState.intervalMs || 20));
+}
+
+function marshalClampView() {
+  if (!marshalState) return;
+  const dur = marshalRaceDurationMs();
+  let span = Math.max(200, Math.min(dur, marshalState.viewSpanMs || dur));
+  let start = marshalState.viewStartMs || 0;
+  if (start < 0) start = 0;
+  if (start + span > dur) start = Math.max(0, dur - span);
+  marshalState.viewSpanMs = span;
+  marshalState.viewStartMs = start;
+}
+
+function marshalMsToX(ms, chart) {
+  const { padL, plotW } = chart;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || 1;
+  return padL + ((ms - start) / span) * plotW;
+}
+
+function marshalXToMs(x, chart) {
+  const { padL, plotW } = chart;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || 1;
+  const frac = (x - padL) / Math.max(1, plotW);
+  return start + frac * span;
+}
+
+function marshalSampleIndexAtMs(ms) {
+  const n = marshalState.samples.length || 1;
+  const idx = Math.round(ms / Math.max(1, marshalState.intervalMs || 20));
+  return Math.max(0, Math.min(n - 1, idx));
+}
+
+function marshalFindNearestMarker(ms, maxDistMs) {
+  let nearest = -1;
+  let nearestDist = Infinity;
+  marshalState.absPasses.forEach((p, i) => {
+    const d = Math.abs(p - ms);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = i;
+    }
+  });
+  if (nearest >= 0 && nearestDist <= maxDistMs) return nearest;
+  return -1;
+}
+
+function bindMarshalCanvasHandlers() {
+  const canvas = document.getElementById("marshalChart");
+  if (!canvas || canvas._marshalBound) return;
+  canvas._marshalBound = true;
+  canvas.addEventListener("wheel", onMarshalWheel, { passive: false });
+  canvas.addEventListener("pointerdown", onMarshalPointerDown);
+  canvas.addEventListener("pointermove", onMarshalPointerMove);
+  canvas.addEventListener("pointerup", onMarshalPointerUp);
+  canvas.addEventListener("pointercancel", onMarshalPointerUp);
+  canvas.addEventListener("pointerleave", onMarshalPointerUp);
+  canvas.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    marshalZoomReset();
+  });
+}
+
+// Shows or hides everything that only makes sense with an RSSI trace. Races
+// recorded before the marshal feature, or with no SD card in, still need to
+// open so their name, tag, distance and notes can be edited.
+function setMarshalGraphVisible(visible) {
+  const shown = visible ? "" : "none";
+  ["marshalChartWrap", "marshalLegend", "marshalThresholds", "marshalGuide"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = shown;
+  });
+  const placeholder = document.getElementById("marshalNoHistory");
+  if (placeholder) placeholder.style.display = visible ? "none" : "flex";
+  ["marshalRecalcBtn", "marshalDeleteBtn"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !visible;
+  });
+  const status = document.getElementById("marshalSelectionStatus");
+  if (status) status.style.display = shown;
+
+  // The graph-linked pass list and the typed list are alternatives; exactly one
+  // of them is on screen, so the panel never gets cluttered with both.
+  ["marshalLapsList", "marshalListHint"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = shown;
+  });
+  ["marshalLapEditList", "marshalLapEditHint", "marshalAddLapBtn"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = visible ? "none" : "";
+  });
+}
+
+// Typed lap entry for races with no RSSI trace. Edits a copy held on
+// marshalState, never raceHistoryData, so closing without saving discards them.
+function renderLapEditList() {
+  const container = document.getElementById("marshalLapEditList");
+  if (!container || !marshalState) return;
+  container.innerHTML = marshalState.editLaps
+    .map((ms, i) => {
+      const label = i === 0 ? i18n.t("race.gate1") : i18n.t("race.lap_counter", { n: i });
+      return `
+      <div class="marshal-lap-edit-row${i === 0 ? " is-gate" : ""}">
+        <span class="marshal-lap-edit-label">${label}</span>
+        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} time in seconds" />
+        <span>s</span>
+        <button type="button" class="marshal-btn marshal-btn-danger" onclick="deleteLapFromEditor(${i})" title="${i18n.t("history.delete")}">&times;</button>
+      </div>`;
+    })
+    .join("");
+}
+
+// Keeps typed values through a re-render, so adding or deleting a row does not
+// silently discard edits made to the other rows.
+function readLapEditInputs() {
+  return [...document.querySelectorAll("#marshalLapEditList input[type=\"number\"]")].map((input) => {
+    const seconds = parseFloat(input.value);
+    return { ms: Math.round(seconds * 1000), valid: !isNaN(seconds) && seconds > 0, input };
+  });
+}
+
+function syncLapEditState() {
+  if (!marshalState) return;
+  const rows = readLapEditInputs();
+  if (rows.length === marshalState.editLaps.length) {
+    rows.forEach((row, i) => {
+      if (row.valid) marshalState.editLaps[i] = row.ms;
+    });
+  }
+}
+
+function addLapToEditor() {
+  if (!marshalState) return;
+  syncLapEditState();
+  const laps = marshalState.editLaps;
+  const average = laps.length ? Math.round(laps.reduce((a, b) => a + b, 0) / laps.length) : 10000;
+  laps.push(average);
+  renderLapEditList();
+  const container = document.getElementById("marshalLapEditList");
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function deleteLapFromEditor(index) {
+  if (!marshalState) return;
+  if (marshalState.editLaps.length <= 1) {
+    alert(i18n.t("history.edit_lap_last_error"));
+    return;
+  }
+  if (!confirm(i18n.t("history.edit_lap_delete_confirm"))) return;
+  syncLapEditState();
+  marshalState.editLaps.splice(index, 1);
+  renderLapEditList();
+}
+
+function openRaceEditor(index) {
+  const race = raceHistoryData[index];
+  if (!race) return;
+  const hasHistory = !!(race.hasRssiHistory || (race.rssiHistory && race.rssiHistory.sampleCount));
+
+  marshalState = {
+    index,
+    race,
+    hasHistory,
+    // A copy, so closing without saving leaves raceHistoryData untouched.
+    editLaps: (race.lapTimes || []).slice(),
+    raceTimestamp: race.timestamp,
+    samples: [],
+    intervalMs: 20,
+    truncated: false,
+    absPasses: segmentsToAbsPasses(race.lapTimes || []),
+    selected: [],
+    enter: typeof enterRssi !== "undefined" ? enterRssi : 120,
+    exit: typeof exitRssi !== "undefined" ? exitRssi : 100,
+    viewStartMs: 0,
+    viewSpanMs: 1,
+    drag: null,
+    suppressClick: false,
+  };
+
+  document.getElementById("raceName").value = race.name || "";
+  document.getElementById("raceTag").value = race.tag || "";
+  document.getElementById("raceDistance").value = race.totalDistance || 0;
+  document.getElementById("raceEditNotes").value = race.notes || "";
+
+  setMarshalGraphVisible(hasHistory);
+  if (!hasHistory) renderLapEditList();
+  document.getElementById("marshalMeta").textContent = hasHistory
+    ? i18n.t("history.marshal_loading")
+    : i18n.t("history.marshal_no_history");
+  document.getElementById("marshalEnter").value = marshalState.enter;
+  document.getElementById("marshalExit").value = marshalState.exit;
+  document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
+  document.getElementById("marshalExitSpan").textContent = marshalState.exit;
+  document.getElementById("marshalTruncated").style.display = "none";
+  document.getElementById("marshalModal").style.display = "flex";
+  applyMarshalGuidePreference();
+  renderMarshalLapsList();
+  bindMarshalCanvasHandlers();
+
+  if (!hasHistory) {
+    return;
+  }
+
+  fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
+    .then((r) => {
+      if (!r.ok) throw new Error("no history HTTP " + r.status);
+      return r.json();
+    })
+    .then((data) => {
+      if (!data || !Array.isArray(data.samples)) {
+        console.error("[Marshal] Unexpected RSSI payload:", data);
+        throw new Error("invalid rssi payload");
+      }
+      marshalState.samples = data.samples;
+      marshalState.intervalMs = data.intervalMs || 20;
+      marshalState.truncated = !!data.truncated;
+      marshalState.viewStartMs = 0;
+      marshalState.viewSpanMs = marshalRaceDurationMs();
+      marshalClampView();
+      const dur = ((marshalState.samples.length * marshalState.intervalMs) / 1000).toFixed(1);
+      document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_meta", {
+        count: marshalState.samples.length,
+        interval: marshalState.intervalMs,
+        duration: dur,
+      });
+      document.getElementById("marshalTruncated").style.display = marshalState.truncated ? "inline" : "none";
+      drawMarshalChart();
+    })
+    .catch((err) => {
+      console.error("[Marshal] failed to load RSSI:", err);
+      document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_no_history");
+      drawMarshalChart();
+    });
+}
+
+function closeMarshalModal() {
+  document.getElementById("marshalModal").style.display = "none";
+  marshalState = null;
+}
+
+function closeMarshalModalOnBackdrop(event) {
+  if (event.target.id === "marshalModal") closeMarshalModal();
+}
+
+function updateMarshalThresholds() {
+  if (!marshalState) return;
+  marshalState.enter = parseInt(document.getElementById("marshalEnter").value, 10);
+  marshalState.exit = parseInt(document.getElementById("marshalExit").value, 10);
+  if (marshalState.exit >= marshalState.enter) {
+    marshalState.exit = Math.max(50, marshalState.enter - 1);
+    document.getElementById("marshalExit").value = marshalState.exit;
+  }
+  document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
+  document.getElementById("marshalExitSpan").textContent = marshalState.exit;
+  drawMarshalChart();
+}
+
+function marshalPassLabel(i) {
+  if (i === 0) return i18n.t("race.gate1");
+  return i18n.t("race.lap_counter", { n: i });
+}
+
+function toggleMarshalGuide() {
+  const guide = document.querySelector(".marshal-guide");
+  const toggle = document.getElementById("marshalGuideToggle");
+  if (!guide || !toggle) return;
+  const collapsed = guide.classList.toggle("is-collapsed");
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  try {
+    localStorage.setItem("marshalGuideCollapsed", collapsed ? "1" : "0");
+  } catch (e) {}
+}
+
+function applyMarshalGuidePreference() {
+  const guide = document.querySelector(".marshal-guide");
+  const toggle = document.getElementById("marshalGuideToggle");
+  if (!guide || !toggle) return;
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem("marshalGuideCollapsed") === "1";
+  } catch (e) {}
+  guide.classList.toggle("is-collapsed", collapsed);
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function updateMarshalSelectionUI() {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  const statusEl = document.getElementById("marshalSelectionStatus");
+  const deleteBtn = document.getElementById("marshalDeleteBtn");
+  const segs = absPassesToSegments(marshalState.absPasses);
+  const selected = marshalState.selected;
+
+  if (!selected.length) {
+    if (statusEl) statusEl.textContent = i18n.t("history.marshal_none_selected");
+    if (deleteBtn) deleteBtn.disabled = true;
+    return;
+  }
+
+  if (selected.length === 1) {
+    const i = selected[0];
+    if (statusEl) {
+      statusEl.textContent = i18n.t("history.marshal_selected", {
+        label: marshalPassLabel(i),
+        time: (marshalState.absPasses[i] / 1000).toFixed(3),
+        seg: (segs[i] / 1000).toFixed(3),
+      });
+    }
+  } else if (statusEl) {
+    statusEl.textContent = i18n.t("history.marshal_selected_multi", { count: selected.length });
+  }
+  if (deleteBtn) deleteBtn.disabled = false;
+}
+
+function renderMarshalLapsList() {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  const segs = absPassesToSegments(marshalState.absPasses);
+  const box = document.getElementById("marshalLapsList");
+  let html = "";
+  segs.forEach((ms, i) => {
+    const label = marshalPassLabel(i);
+    const sel = marshalIsSelected(i);
+    html += `<button type="button" role="option" aria-selected="${sel ? "true" : "false"}" class="marshal-pass-item${sel ? " is-selected" : ""}" onclick="marshalSelectPass(${i}, event)">
+      <div class="marshal-pass-label">${label}</div>
+      <div class="marshal-pass-time">${(ms / 1000).toFixed(3)}s</div>
+      <div class="marshal-pass-abs">${i18n.t("history.marshal_at", { time: (marshalState.absPasses[i] / 1000).toFixed(3) })}</div>
+    </button>`;
+  });
+  if (!segs.length) html = `<p class="no-data">-</p>`;
+  box.innerHTML = html;
+  updateMarshalSelectionUI();
+
+  const primary = marshalPrimarySelected();
+  if (primary >= 0) {
+    const selectedEls = box.querySelectorAll(".marshal-pass-item.is-selected");
+    const target = selectedEls[selectedEls.length - 1];
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function marshalSelectPass(i, ev) {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  const multi = !!(ev && (ev.ctrlKey || ev.metaKey));
+  if (multi) {
+    const pos = marshalState.selected.indexOf(i);
+    if (pos >= 0) marshalState.selected.splice(pos, 1);
+    else marshalState.selected.push(i);
+  } else if (marshalState.selected.length === 1 && marshalState.selected[0] === i) {
+    marshalState.selected = [];
+  } else {
+    marshalState.selected = [i];
+  }
+  marshalNormalizeSelection();
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function marshalDeleteSelected() {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  if (!marshalState.selected.length) return;
+  if (marshalState.absPasses.length - marshalState.selected.length < 1) {
+    alert(i18n.t("history.edit_lap_last_error"));
+    return;
+  }
+  const remove = new Set(marshalState.selected);
+  marshalState.absPasses = marshalState.absPasses.filter((_, idx) => !remove.has(idx));
+  marshalState.selected = [];
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function marshalZoomAt(centerMs, factor) {
+  if (!marshalState) return;
+  const dur = marshalRaceDurationMs();
+  const oldSpan = marshalState.viewSpanMs || dur;
+  const oldStart = marshalState.viewStartMs || 0;
+  const frac = oldSpan > 0 ? (centerMs - oldStart) / oldSpan : 0.5;
+  let newSpan = Math.max(200, Math.min(dur, oldSpan * factor));
+  let newStart = centerMs - frac * newSpan;
+  marshalState.viewSpanMs = newSpan;
+  marshalState.viewStartMs = newStart;
+  marshalClampView();
+  drawMarshalChart();
+}
+
+function marshalZoomIn() {
+  if (!marshalState) return;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || marshalRaceDurationMs();
+  marshalZoomAt(start + span / 2, 0.7);
+}
+
+function marshalZoomOut() {
+  if (!marshalState) return;
+  const start = marshalState.viewStartMs || 0;
+  const span = marshalState.viewSpanMs || marshalRaceDurationMs();
+  marshalZoomAt(start + span / 2, 1.4);
+}
+
+function marshalZoomReset() {
+  if (!marshalState) return;
+  marshalState.viewStartMs = 0;
+  marshalState.viewSpanMs = marshalRaceDurationMs();
+  marshalClampView();
+  drawMarshalChart();
+}
+
+function onMarshalWheel(ev) {
+  if (!marshalState || !marshalState._chart) return;
+  ev.preventDefault();
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const centerMs = marshalXToMs(x, marshalState._chart);
+  marshalZoomAt(centerMs, ev.deltaY < 0 ? 0.85 : 1.18);
+}
+
+function onMarshalPointerDown(ev) {
+  if (!marshalState || !marshalState._chart) return;
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const { padL, plotW } = marshalState._chart;
+  if (x < padL || x > padL + plotW) return;
+
+  const ms = marshalXToMs(x, marshalState._chart);
+  const hitPx = 14;
+  const hitMs = Math.abs(marshalXToMs(x + hitPx, marshalState._chart) - ms);
+  const nearest = marshalFindNearestMarker(ms, hitMs);
+
+  marshalState.suppressClick = false;
+  marshalState.drag = {
+    pointerId: ev.pointerId,
+    mode: nearest >= 0 ? "marker" : "pan",
+    startX: x,
+    lastX: x,
+    originStartMs: marshalState.viewStartMs || 0,
+    markerIndex: nearest,
+    moved: false,
+    multi: !!(ev.ctrlKey || ev.metaKey),
+  };
+
+  try {
+    canvas.setPointerCapture(ev.pointerId);
+  } catch (e) {}
+  canvas.style.cursor = nearest >= 0 ? "ew-resize" : "grabbing";
+  ev.preventDefault();
+}
+
+function onMarshalPointerMove(ev) {
+  if (!marshalState || !marshalState.drag || !marshalState._chart) return;
+  if (marshalState.drag.pointerId !== ev.pointerId) return;
+
+  const canvas = ev.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+  const dx = x - marshalState.drag.startX;
+  if (Math.abs(dx) > 3) {
+    marshalState.drag.moved = true;
+    marshalState.suppressClick = true;
+  }
+
+  if (marshalState.drag.mode === "pan") {
+    const msPerPx = (marshalState.viewSpanMs || 1) / Math.max(1, marshalState._chart.plotW);
+    marshalState.viewStartMs = marshalState.drag.originStartMs - dx * msPerPx;
+    marshalClampView();
+    drawMarshalChart();
+  } else if (marshalState.drag.mode === "marker" && marshalState.drag.markerIndex >= 0) {
+    let ms = Math.round(marshalXToMs(x, marshalState._chart));
+    ms = Math.max(0, Math.min(marshalRaceDurationMs(), ms));
+    // Snap to local peak while dragging for accuracy
+    const centerIdx = marshalSampleIndexAtMs(ms);
+    let peakIdx = centerIdx;
+    let peakVal = marshalState.samples[centerIdx] || 0;
+    const win = 3;
+    for (let i = Math.max(0, centerIdx - win); i <= Math.min(marshalState.samples.length - 1, centerIdx + win); i++) {
+      if (marshalState.samples[i] > peakVal) {
+        peakVal = marshalState.samples[i];
+        peakIdx = i;
+      }
+    }
+    marshalState.absPasses[marshalState.drag.markerIndex] = peakIdx * marshalState.intervalMs;
+    // Keep order stable while dragging one marker: resort and remap selection/drag index
+    const oldSelectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
+    const dragTime = marshalState.absPasses[marshalState.drag.markerIndex];
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.drag.markerIndex = marshalState.absPasses.indexOf(dragTime);
+    marshalState.selected = oldSelectedTimes
+      .map((t) => marshalState.absPasses.indexOf(t))
+      .filter((i) => i >= 0);
+    if (marshalState.selected.indexOf(marshalState.drag.markerIndex) < 0) {
+      marshalState.selected = [marshalState.drag.markerIndex];
+    }
+    renderMarshalLapsList();
+    drawMarshalChart();
+  }
+  marshalState.drag.lastX = x;
+  ev.preventDefault();
+}
+
+function onMarshalPointerUp(ev) {
+  if (!marshalState || !marshalState.drag) return;
+  if (marshalState.drag.pointerId !== ev.pointerId) return;
+  const canvas = ev.currentTarget;
+  const drag = marshalState.drag;
+  marshalState.drag = null;
+  canvas.style.cursor = "crosshair";
+  try {
+    canvas.releasePointerCapture(ev.pointerId);
+  } catch (e) {}
+
+  if (!drag.moved) {
+    // Treat as click selection / add
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const x = (ev.clientX - rect.left) * scaleX;
+    handleMarshalClickAtX(x, drag.multi);
+  } else {
+    // Finalize order after drag
+    const selectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.selected = selectedTimes
+      .map((t) => marshalState.absPasses.indexOf(t))
+      .filter((i) => i >= 0);
+    renderMarshalLapsList();
+    drawMarshalChart();
+  }
+  marshalState.suppressClick = false;
+}
+
+function handleMarshalClickAtX(x, multi) {
+  if (!marshalState || !marshalState._chart) return;
+  const { padL, plotW } = marshalState._chart;
+  if (x < padL || x > padL + plotW) return;
+
+  const ms = marshalXToMs(x, marshalState._chart);
+  const hitPx = 14;
+  const hitMs = Math.abs(marshalXToMs(x + hitPx, marshalState._chart) - ms);
+  const nearest = marshalFindNearestMarker(ms, Math.max(hitMs, marshalState.intervalMs * 4));
+
+  if (nearest >= 0) {
+    marshalNormalizeSelection();
+    if (multi) {
+      const pos = marshalState.selected.indexOf(nearest);
+      if (pos >= 0) marshalState.selected.splice(pos, 1);
+      else marshalState.selected.push(nearest);
+    } else if (marshalState.selected.length === 1 && marshalState.selected[0] === nearest) {
+      marshalState.selected = [];
+    } else {
+      marshalState.selected = [nearest];
+    }
+  } else if (!multi) {
+    // Add missing crossing near click, snapped to local peak
+    const idx = marshalSampleIndexAtMs(ms);
+    let peakIdx = idx;
+    let peakVal = marshalState.samples[idx] || 0;
+    const win = 5;
+    for (let i = Math.max(0, idx - win); i <= Math.min(marshalState.samples.length - 1, idx + win); i++) {
+      if (marshalState.samples[i] > peakVal) {
+        peakVal = marshalState.samples[i];
+        peakIdx = i;
+      }
+    }
+    const newMs = peakIdx * marshalState.intervalMs;
+    marshalState.absPasses.push(newMs);
+    marshalState.absPasses.sort((a, b) => a - b);
+    marshalState.selected = [marshalState.absPasses.indexOf(newMs)];
+  }
+
+  marshalNormalizeSelection();
+  renderMarshalLapsList();
+  drawMarshalChart();
+}
+
+function drawMarshalChart() {
+  if (!marshalState) return;
+  marshalNormalizeSelection();
+  const canvas = document.getElementById("marshalChart");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+  const padL = 44, padR = 14, padT = 18, padB = 30;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, w, h);
+
+  const samples = marshalState.samples;
+  const n = samples.length;
+  if (!n) {
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText(i18n.t("history.marshal_no_samples"), padL, h / 2);
+    return;
+  }
+
+  marshalClampView();
+  const viewStart = marshalState.viewStartMs || 0;
+  const viewSpan = marshalState.viewSpanMs || marshalRaceDurationMs();
+  const viewEnd = viewStart + viewSpan;
+  const i0 = Math.max(0, Math.floor(viewStart / marshalState.intervalMs) - 1);
+  const i1 = Math.min(n - 1, Math.ceil(viewEnd / marshalState.intervalMs) + 1);
+
+  let minV = 255, maxV = 0;
+  for (let i = i0; i <= i1; i++) {
+    if (samples[i] < minV) minV = samples[i];
+    if (samples[i] > maxV) maxV = samples[i];
+  }
+  minV = Math.max(0, Math.min(minV, marshalState.exit - 10));
+  maxV = Math.min(255, Math.max(maxV, marshalState.enter + 10));
+  if (maxV <= minV) maxV = minV + 1;
+
+  const chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV };
+  const xAtMs = (ms) => marshalMsToX(ms, chart);
+  const yAt = (v) => padT + (1 - (v - minV) / (maxV - minV)) * plotH;
+
+  // Grid
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (g / 4) * plotH;
+    ctx.moveTo(padL, y);
+    ctx.lineTo(padL + plotW, y);
+  }
+  ctx.stroke();
+
+  // Enter / exit
+  const enterY = yAt(marshalState.enter);
+  const exitY = yAt(marshalState.exit);
+  ctx.setLineDash([8, 5]);
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = "#ff4d4d";
+  ctx.beginPath();
+  ctx.moveTo(padL, enterY);
+  ctx.lineTo(padL + plotW, enterY);
+  ctx.stroke();
+  ctx.strokeStyle = "#ffb020";
+  ctx.beginPath();
+  ctx.moveTo(padL, exitY);
+  ctx.lineTo(padL + plotW, exitY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillStyle = "#ff8a80";
+  ctx.fillText("ENTER " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
+  ctx.fillStyle = "#ffd54f";
+  ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
+
+  // RSSI line in view
+  ctx.beginPath();
+  let started = false;
+  for (let i = i0; i <= i1; i++) {
+    const x = xAtMs(i * marshalState.intervalMs);
+    const y = yAt(samples[i]);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "#4da3ff";
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Markers
+  marshalState.absPasses.forEach((absMs, idx) => {
+    if (absMs < viewStart - marshalState.intervalMs || absMs > viewEnd + marshalState.intervalMs) return;
+    const si = marshalSampleIndexAtMs(absMs);
+    const x = xAtMs(absMs);
+    const y = yAt(samples[si]);
+    const selected = marshalIsSelected(idx);
+
+    if (selected) {
+      ctx.fillStyle = "rgba(255, 229, 102, 0.12)";
+      ctx.fillRect(x - 10, padT, 20, plotH);
+    }
+
+    ctx.strokeStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.lineWidth = selected ? 3.5 : 2;
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+
+    ctx.fillStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 7 : 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const badge = idx === 0 ? "G1" : "L" + idx;
+    ctx.font = "bold 11px sans-serif";
+    const tw = ctx.measureText(badge).width;
+    const bx = x - tw / 2 - 4;
+    const by = padT - 2;
+    ctx.fillStyle = selected ? "#ffe566" : "#ffffff";
+    ctx.fillRect(bx, by - 12, tw + 8, 14);
+    ctx.fillStyle = "#000000";
+    ctx.fillText(badge, bx + 4, by - 1);
+  });
+
+  // Axis labels for current view
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 12px sans-serif";
+  ctx.fillText(String(maxV), 6, padT + 10);
+  ctx.fillText(String(minV), 6, padT + plotH);
+  const startLabel = (viewStart / 1000).toFixed(1) + "s";
+  const endLabel = (viewEnd / 1000).toFixed(1) + "s";
+  ctx.fillText(startLabel, padL, h - 8);
+  ctx.fillText(endLabel, padL + plotW - ctx.measureText(endLabel).width, h - 8);
+
+  marshalState._chart = chart;
+}
+
+function marshalRecalculate() {
+  if (!marshalState || !marshalState.samples.length) return;
+  const samples = marshalState.samples;
+  const enter = marshalState.enter;
+  const exit = marshalState.exit;
+  const interval = marshalState.intervalMs;
+  const minLapMs = 2000;
+  const abs = [];
+  let crossing = false;
+  let peak = 0;
+  let peakIdx = 0;
+  let lastPass = -minLapMs;
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i];
+    if (!crossing && v >= enter) {
+      crossing = true;
+      peak = v;
+      peakIdx = i;
+    } else if (crossing) {
+      if (v > peak) {
+        peak = v;
+        peakIdx = i;
+      }
+      if (v < exit) {
+        const t = peakIdx * interval;
+        if (t - lastPass >= minLapMs) {
+          abs.push(t);
+          lastPass = t;
+        }
+        crossing = false;
+        peak = 0;
+      }
+    }
+  }
+  if (abs.length) {
+    marshalState.absPasses = abs;
+    marshalState.selected = [];
+    renderMarshalLapsList();
+    drawMarshalChart();
+  } else {
+    alert(i18n.t("history.marshal_recalc_none"));
+  }
+}
+
+function refreshRaceHistoryViews(timestamp) {
+  // Keep open race details/timeline/analytics in sync after lap edits
+  if (currentDetailRace && currentDetailRace.timestamp === timestamp) {
+    const idx = raceHistoryData.findIndex((r) => r.timestamp === timestamp);
+    if (idx >= 0) {
+      viewRaceDetails(idx);
+    }
+  }
+}
+
+// Both endpoints answer 200 with {"status":"ERROR"} on a failed write, so the
+// HTTP status alone never proves anything was saved.
+function assertSaved(data, what) {
+  if (!data || data.status !== "OK") {
+    throw new Error(what + " not saved: " + JSON.stringify(data));
+  }
+  return data;
+}
+
+function saveRaceChanges() {
+  if (!marshalState) return;
+  const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
+
+  const details = new URLSearchParams();
+  details.append("timestamp", ts);
+  details.append("name", document.getElementById("raceName").value);
+  details.append("tag", document.getElementById("raceTag").value);
+  details.append("totalDistance", parseFloat(document.getElementById("raceDistance").value) || 0);
+  details.append("notes", document.getElementById("raceEditNotes").value.trim());
+
+  // Lap times come from the graph when there is one, and from the typed list
+  // when there is not.
+  let segs;
+  if (marshalState.hasHistory) {
+    segs = absPassesToSegments(marshalState.absPasses);
+  } else {
+    const rows = readLapEditInputs();
+    rows.forEach((row) => row.input.classList.toggle("is-invalid", !row.valid));
+    if (rows.some((row) => !row.valid)) {
+      alert(i18n.t("messages.race_edit_invalid_laps"));
+      return;
+    }
+    segs = rows.map((row) => row.ms);
+  }
+  if (!segs.length) {
+    alert(i18n.t("messages.race_edit_no_laps"));
+    return;
+  }
+
+  fetch("/races/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: details,
+  })
+    .then((r) => r.json())
+    .then((data) => assertSaved(data, "Race details"))
+    .then(() => {
+      return fetch("/races/updateLaps", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
+      })
+        .then((r) => r.json())
+        .then((data) => assertSaved(data, "Lap times"));
+    })
+    .then(() => {
+      alert(i18n.t("history.marshal_saved"));
+      closeMarshalModal();
+      return loadRaceHistory(() => refreshRaceHistoryViews(ts));
+    })
+    .catch((err) => {
+      console.error("Error saving race:", err);
+      alert(i18n.t("messages.race_update_error"));
+    });
 }
 
 function clearAllRaces() {

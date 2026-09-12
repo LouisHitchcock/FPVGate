@@ -1,5 +1,6 @@
 #include "webserver.h"
 #include "version.h"
+#include "race_rssi_recorder.h"
 #include <ElegantOTA.h>
 
 #include <DNSServer.h>
@@ -7,6 +8,7 @@
 #include <LittleFS.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
+#include <memory>
 #include <vector>
 
 #include "debug.h"
@@ -1164,6 +1166,53 @@ EEPROM:\n\
     server.addHandler(configJsonHandler);
 
     // Race history endpoints
+    // Use /api/marshal/rssi (NOT under /races/*). ESPAsyncWebServer can treat
+    // /races as a prefix match, so /races/rssi previously returned the race list.
+    server.on("/api/marshal/rssi", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!request->hasParam("timestamp")) {
+            request->send(400, "application/json", "{\"status\":\"ERROR\",\"message\":\"Missing timestamp\"}");
+            return;
+        }
+        uint32_t timestamp = request->getParam("timestamp")->value().toInt();
+        RaceSession race;
+        if (!history->getRaceByTimestamp(timestamp, race) || !race.rssiMeta.hasHistory) {
+            DEBUG("[Marshal] RSSI lookup miss ts=%u hasHistory=%d\n", timestamp, race.rssiMeta.hasHistory ? 1 : 0);
+            request->send(404, "application/json", "{\"status\":\"ERROR\",\"message\":\"No RSSI history\"}");
+            return;
+        }
+        RaceRssiMeta meta;
+        std::vector<uint8_t> samples;
+        String file = race.rssiMeta.file;
+        if (!RaceRssiRecorder::loadSamples(storage, file, meta, samples)) {
+            String fallback = RaceRssiRecorder::sidecarBasenameForTimestamp(timestamp);
+            DEBUG("[Marshal] loadSamples failed for '%s', trying '%s'\n", file.c_str(), fallback.c_str());
+            if (!RaceRssiRecorder::loadSamples(storage, fallback, meta, samples)) {
+                request->send(404, "application/json", "{\"status\":\"ERROR\",\"message\":\"RSSI file missing\"}");
+                return;
+            }
+        }
+        DEBUG("[Marshal] Serving %u RSSI samples for ts=%u\n", (unsigned)samples.size(), timestamp);
+
+        // Stream the sample array instead of building it in one String. A
+        // 15-minute capture is 45000 samples, which as "255," text is ~180 KB
+        // on top of the sample vector and the copy request->send() would make
+        // of it. That does not fit in heap. The chunk callback emits a few
+        // hundred bytes at a time and keeps only the samples themselves.
+        auto stream = std::make_shared<MarshalRssiStream>();
+        stream->samples.swap(samples);
+        stream->head = String("{\"timestamp\":") + String(timestamp) +
+                       ",\"intervalMs\":" + String(meta.intervalMs) +
+                       ",\"sampleCount\":" + String((uint32_t)stream->samples.size()) +
+                       ",\"truncated\":" + (meta.truncated ? "true" : "false") +
+                       ",\"samples\":[";
+        request->send(request->beginChunkedResponse(
+            "application/json",
+            [stream](uint8_t *buffer, size_t maxLen, size_t) -> size_t {
+                return stream->fill(buffer, maxLen);
+            }));
+        led->on(200);
+    });
+
     server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = history->toJsonString();
         request->send(200, "application/json", json);

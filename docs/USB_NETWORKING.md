@@ -657,13 +657,15 @@ line after recovery gives the answer. 4=PANIC, 5=INT_WDT, 6=TASK_WDT, 7=WDT,
 
 ### 5.5 Diagnostics and tooling notes
 
-A coredump partition was added (`custom_8mb_coredump.csv`, AIO only, at
-0x510000/0x10000). The Arduino core already sets
-`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`, but the stock partition table gave it
-nowhere to write, so every panic was previously silent. Read and decode with:
+This work originally carried its own partition table,
+`custom_8mb_coredump.csv`, to add a coredump partition at 0x510000. That table
+is gone: `custom_8mb.csv` now carries a coredump partition for every 8MB board
+at **0x7F0000/0x10000**, alongside a much larger spiffs. The Arduino core already
+sets `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`, but the stock table gave it nowhere
+to write, so every panic was previously silent. Read and decode with:
 
 ```
-esptool ... --after no_reset read_flash 0x510000 0x10000 coredump.bin
+esptool ... --after no_reset read_flash 0x7F0000 0x10000 coredump.bin
 docker run --rm -v "<dir>:/w" -w /w espressif/idf:release-v5.4 \
   bash -lc "esp-coredump --chip esp32s3 info_corefile -t raw \
             -c /w/coredump.bin /w/firmware.elf"
