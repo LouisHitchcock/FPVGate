@@ -1171,16 +1171,22 @@ Track battery voltage during races.
 **Enable:** Configuration -> System Setup -> Battery Monitoring toggle
 
 **When Enabled:**
-- Current voltage displayed
-- Low battery alarm threshold setting
-- Audio/visual alerts when low
-- Voltage updates every 2 seconds
+- Current voltage and per-cell voltage displayed
+- Battery type (LiPo / LiPoHV / Li-Ion) and cell count
+- Voltage divider ratio, which must match the resistors fitted
+- Low battery alarm threshold, set per cell
+
+**Alerts are shown in the browser.** If no browser is connected to the gate,
+nothing warns you that the pack is low.
 
 **Wiring:**
-- Connect battery sense to GPIO1
-- Use voltage divider for >3.3V batteries
-- 1S: Direct connection OK
-- 2S+: Voltage divider required
+- The sense pin differs per board - GPIO1 on the AIO and Solo, GPIO0 on the
+  SuperMini and Seeed XIAO, GPIO3 on the LilyGO, GPIO5 on the Waveshare
+- A voltage divider is required for anything above 1S, and the ratio must be
+  entered in the settings or the reading will be wrong
+
+See **[Battery Monitoring](BATTERY_MONITORING.md)** for divider sizing,
+calibration and troubleshooting.
 
 ### Theme Selection
 

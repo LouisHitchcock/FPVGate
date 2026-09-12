@@ -808,46 +808,53 @@ For 100+ LED strips:
 
 ### Battery Monitoring Circuit
 
-Voltage divider for 2S-3S LiPo:
+The ESP32-S3 ADC reads up to about 3.3 V, and every LiPo pack is higher than
+that, so a resistor divider scales the pack voltage down to something the pin can
+survive. The firmware then multiplies back up using the **Voltage Divider Ratio**
+setting, which has to match the resistors you fit.
 
 ```
-Battery+ ─┬─ 10kΩ ─┬─ GPIO1
-          │        │
-         GND     10kΩ
-                  │
-                 GND
+Battery+ --+-- R1 --+-- ADC pin
+           |        |
+          GND       R2
+                    |
+                   GND
 ```
 
-**Calculation:**
-- 2S LiPo = 8.4V max
-- Divider ratio: 1/2 (10kΩ + 10kΩ)
-- GPIO1 sees: 4.2V max
--  Exceeds 3.3V safe limit!
-
-**Correct Divider (3S safe):**
 ```
-Battery+ ─┬─ 22kΩ ─┬─ GPIO1
-          │        │
-         GND     10kΩ
-                  │
-                 GND
+divider ratio = (R1 + R2) / R2
+pin voltage   = battery voltage / divider ratio
 ```
 
-- 3S LiPo = 12.6V max
-- Divider ratio: 10/(10+22) = 0.3125
-- GPIO1 sees: 12.6V × 0.3125 = 3.94V (still too high!)
+**Size the divider for the pack at full charge, not its nominal voltage.** These
+use common E12 values with `R2 = 10k`, targeting roughly 3.0 V at the pin when
+fully charged:
 
-**Safe 3S Divider:**
-```
-Battery+ ─┬─ 33kΩ ─┬─ GPIO1
-          │        │
-         GND     10kΩ
-                  │
-                 GND
-```
+| Pack | Max voltage | R1 | R2 | Ratio to enter | Pin sees at full charge |
+|---|---|---|---|---|---|
+| 1S | 4.2 V | 10k | 10k | 2.0 | 2.10 V |
+| 2S | 8.4 V | 22k | 10k | 3.2 | 2.63 V |
+| 3S | 12.6 V | 33k | 10k | 4.3 | 2.93 V |
+| 4S | 16.8 V | 47k | 10k | 5.7 | 2.95 V |
+| 6S | 25.2 V | 100k | 10k | 11.0 | 2.29 V |
 
-- Ratio: 10/(10+33) = 0.23
-- GPIO1 sees: 12.6V × 0.23 = 2.9V 
+**Never let the pin exceed 3.3 V.** The compiled-in default ratio on most boards
+is 2.0, which suits a 1S pack only. A fully charged 2S pack through a 2:1 divider
+puts 4.2 V on the pin and risks damaging it, so 2S and above need a larger
+divider *and* the matching ratio set in the UI.
+
+The ADC pin differs per board — GPIO1 on the AIO, Solo, XIAO S3 Plus and
+DevKitC-1; GPIO0 on the SuperMini and Seeed XIAO; GPIO3 on the LilyGO T-Energy
+S3; GPIO5 on the Waveshare LCD-2.
+
+> Fitting the resistors is only half the job. Until the **Voltage Divider Ratio**
+> in Configuration -> System Setup matches them, the hardware is safe but the
+> voltage displayed is wrong. Note the ratio is the reciprocal of the divider
+> fraction: a 33k/10k divider passes 0.23 of the pack voltage, and the ratio to
+> enter is 1 / 0.23 = 4.3.
+
+See **[Battery Monitoring](BATTERY_MONITORING.md)** for the settings, calibration
+against a multimeter, per-board defaults and troubleshooting.
 
 ---
 
