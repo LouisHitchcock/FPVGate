@@ -12,6 +12,15 @@
 
 #include <LittleFS.h>
 
+// Web assets ship gzipped: scripts/gzip_assets.py stages data/ as <name>.gz and
+// only that form is written to the filesystem image. ESPAsyncWebServer resolves
+// the .gz fallback itself when serving, but a bare LittleFS.exists() on the
+// uncompressed name does not, and would report a perfectly healthy filesystem
+// as missing its UI. Use this anywhere a web asset's presence is checked.
+inline bool webAssetExists(const String &path) {
+    return LittleFS.exists(path) || LittleFS.exists(path + ".gz");
+}
+
 class Storage {
    public:
     Storage();

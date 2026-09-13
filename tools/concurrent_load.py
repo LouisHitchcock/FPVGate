@@ -139,6 +139,10 @@ def main():
                         help="pause between page loads, letting TCP windows reset")
     parser.add_argument("--assets", nargs="*", default=DEFAULT_ASSETS,
                         help="override the asset list")
+    parser.add_argument("--concurrency", type=int, default=0,
+                        help="cap simultaneous requests (0 = all at once, as a "
+                             "browser with an empty cache does). Sweeping this "
+                             "finds how many connections the board can take.")
     args = parser.parse_args()
 
     print(f"concurrent load: {args.rounds} page loads of {len(args.assets)} assets "
@@ -155,10 +159,19 @@ def main():
     for index in range(args.rounds):
         results = []
         lock = threading.Lock()
+        # A semaphore rather than a thread pool, so that with the default of
+        # no cap every request really is in flight at the same instant.
+        gate = threading.Semaphore(args.concurrency) if args.concurrency else None
+
+        def run(path):
+            if gate is None:
+                fetch(args.host, path, args.timeout, results, lock)
+                return
+            with gate:
+                fetch(args.host, path, args.timeout, results, lock)
+
         started = time.time()
-        threads = [threading.Thread(target=fetch,
-                                    args=(args.host, path, args.timeout, results, lock))
-                   for path in args.assets]
+        threads = [threading.Thread(target=run, args=(path,)) for path in args.assets]
         for thread in threads:
             thread.start()
         for thread in threads:

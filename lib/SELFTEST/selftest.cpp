@@ -383,7 +383,7 @@ TestResult SelfTest::testAudio(Buzzer* buzzer) {
     buzzer->beep(100);
     delay(150);
 
-    bool audioJsExists = LittleFS.exists("/audio-announcer.js");
+    bool audioJsExists = webAssetExists("/audio-announcer.js");
     if (!audioJsExists) {
         return makeFail("Audio/Buzzer", "audio-announcer.js missing from LittleFS", start);
     }
@@ -425,9 +425,9 @@ TestResult SelfTest::testRaceHistory(RaceHistory* history) {
 
 TestResult SelfTest::testWebServer() {
     uint32_t start = millis();
-    bool indexExists  = LittleFS.exists("/index.html");
-    bool scriptExists = LittleFS.exists("/script.js");
-    bool styleExists  = LittleFS.exists("/style.css");
+    bool indexExists  = webAssetExists("/index.html");
+    bool scriptExists = webAssetExists("/script.js");
+    bool styleExists  = webAssetExists("/style.css");
 
     if (!indexExists || !scriptExists || !styleExists) {
         String missing;

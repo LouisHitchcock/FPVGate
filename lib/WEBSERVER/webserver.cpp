@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "debug.h"
+#include "storage.h"  // webAssetExists(): assets ship gzipped, see gzip_assets.py
 
 #ifdef HAS_RGB_LED
 #include "rgbled.h"
@@ -545,7 +546,7 @@ static void handleRoot(AsyncWebServerRequest *request) {
 #endif
 
     // LittleFS is already mounted in startServices(), don't remount
-    if (!LittleFS.exists("/index.html")) {
+    if (!webAssetExists("/index.html")) {
         request->send(500, "text/plain",
             "Web UI not found. LittleFS not mounted or /index.html missing.\n"
             "Did you add a LittleFS partition + run uploadfs?");
@@ -598,10 +599,10 @@ static void handleNotFound(AsyncWebServerRequest *request) {
 
 static bool startLittleFS() {
     Serial.println("[INFO] Attempting to mount LittleFS...");
-    if (!LittleFS.begin(false)) {
+    if (!LittleFS.begin(false, "/littlefs", 24)) {  // TEMPORARY experiment, revert
         Serial.println("[WARN] LittleFS mount failed, attempting to format...");
         DEBUG("LittleFS mount failed, attempting to format...\n");
-        if (!LittleFS.begin(true)) {
+        if (!LittleFS.begin(true, "/littlefs", 24)) {
             Serial.println("[ERROR] LittleFS format failed!");
             DEBUG("LittleFS format failed\n");
             return false;
