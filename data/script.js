@@ -7624,20 +7624,31 @@ function runOtaUpdate(firmwareFile, filesystemFile, button) {
 
   otaLog(i18n.t("settings.firmware.log_start"));
 
-  // Filesystem first. If the firmware went first and the filesystem upload then
-  // failed, the device would be left running new firmware against an old web
-  // UI, which is harder to recover from than the reverse.
+  // Firmware first, then the filesystem. This used to be the other way round,
+  // on the reasoning that new firmware against an old web UI was the worse
+  // half-finished state. Shipping the assets gzipped inverted that.
+  //
+  // The filesystem takes effect the moment it is written, with no reboot, so a
+  // gzipped image landing on pre-gzip firmware breaks the UI immediately: that
+  // firmware checks LittleFS.exists("/index.html"), cannot see index.html.gz,
+  // and serves "Web UI not found". If the firmware upload then failed, the user
+  // would be left with a dead UI and no way to retry from the browser.
+  //
+  // The reverse is safe. New firmware resolves either name through
+  // webAssetExists(), so it serves old uncompressed assets perfectly well. A
+  // failed filesystem upload now leaves a working UI on older assets rather
+  // than a bricked one.
   let chain = Promise.resolve();
-  if (filesystemFile) {
-    chain = chain.then(() => {
-      otaLog(`${i18n.t("settings.firmware.log_fs")} (${formatBytes(filesystemFile.size)})`);
-      return otaUpload(filesystemFile, "fs", i18n.t("settings.firmware.label_fs"));
-    });
-  }
   if (firmwareFile) {
     chain = chain.then(() => {
       otaLog(`${i18n.t("settings.firmware.log_fw")} (${formatBytes(firmwareFile.size)})`);
       return otaUpload(firmwareFile, "firmware", i18n.t("settings.firmware.label_fw"));
+    });
+  }
+  if (filesystemFile) {
+    chain = chain.then(() => {
+      otaLog(`${i18n.t("settings.firmware.log_fs")} (${formatBytes(filesystemFile.size)})`);
+      return otaUpload(filesystemFile, "fs", i18n.t("settings.firmware.label_fs"));
     });
   }
 
