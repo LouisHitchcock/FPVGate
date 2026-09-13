@@ -160,10 +160,19 @@ static void sendOnUsbTask(void *arg) {
 // rate is set by the USB IN endpoint, not by this number - so the goal is to
 // let TCP's window settle rather than to buffer indefinitely.
 //
-// txPoolLow below records how close the pool actually came to empty. If it
-// never approaches zero this is oversized and can come back down; if it sits
-// at zero, the bottleneck is the drain rate and a larger pool will not help.
-static constexpr size_t TX_POOL_FRAMES = 24;
+// Raising this to 24 was tried and measured, and it made things materially
+// worse: concurrent page loads went from 6 failures in 8 to 20 in 20, and the
+// heap floor fell from 2664 bytes to 1126. The arithmetic is the whole story.
+// Fifteen extra frames is 22,744 bytes of *static* RAM, taken from a board
+// whose heap floor was already under 3 KB, and the heap is where lwIP finds
+// pbufs and the async web server finds its response buffers. Buffering was
+// bought with exactly the memory needed to assemble the responses being
+// buffered. On a board with PSRAM the trade would likely pay; on this one it
+// cannot. Do not raise this again without first making headroom elsewhere.
+//
+// txPoolLow records how close the pool actually comes to empty, reported on
+// the [USB TX] status line.
+static constexpr size_t TX_POOL_FRAMES = 9;
 static Packet txPackets[TX_POOL_FRAMES];
 static SendAttempt txAttempt;
 
