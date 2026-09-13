@@ -86,5 +86,18 @@ PCB/
 # These are for the dev loop only and must never be committed.
 .dev/
 
+# Output from the test harnesses in tools/. They are run from the repo root and
+# write a log and a JSON report next to wherever they were started, so without
+# this every soak or race-day run leaves files behind. The names vary because
+# the log path is chosen per run.
+/*.log
+/*_console.txt
+/test-runs/
+/reliability.json
+/race_day.json
+/overnight.json
+/step*.json
+/gate.json
+
 # The discord bot for the FPVGate Discord Server
 discord-bot/
