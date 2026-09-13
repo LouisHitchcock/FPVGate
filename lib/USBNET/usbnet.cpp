@@ -46,6 +46,10 @@ static std::atomic<uint32_t> lastRndisMsg{0}, rndisState{0};
 static std::atomic<uint32_t> inXferFail{0}, inXferDone{0};
 // Deferred callbacks that did not signal within the semaphore timeout.
 static std::atomic<uint32_t> txDeferLost{0};
+// Fewest free frames ever seen in the egress pool. Zero means transmit() ran
+// the pool dry and started shedding packets; a figure comfortably above zero
+// means the pool is large enough for the offered load.
+static std::atomic<uint32_t> txPoolLow{0};
 
 static std::atomic<uint32_t> inBusy{0}, inStalled{0}, inSubmitLen{0}, inCompleteLen{0};
 static std::atomic<uint32_t> inCtl{0}, inInt{0}, inSize{0}, inFifo{0}, inFifoConfig{0};
@@ -145,7 +149,22 @@ static void sendOnUsbTask(void *arg) {
 // space; the semaphore timeout below only bounds the wait AFTER that post.
 // The pool owns queued and in-flight frames; only an acknowledged callback
 // permits reuse. A stalled callback stops the worker without blocking lwIP.
-static Packet txPackets[9];
+//
+// Sizing this is a throughput-versus-RAM trade. Every frame costs a full MTU
+// (~1516 bytes) of static RAM, and the pool is shared by every concurrent TCP
+// stream. A browser opening one page makes about six connections at once, and
+// each one immediately puts a full initial window on the wire; at nine frames
+// the pool emptied constantly and transmit() shed ~9.5% of egress on a
+// DevKitC-1, which TCP saw as loss and answered with retransmits and stalled
+// page loads. The pool only needs to absorb that opening burst - the drain
+// rate is set by the USB IN endpoint, not by this number - so the goal is to
+// let TCP's window settle rather than to buffer indefinitely.
+//
+// txPoolLow below records how close the pool actually came to empty. If it
+// never approaches zero this is oversized and can come back down; if it sits
+// at zero, the bottleneck is the drain rate and a larger pool will not help.
+static constexpr size_t TX_POOL_FRAMES = 24;
+static Packet txPackets[TX_POOL_FRAMES];
 static SendAttempt txAttempt;
 
 static void txTask(void *) {
@@ -184,8 +203,15 @@ static esp_err_t transmit(void *, void *buffer, size_t len) {
     // Called on lwIP's 2560-byte stack. Never put a 1516-byte frame on it.
     Packet *packet = nullptr;
     if (xQueueReceive(txFreePackets, &packet, 0) != pdTRUE) {
+        txPoolLow = 0;
         ++txDropped;
         return ESP_ERR_NO_MEM;
+    }
+    // Sampled after the take, so this is the depth the next caller would find.
+    const uint32_t free_now = uxQueueMessagesWaiting(txFreePackets);
+    uint32_t low = txPoolLow.load(std::memory_order_relaxed);
+    while (free_now < low &&
+           !txPoolLow.compare_exchange_weak(low, free_now, std::memory_order_relaxed)) {
     }
     packet->length = len;
     memcpy(packet->bytes, buffer, len);
@@ -258,8 +284,10 @@ void usbnet_print_status(void) {
     Serial.printf("[USB RNDIS] ctrl=%u report=%u msgs=%u last_msg=0x%x state=%u\n",
         ctrlCalls.load(), reportCalls.load(), rndisMsgs.load(),
         lastRndisMsg.load(), rndisState.load());
-    Serial.printf("[USB TX] in_fail=%u in_done=%u defer_lost=%u\n",
-        inXferFail.load(), inXferDone.load(), txDeferLost.load());
+    Serial.printf("[USB TX] in_fail=%u in_done=%u defer_lost=%u pool=%u/%u low=%u\n",
+        inXferFail.load(), inXferDone.load(), txDeferLost.load(),
+        static_cast<unsigned>(uxQueueMessagesWaiting(txFreePackets)),
+        static_cast<unsigned>(TX_POOL_FRAMES), txPoolLow.load());
     Serial.printf("[USB IN] busy=%u stalled=%u submit=%u complete=%u ctl=%08x int=%08x size=%08x fifo=%u config=%08x\n",
         inBusy.load(), inStalled.load(), inSubmitLen.load(), inCompleteLen.load(),
         inCtl.load(), inInt.load(), inSize.load(), inFifo.load(), inFifoConfig.load());
@@ -281,8 +309,11 @@ esp_err_t usbnet_begin(void) {
     // Idempotent. FPVGate normally gets this via WiFi, but USB must not
     // depend on WiFi having initialised the stack first.
     esp_netif_init();
-    txQueue = xQueueCreate(8, sizeof(Packet *));
-    txFreePackets = xQueueCreate(9, sizeof(Packet *));
+    // One frame short of the pool: txTask holds a packet while it sends, so a
+    // full queue plus the in-flight frame is exactly the pool.
+    txQueue = xQueueCreate(TX_POOL_FRAMES - 1, sizeof(Packet *));
+    txFreePackets = xQueueCreate(TX_POOL_FRAMES, sizeof(Packet *));
+    txPoolLow = TX_POOL_FRAMES;
     txDone = xSemaphoreCreateBinary();
     if (!txQueue || !txFreePackets || !txDone) {
         if (txQueue) vQueueDelete(txQueue);
