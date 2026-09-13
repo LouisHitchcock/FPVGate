@@ -221,10 +221,15 @@
 #define PIN_SD_SCK 36
 #define PIN_SD_MOSI 35
 #define PIN_SD_MISO 37
-// I2S audio output (MAX98357A DAC)
-#define PIN_I2S_BCLK 16
-#define PIN_I2S_LRC  17
-#define PIN_I2S_DOUT 18
+// I2S audio output (MAX98357A DAC) — disabled. The feature was never finished,
+// and this is the only board it was ever built for. The DevKitC-1 N8 has no
+// PSRAM, so the RAM and flash it cost were being spent on nothing. Defining
+// PIN_I2S_BCLK is what switches HAS_I2S_AUDIO on further down, so restoring
+// audio means restoring these three lines and the ESP8266Audio dependency in
+// targets/ESP32S3.ini.
+// #define PIN_I2S_BCLK 16
+// #define PIN_I2S_LRC  17
+// #define PIN_I2S_DOUT 18
 
 #endif
 
