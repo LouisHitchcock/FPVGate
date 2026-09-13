@@ -599,10 +599,10 @@ static void handleNotFound(AsyncWebServerRequest *request) {
 
 static bool startLittleFS() {
     Serial.println("[INFO] Attempting to mount LittleFS...");
-    if (!LittleFS.begin(false, "/littlefs", 24)) {  // TEMPORARY experiment, revert
+    if (!LittleFS.begin(false)) {
         Serial.println("[WARN] LittleFS mount failed, attempting to format...");
         DEBUG("LittleFS mount failed, attempting to format...\n");
-        if (!LittleFS.begin(true, "/littlefs", 24)) {
+        if (!LittleFS.begin(true)) {
             Serial.println("[ERROR] LittleFS format failed!");
             DEBUG("LittleFS format failed\n");
             return false;
