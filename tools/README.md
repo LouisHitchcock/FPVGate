@@ -101,6 +101,7 @@ what each layer proves and, more usefully, what it does not.
 | `reliability_check.py` | no | 4 h+ | prove it stays up under load |
 | `stress_test.py` | no | minutes | concurrency and throughput |
 | `soak_test.py` | no | hours | liveness across both transports |
+| `concurrent_load.py` | no | ~1 min | will the UI actually open in a browser |
 
 All of them take `--usb <gate ip> --bind <host ip>` and/or `--wifi <gate ip>`, and
 need at least one. The gate is always `192.168.7.1` over USB; `--bind` is your
@@ -154,6 +155,24 @@ for reproducing load-dependent faults quickly.
 
 Long liveness watch: probes both transports on an interval, with periodic bursts
 of race-shaped traffic, and reports outages and whether they recovered unaided.
+
+### concurrent_load.py
+
+Fetches every startup asset simultaneously, several times over, exactly as a
+browser does on a cold load. Fast, read-only, and the first thing to run if a
+board serves assets perfectly one at a time but still will not open in a
+browser.
+
+This catches something the others miss. On a DevKitC-1 the sequential failure
+rate was about 1 in 1350 requests, which `soak_test.py` and
+`reliability_check.py` both passed; the same assets fetched concurrently failed
+six page loads out of eight. `stress_test.py --workers 3` comes closest, but its
+workers loop over random assets independently, which is sustained mixed traffic
+rather than the synchronised burst that a page load actually is.
+
+Run this before a release on every board, not just the one on the bench. The
+failure is memory- and buffer-dependent, so a board without PSRAM can fail it
+while a board with PSRAM passes on identical firmware.
 
 ### Why Content-Length is checked everywhere
 

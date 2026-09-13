@@ -23,8 +23,9 @@ to the things only a person can assess.
 | **1. Unit** | every change | no | seconds | `cd tests && npx jest` |
 | **2. Build** | every change | no | ~2 min | `pio run -e <target>` |
 | **3. Component** | before release | yes | ~2 min | `race_day_sim.py --components-only` |
-| **4. Race day** | before release | yes | 1–4 h | `race_day_sim.py --heats 20` |
-| **5. Reliability** | before release | yes | 4 h+ | `reliability_check.py` |
+| **4. Page load** | before release, **every board** | yes | ~1 min | `concurrent_load.py` |
+| **5. Race day** | before release | yes | 1–4 h | `race_day_sim.py --heats 20` |
+| **6. Reliability** | before release | yes | 4 h+ | `reliability_check.py` |
 
 ### 1. Unit — `tests/`
 
@@ -65,7 +66,26 @@ One pass over every component with explicit pass/fail:
 
 **This writes to the device.** It creates races and deletes them afterwards.
 
-### 4. Race day — `race_day_sim.py`
+### 4. Page load — `concurrent_load.py`
+
+Fetches every startup asset at once, repeatedly, the way a browser does on a
+cold load, and fails any response shorter than its `Content-Length`.
+
+This layer exists because layers 3, 5 and 6 all missed a real fault. On an
+ESP32-S3 DevKitC-1 the web UI would not open reliably in a browser, yet every
+asset served byte-exact when requested one at a time — a sequential failure rate
+of roughly 1 in 1350. Fetched concurrently, six page loads in eight failed. The
+cause was a fixed egress buffer shared across connections, which only a
+simultaneous burst can exhaust.
+
+**Run this on every supported board, not just the one on the bench.** The fault
+is memory- and buffer-dependent, so a board with PSRAM can pass while a board
+without it fails on identical firmware. That is exactly what happened: the
+FPVGateAIO was fine throughout.
+
+Read-only and takes about a minute, so there is no reason to skip it.
+
+### 5. Race day — `race_day_sim.py`
 
 The same checks, repeated across many heats over hours, with periodic re-checks
 of the self test and history. Catches what one pass cannot: storage leaks,
