@@ -95,9 +95,14 @@ class Transport:
         self.last_min = None
         self.selftest_failed = []
         self.endpoint_failures = []
+        # Set once the bound source address has disappeared and been abandoned.
+        # Reported at the end, because it means the USB adapter re-enumerated
+        # mid-run, which is worth knowing even when the run then recovered.
+        self.bind_lost = False
 
-    def get(self, path, timeout):
-        src = (self.bind, 0) if self.bind else None
+    def _attempt(self, path, timeout, bind):
+        """One request, optionally from a specific source address."""
+        src = (bind, 0) if bind else None
         conn = http.client.HTTPConnection(self.host, timeout=timeout, source_address=src)
         total, t0 = 0, time.time()
         try:
@@ -124,6 +129,32 @@ class Transport:
             return False, total, time.time() - t0, f"{type(exc).__name__}: {exc}", b""
         finally:
             conn.close()
+
+    def get(self, path, timeout):
+        """Request, surviving the loss of the bound source address.
+
+        Binding is optional and on a directly connected subnet unnecessary: the
+        routing table already sends 192.168.7.1 out of the USB adapter. It is
+        kept for hosts with unusual routing, but it must never be a single point
+        of failure.
+
+        When the device re-enumerates, the host address the gate handed out
+        disappears and every bind fails with "address not valid in its context".
+        That reads as the gate being down when the gate is fine. One overnight
+        run was lost to exactly this, reporting a 98% USB failure rate for what
+        was a single event. If the bound address goes away, the binding is
+        dropped for good and the request retried on whatever route exists.
+        """
+        ok, total, dt, err, body = self._attempt(path, timeout, self.bind)
+        if ok or not self.bind or not err:
+            return ok, total, dt, err, body
+        # WSAEADDRNOTAVAIL on Windows, EADDRNOTAVAIL elsewhere: the source
+        # address itself is gone, which is a host problem, not a device one.
+        if "10049" in err or "EADDRNOTAVAIL" in err or "not valid in its context" in err:
+            self.bind_lost = True
+            self.bind = None
+            return self._attempt(path, timeout, None)
+        return ok, total, dt, err, body
 
 
 def heap_trend(samples):
@@ -396,6 +427,9 @@ def verdict(transports, args, log, result, diagnostics_ok, log_path, json_path):
         if t.reboots:
             log(f"           {len(t.reboots)} REBOOT(S) detected at "
                 + ", ".join(f"{r / 60:.0f} min" for r in t.reboots))
+        if t.bind_lost:
+            log(f"           the bound source address disappeared during the run, so the "
+                f"adapter re-enumerated; binding was dropped and requests continued")
 
         if not t.alive:
             reasons.append(f"{t.name.strip()} was down at the end of the run")
