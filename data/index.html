@@ -44,7 +44,7 @@
           // First visit, or localStorage unavailable. The default theme is fine.
         }
       })();
-    </script>
+    </script>
     <style>
       /* Critical skeleton styles. Inlined so the loading state paints while
          style.css and the 182KB of head scripts are still in flight. Colours are
@@ -121,7 +121,7 @@
       @media (max-height: 520px) {
         .sk-card:nth-of-type(n + 3) { display: none; }
       }
-    </style>
+    </style>
     <link rel="stylesheet" type="text/css" href="style.css" />
     <link rel="stylesheet" type="text/css" href="calib-styles.css" />
     <script src="jquery-3.7.1.min.js" defer></script>
@@ -447,11 +447,11 @@
         </div>
       </div>
 
-      <div id="ota" class="tabcontent" style="display: none">
-        <div class="firmware-update">
-          <iframe src="http://fpvgate.local/update" width="100%" height="600px" frameborder="0"></iframe>
-        </div>
-      </div>
+      <!-- Updates live in Configuration -> System Setup -> Firmware. This tab
+           previously embedded http://fpvgate.local/update in an iframe, which
+           could only ever work on a network where that name resolved: never
+           over USB, and not on many home networks either. -->
+      <div id="ota" class="tabcontent" style="display: none"></div>
     </main>
 
     <footer>
@@ -1618,8 +1618,65 @@
               </div>
 
               <h3 data-i18n="settings.firmware.title">Firmware</h3>
-              <div class="config-item">
-                <label data-i18n="settings.firmware.update">Firmware Update:</label>
+
+              <div id="otaDeviceInfo" class="ota-device-info">
+                <span data-i18n="settings.firmware.reading">Reading device information...</span>
+              </div>
+
+              <div class="ota-panel">
+                <div id="otaSourceOnline">
+                  <div class="ota-line">
+                    <select id="otaVersionSelect" onchange="onOtaVersionChange()" aria-label="Version">
+                      <option value="" data-i18n="settings.firmware.loading_versions">Loading versions...</option>
+                    </select>
+                    <label class="ota-checkbox">
+                      <input type="checkbox" id="otaPreReleaseToggle" onchange="loadOtaVersions()" />
+                      <span data-i18n="settings.firmware.show_prerelease">Pre-release</span>
+                    </label>
+                  </div>
+                  <details id="otaNotesWrap" class="ota-notes" style="display: none">
+                    <summary data-i18n="settings.firmware.whats_new">What's new</summary>
+                    <div id="otaReleaseNotes"></div>
+                  </details>
+                </div>
+
+                <div id="otaSourceFile" style="display: none">
+                  <div class="ota-line">
+                    <label for="otaFirmwareFile" data-i18n="settings.firmware.file_firmware_short">Firmware</label>
+                    <input type="file" id="otaFirmwareFile" accept=".bin" />
+                  </div>
+                  <div class="ota-line">
+                    <label for="otaFilesystemFile" data-i18n="settings.firmware.file_filesystem_short">Filesystem</label>
+                    <input type="file" id="otaFilesystemFile" accept=".bin" />
+                  </div>
+                </div>
+
+                <div id="otaWarning" class="ota-warning" style="display: none"></div>
+
+                <div class="ota-actions">
+                  <button type="button" id="otaStartBtn" onclick="startOtaUpdate()" data-i18n="settings.firmware.install">Install Update</button>
+                  <span id="otaHint" class="ota-hint" data-i18n="settings.firmware.hint_online">Downloaded by your browser and passed to the gate, so the gate needs no internet of its own.</span>
+                  <!-- Downloading is the normal path, so it needs no control of
+                       its own. Supplying files by hand is the exception and gets
+                       a link rather than a tab. -->
+                  <button type="button" id="otaSourceToggle" class="ota-link" onclick="toggleOtaSource()" data-i18n="settings.firmware.source_file">Use my own files</button>
+                </div>
+
+                <!-- Progress and log stay out of the layout until an update is
+                     actually running, so the resting panel is just source,
+                     version and one button. -->
+                <div id="otaRunning" class="ota-running" style="display: none">
+                  <div class="ota-progress-track"><div id="otaProgressBar" class="ota-progress-bar"></div></div>
+                  <div id="otaProgressText" class="ota-progress-text"></div>
+                  <details id="otaLogWrap" class="ota-notes">
+                    <summary data-i18n="settings.firmware.details">Details</summary>
+                    <div id="otaLog" class="ota-log"></div>
+                  </details>
+                </div>
+              </div>
+
+              <div class="config-item" style="margin-top: 16px">
+                <label data-i18n="settings.firmware.first_install">First install or recovery:</label>
                 <a href="https://fpvgate.xyz/flasher" target="_blank" class="update-link" data-i18n="settings.firmware.open_page">Open Web Flasher</a>
               </div>
             </div>

@@ -96,6 +96,10 @@ class Webserver : public TransportInterface {
     // Pending lap/clear for LCD (set by HTTP handlers, consumed by main loop)
     volatile uint32_t _pendingLcdLap = 0;
     volatile bool _hasLcdLap = false;
+    // Set by /api/system/reboot. The restart is deferred to handleWebUpdate so
+    // the response is actually delivered before the device goes down; zero
+    // means no reboot pending.
+    volatile uint32_t _rebootRequestedMs = 0;
     volatile bool _pendingLcdClear = false;
 
     // Pending LCD overlay event (set by HTTP timer handlers, consumed by main loop)

@@ -21,10 +21,18 @@ reporting; longer is better.
 2. Work out the addresses:
    - **WiFi**: shown in the gate's web UI, or in the self test under `WiFi`.
      Usually `192.168.0.x`.
-   - **USB**: the gate is always `192.168.7.1`. The host address for `--bind` is
-     whatever your machine holds on the USB network adapter, normally
-     `192.168.7.2`. On Windows:
+   - **USB**: the gate is always `192.168.7.1`. That is the only address you
+     need. `--bind` is optional and rarely useful: it names *your own* address
+     on the USB adapter, not the gate's, and the routing table already sends
+     traffic for that subnet out of the right interface. Omit it unless a run
+     shows requests leaving via the wrong interface.
+
+     If you do pass it, the address is whatever your machine holds on the USB
+     adapter, normally `192.168.7.2`. On Windows:
      `Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.168.7.*' }`
+     Should that address vanish mid-run, which happens whenever the device
+     re-enumerates, the binding is dropped automatically and the run carries on.
+     The summary says so at the end, because it means the adapter reset.
 3. Close any serial monitor attached to the board. It is not needed and it can
    interfere.
 

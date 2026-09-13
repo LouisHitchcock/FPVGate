@@ -2530,3 +2530,183 @@ footer {
   font-style: italic;
 }
 
+/* ---- Firmware update panel (Configuration -> System Setup -> Firmware) ----
+   Kept to one column of three things at rest: source, version, button.
+   Everything else - release notes, progress, log - is either collapsed or
+   absent until it has something to say. */
+
+.ota-device-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.ota-device-name {
+  font-weight: bold;
+  color: var(--text-color);
+}
+
+/* Muted body text, not link colour. --secondary-color is a theme accent and
+   reads as something clickable when used for prose. */
+.ota-device-sizes,
+.ota-hint,
+.ota-notes > div {
+  color: var(--text-color);
+  opacity: 0.65;
+}
+
+.ota-panel {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+/* A plain-text action, not a button. Downloading is the default path; this is
+   the way out of it for the rare case of supplying files by hand. */
+.ota-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary-color);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.ota-link:hover { opacity: 0.8; }
+
+/* One row per control rather than a label column, which was forcing everything
+   into a tall stack of half-empty lines. */
+.ota-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ota-line label {
+  min-width: 78px;
+  font-size: 13px;
+}
+
+.ota-line select,
+.ota-line input[type="file"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.ota-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ota-checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+/* Release notes and the run log share this. Collapsed by default: useful when
+   wanted, silent when not. */
+.ota-notes {
+  margin: 2px 0 10px 0;
+  font-size: 12px;
+}
+
+.ota-notes > summary {
+  cursor: pointer;
+  color: var(--text-color);
+  opacity: 0.75;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.ota-notes > div {
+  margin-top: 6px;
+  padding: 8px 10px;
+  max-height: 150px;
+  overflow-y: auto;
+  background-color: var(--bg-secondary);
+  border-radius: 6px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.ota-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.ota-actions .ota-hint {
+  flex: 1;
+  min-width: 180px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Deliberately loud: everything routed here is a reason not to proceed. */
+.ota-warning {
+  margin: 10px 0 0 0;
+  padding: 9px 11px;
+  border-left: 3px solid #e74c3c;
+  background: rgba(231, 76, 60, 0.08);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-color);
+}
+
+.ota-running {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ota-progress-track {
+  height: 8px;
+  background-color: var(--bg-secondary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ota-progress-bar {
+  height: 100%;
+  width: 0;
+  background-color: var(--primary-color);
+  transition: width 0.2s ease;
+}
+
+.ota-progress-text {
+  margin: 6px 0 4px 0;
+  font-size: 12px;
+  color: var(--text-color);
+  opacity: 0.75;
+}
+
+.ota-log {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.ota-log-error { color: #e74c3c; opacity: 1; }
+
+@media (max-width: 600px) {
+  .ota-line { flex-wrap: wrap; }
+  .ota-line label { min-width: 0; width: 100%; }
+  .ota-actions .ota-hint { flex-basis: 100%; }
+}

@@ -229,6 +229,40 @@
 #endif
 
 // ====================================================================
+// Board identity
+// ====================================================================
+// A stable, machine-readable name for the board this firmware was built for,
+// reported over HTTP so an updater can pick the right binary. Flashing the
+// wrong board's image bricks the device, so nothing that chooses an image
+// should have to guess from the chip model.
+//
+// These deliberately match the PlatformIO environment names in targets/, which
+// are also the directory names used for release artefacts. Keep the three in
+// step: env name, release directory, and this identifier.
+
+#if defined(FPVGATE_AIO)
+    #define FPVGATE_BOARD_ID "FPVGateAIO"
+#elif defined(FPVGATE_SOLO)
+    #define FPVGATE_BOARD_ID "FPVGateSolo"
+#elif defined(ESP32S3_SUPERMINI)
+    #define FPVGATE_BOARD_ID "ESP32S3SuperMini"
+#elif defined(LILYGO_TENERGY_S3)
+    #define FPVGATE_BOARD_ID "LilyGOTEnergyS3"
+#elif defined(WAVESHARE_ESP32S3_LCD2)
+    #define FPVGATE_BOARD_ID "WaveshareESP32S3LCD2"
+#elif defined(XIAO_ESP32S3_PLUS)
+    #define FPVGATE_BOARD_ID "XIAOS3Plus"
+#elif defined(SEEED_XIAO_ESP32S3)
+    #define FPVGATE_BOARD_ID "SeeedXIAOESP32S3"
+#elif defined(ESP32S3)
+    #define FPVGATE_BOARD_ID "ESP32S3"
+#else
+    // An unrecognised board must not silently claim to be something else. An
+    // updater seeing this should refuse to offer an image rather than guess.
+    #define FPVGATE_BOARD_ID "unknown"
+#endif
+
+// ====================================================================
 // Centralized Platform Feature Defines
 // Add new board defines here to automatically enable features across the codebase
 // ====================================================================

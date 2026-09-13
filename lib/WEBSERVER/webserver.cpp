@@ -1,4 +1,6 @@
 #include "webserver.h"
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include "version.h"
 #include "race_rssi_recorder.h"
 #include <ElegantOTA.h>
@@ -314,6 +316,15 @@ void Webserver::update(uint32_t currentTimeMs) {
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
+    // A reboot asked for over HTTP. Deferred rather than immediate so the
+    // response reaches the client first; restarting inside the handler drops
+    // the connection and the caller cannot tell success from a crash.
+    if (_rebootRequestedMs != 0 && (currentTimeMs - _rebootRequestedMs) > 600) {
+        DEBUG("Rebooting on request\n");
+        Serial.flush();
+        ESP.restart();
+    }
+
     // Process deferred race state events from LCD triggers (must run on core 0)
     if (pendingRaceState) {
         const char* state = (const char*)pendingRaceState;
@@ -1014,6 +1025,74 @@ EEPROM:\n\
         request->send(200, "text/plain", versionStr);
     });
 
+    // Everything an updater needs to decide whether a given image belongs on
+    // this device, and whether it will fit.
+    //
+    // /version alone is not enough. Nothing else reports which board this is,
+    // and flashing another board's binary bricks it, so an updater would be
+    // guessing from the chip model - which several boards share. Partition
+    // sizes are reported as measured rather than as a layout version number,
+    // so an updater can simply compare an image against the space that exists
+    // instead of tracking which layout shipped when.
+    server.on("/api/system/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        doc["version"] = FPVGATE_VERSION_STRING();
+        doc["board"] = FPVGATE_BOARD_ID;
+        doc["chip"] = ESP.getChipModel();
+        doc["chipRevision"] = ESP.getChipRevision();
+        doc["flashSize"] = ESP.getFlashChipSize();
+        doc["sdkVersion"] = ESP.getSdkVersion();
+
+        // Which application slot is running, and how much room the other one
+        // has. An over-the-air application update is written to the inactive
+        // slot, so that is the size a firmware image must fit into.
+        const esp_partition_t *running = esp_ota_get_running_partition();
+        const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+        JsonObject app = doc["app"].to<JsonObject>();
+        if (running) {
+            app["running"] = running->label;
+            app["size"] = running->size;
+        }
+        app["used"] = ESP.getSketchSize();
+        if (next) {
+            app["updateSlot"] = next->label;
+            app["updateSize"] = next->size;
+        }
+
+        // The filesystem partition is written in place, so its actual size is
+        // the hard limit on a filesystem image. This is what stops a device on
+        // the old 1MB table being offered a 3.875MB image it cannot hold.
+        const esp_partition_t *fs = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, NULL);
+        if (fs) {
+            JsonObject f = doc["filesystem"].to<JsonObject>();
+            f["offset"] = fs->address;
+            f["size"] = fs->size;
+        }
+
+        // Present only on the newer table. Its absence tells an updater the
+        // device is still on the original layout without needing a version.
+        const esp_partition_t *core = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+        doc["hasCoredumpPartition"] = core != NULL;
+
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
+    // Reboot on request. Needed because ElegantOTA's auto-reboot is disabled:
+    // a full update is a filesystem upload followed by a firmware upload, and
+    // restarting between the two would leave new firmware running against the
+    // old filesystem. The caller reboots once both have landed.
+    //
+    // The reply is sent first and the restart deferred, so the client sees a
+    // response rather than a dropped connection.
+    server.on("/api/system/reboot", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        request->send(200, "application/json", "{\"status\":\"OK\",\"message\":\"Rebooting\"}");
+        _rebootRequestedMs = millis();
+    });
+
     AsyncCallbackJsonWebHandler *configJsonHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
 #ifdef DEBUG_OUT
@@ -1148,7 +1227,16 @@ EEPROM:\n\
     });
     
     // Serve other static files from LittleFS only
-    server.serveStatic("/", LittleFS, "/").setCacheControl("max-age=600");
+    // "no-cache" means revalidate, not "do not cache". The browser keeps the
+    // file and asks whether it has changed; the server answers 304 and sends
+    // nothing when it has not, so repeat loads stay cheap.
+    //
+    // max-age=600 was actively wrong once updates could be installed from the
+    // web UI: after an update the browser would serve the previous script.js
+    // against the new index.html for up to ten minutes, which presents as a
+    // broken page rather than a stale one. Correctness beats saving a
+    // conditional request on a link this short.
+    server.serveStatic("/", LittleFS, "/").setCacheControl("no-cache");
 
     events.onConnect([this](AsyncEventSourceClient *client) {
         if (client->lastId()) {
@@ -2143,7 +2231,11 @@ EEPROM:\n\
         webhooks->triggerFlash();
     });
 
-    ElegantOTA.setAutoReboot(true);
+    // Rebooting automatically after each upload would restart the device
+    // between the filesystem and the firmware, leaving it briefly running new
+    // firmware against the old filesystem. A full update is two uploads, so the
+    // UI decides when it is finished and calls /api/system/reboot itself.
+    ElegantOTA.setAutoReboot(false);
     ElegantOTA.begin(&server);
 
     server.begin();
