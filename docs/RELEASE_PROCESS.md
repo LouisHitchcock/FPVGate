@@ -9,32 +9,38 @@ Each release must follow this exact structure to work with the web flasher at ht
 ```
 release/vX.Y.Z/
 ├── boards/                          # For web flasher (fpvgate.xyz)
-│   ├── ESP32S3-8MB-bootloader.bin
-│   ├── ESP32S3-8MB-firmware.bin
-│   ├── ESP32S3-8MB-littlefs.bin
-│   ├── ESP32S3-8MB-partitions.bin
-│   ├── ESP32S3SuperMini-4MB-bootloader.bin
-│   ├── ESP32S3SuperMini-4MB-firmware.bin
-│   ├── ESP32S3SuperMini-4MB-littlefs.bin
-│   └── ESP32S3SuperMini-4MB-partitions.bin
-├── ESP32S3-bootloader.bin            # For GitHub release downloads
-├── ESP32S3-firmware.bin
-├── ESP32S3-littlefs.bin
-├── ESP32S3-partitions.bin
-├── ESP32S3-FLASH_INSTRUCTIONS.txt
-├── ESP32S3SuperMini-bootloader.bin
-├── ESP32S3SuperMini-firmware.bin
-├── ESP32S3SuperMini-littlefs.bin
-├── ESP32S3SuperMini-partitions.bin
-├── ESP32S3SuperMini-FLASH_INSTRUCTIONS.txt
+│   ├── <BOARD>-<SIZE>-bootloader.bin
+│   ├── <BOARD>-<SIZE>-partitions.bin
+│   ├── <BOARD>-<SIZE>-firmware.bin
+│   └── <BOARD>-<SIZE>-littlefs.bin        ... for every board below
+├── <BOARD>-bootloader.bin            # For GitHub release downloads
+├── <BOARD>-partitions.bin
+├── <BOARD>-firmware.bin
+├── <BOARD>-littlefs.bin
+├── <BOARD>-FLASH_INSTRUCTIONS.txt     ... for every board below
+├── Supported_Boards.txt
 └── RELEASE_NOTES.md
 ```
+
+### Boards a release ships
+
+| Environment | Flash | Board |
+|---|---|---|
+| `ESP32S3` | 8MB | ESP32-S3 DevKitC-1 |
+| `FPVGateAIO` | 8MB | FPVGate AIO V3 (XIAO ESP32S3) |
+| `FPVGateSolo` | 8MB | FPVGate Solo (XIAO ESP32S3) |
+| `SeeedXIAOESP32S3` | 8MB | Seeed Studio XIAO ESP32S3 |
+| `XIAOS3Plus` | 16MB | XIAO ESP32S3 Plus |
+
+This list lives in three places that must agree, or a board silently ships
+nothing: the `BOARDS` table in `tools/package_release.py`, the `matrix` in
+`.github/workflows/manual-release-build.yml`, and this table.
 
 ## Why Two Sets of Binaries?
 
 ### 1. `boards/` Directory
 - **Purpose**: Used by the web flasher at https://fpvgate.xyz
-- **Naming**: Must use `-8MB-` and `-4MB-` suffixes to indicate flash size
+- **Naming**: Must carry the flash size, `-8MB-` or `-16MB-`, matching the table above
 - **URL Pattern**: `https://fpvgate.xyz/firmware/vX.Y.Z/boards/ESP32S3-8MB-bootloader.bin`
 - **Must be committed to repository**: The website pulls files from the GitHub repository, NOT release assets
 
@@ -47,9 +53,12 @@ release/vX.Y.Z/
 
 ### Step 1: Update Version Number
 
-Edit `lib/VERSION/version.h`:
+Edit `lib/VERSION/version.h`. Both lines matter — the stage suffix is what makes
+a build report `1.8.0-dev` rather than `1.8.0`, and leaving it set ships a
+release that calls itself a development build:
 ```cpp
 #define FPVGATE_VERSION "X.Y.Z"
+#define FPVGATE_VERSION_STAGE ""   // "" for a release; "dev"/"alpha"/"beta"/"rc-1" otherwise
 ```
 
 ### Step 2: Update CHANGELOG.md
@@ -93,52 +102,44 @@ After the workflow completes:
 
 If the automated process fails, follow these steps:
 
-### 1. Build Firmware
+### 1. Build and package every board
+
+One command builds all five boards, writes both naming conventions, generates
+per-board flash instructions with the correct filesystem offset read from that
+board's partition CSV, and writes `Supported_Boards.txt`:
 
 ```bash
-# ESP32S3 DevKitC-1 (8MB)
-pio run -e ESP32S3
-pio run -e ESP32S3 -t buildfs
-
-# ESP32S3 Super Mini (4MB)
-pio run -e ESP32S3SuperMini
-pio run -e ESP32S3SuperMini -t buildfs
+python tools/package_release.py --version vX.Y.Z
 ```
+
+Add `--skip-build` to repackage binaries already in `.pio/build`, or
+`--only ESP32S3 FPVGateAIO` to limit it to specific boards.
+
+**On Windows, run this from PowerShell, not Git Bash.** PlatformIO refuses to
+install its esptool package under MSys and the filesystem build fails with
+"MSys/Mingw is not supported".
+
+The rest of this section describes what that script does, for when it needs
+changing or the release has to be assembled by hand.
 
 ### 2. Copy Binaries to Release Directory
 
-```bash
-# Create release directory
-mkdir -p release/vX.Y.Z/boards
+For each board, four artefacts are copied twice, under two naming conventions:
 
-# ESP32S3 (8MB) - Root level
-cp .pio/build/ESP32S3/bootloader.bin release/vX.Y.Z/ESP32S3-bootloader.bin
-cp .pio/build/ESP32S3/firmware.bin release/vX.Y.Z/ESP32S3-firmware.bin
-cp .pio/build/ESP32S3/littlefs.bin release/vX.Y.Z/ESP32S3-littlefs.bin
-cp .pio/build/ESP32S3/partitions.bin release/vX.Y.Z/ESP32S3-partitions.bin
-
-# ESP32S3 (8MB) - boards/ directory
-cp .pio/build/ESP32S3/bootloader.bin release/vX.Y.Z/boards/ESP32S3-8MB-bootloader.bin
-cp .pio/build/ESP32S3/firmware.bin release/vX.Y.Z/boards/ESP32S3-8MB-firmware.bin
-cp .pio/build/ESP32S3/littlefs.bin release/vX.Y.Z/boards/ESP32S3-8MB-littlefs.bin
-cp .pio/build/ESP32S3/partitions.bin release/vX.Y.Z/boards/ESP32S3-8MB-partitions.bin
-
-# ESP32S3 Super Mini (4MB) - Root level
-cp .pio/build/ESP32S3SuperMini/bootloader.bin release/vX.Y.Z/ESP32S3SuperMini-bootloader.bin
-cp .pio/build/ESP32S3SuperMini/firmware.bin release/vX.Y.Z/ESP32S3SuperMini-firmware.bin
-cp .pio/build/ESP32S3SuperMini/littlefs.bin release/vX.Y.Z/ESP32S3SuperMini-littlefs.bin
-cp .pio/build/ESP32S3SuperMini/partitions.bin release/vX.Y.Z/ESP32S3SuperMini-partitions.bin
-
-# ESP32S3 Super Mini (4MB) - boards/ directory
-cp .pio/build/ESP32S3SuperMini/bootloader.bin release/vX.Y.Z/boards/ESP32S3SuperMini-4MB-bootloader.bin
-cp .pio/build/ESP32S3SuperMini/firmware.bin release/vX.Y.Z/boards/ESP32S3SuperMini-4MB-firmware.bin
-cp .pio/build/ESP32S3SuperMini/littlefs.bin release/vX.Y.Z/boards/ESP32S3SuperMini-4MB-littlefs.bin
-cp .pio/build/ESP32S3SuperMini/partitions.bin release/vX.Y.Z/boards/ESP32S3SuperMini-4MB-partitions.bin
 ```
+.pio/build/<ENV>/{bootloader,partitions,firmware,littlefs}.bin
+  -> release/vX.Y.Z/<ENV>-<part>.bin              (GitHub release assets)
+  -> release/vX.Y.Z/boards/<ENV>-<SIZE>-<part>.bin (web flasher)
+```
+
+The `-8MB-` / `-16MB-` infix in `boards/` is load-bearing and case-sensitive;
+the flasher builds its URLs from it.
 
 ### 3. Create Flash Instructions
 
-Create `release/vX.Y.Z/ESP32S3-FLASH_INSTRUCTIONS.txt` and `ESP32S3SuperMini-FLASH_INSTRUCTIONS.txt` following the template from v1.5.3.
+One `<ENV>-FLASH_INSTRUCTIONS.txt` per board. The filesystem offset differs
+between the 8MB and 16MB layouts (`0x410000` vs `0x610000`), so it is read from
+that board's partition CSV rather than copied from another board's file.
 
 ### 4. Commit Binaries to Repository
 
@@ -155,12 +156,15 @@ git push origin main
 
 ```bash
 gh release upload vX.Y.Z \
-  release/vX.Y.Z/ESP32S3-*.bin \
-  release/vX.Y.Z/ESP32S3-FLASH_INSTRUCTIONS.txt \
-  release/vX.Y.Z/ESP32S3SuperMini-*.bin \
-  release/vX.Y.Z/ESP32S3SuperMini-FLASH_INSTRUCTIONS.txt \
+  release/vX.Y.Z/*.bin \
+  release/vX.Y.Z/*FLASH_INSTRUCTIONS.txt \
+  release/vX.Y.Z/Supported_Boards.txt \
   release/vX.Y.Z/RELEASE_NOTES.md
 ```
+
+Note this uploads the root-level binaries only. The `boards/` copies are served
+from the repository, not from release assets, so they are committed rather than
+uploaded.
 
 ## Hotfix Process (Silent Update)
 
@@ -175,21 +179,14 @@ Make code changes and test thoroughly.
 Only rebuild what changed (usually just littlefs.bin for web interface fixes):
 
 ```bash
-pio run -e ESP32S3 -t buildfs
-pio run -e ESP32S3SuperMini -t buildfs
+python tools/package_release.py --version vX.Y.Z
 ```
 
 ### 3. Update Release Binaries
 
-```bash
-# Update boards/ directory (for web flasher)
-cp .pio/build/ESP32S3/littlefs.bin release/vX.Y.Z/boards/ESP32S3-8MB-littlefs.bin
-cp .pio/build/ESP32S3SuperMini/littlefs.bin release/vX.Y.Z/boards/ESP32S3SuperMini-4MB-littlefs.bin
-
-# Update root level (for downloads)
-cp .pio/build/ESP32S3/littlefs.bin release/vX.Y.Z/ESP32S3-littlefs.bin
-cp .pio/build/ESP32S3SuperMini/littlefs.bin release/vX.Y.Z/ESP32S3SuperMini-littlefs.bin
-```
+The packaging script overwrites both copies for every board, so there is nothing
+to do by hand. If only the web UI changed, the firmware binaries will be
+byte-identical anyway and `git add` picks up just the filesystem images.
 
 ### 4. Commit and Upload
 
@@ -200,10 +197,7 @@ git commit -m "Hotfix: <brief description> for vX.Y.Z"
 git push origin main
 
 # Replace GitHub release assets
-gh release upload vX.Y.Z \
-  release/vX.Y.Z/ESP32S3-littlefs.bin \
-  release/vX.Y.Z/ESP32S3SuperMini-littlefs.bin \
-  --clobber
+gh release upload vX.Y.Z release/vX.Y.Z/*-littlefs.bin --clobber
 ```
 
 ## Web Flasher Integration
@@ -221,23 +215,30 @@ https://fpvgate.xyz/firmware/vX.Y.Z/boards/BOARD-FLASH_SIZE-TYPE.bin
 ```
 
 ### File Names Must Match
-- `ESP32S3-8MB-bootloader.bin`
+
+`<Environment>-<Size>-<part>.bin`, case-sensitive, for each of the five
+environments in the table at the top and each of `bootloader`, `partitions`,
+`firmware`, `littlefs`. For example:
+
 - `ESP32S3-8MB-firmware.bin`
-- `ESP32S3-8MB-littlefs.bin`
-- `ESP32S3-8MB-partitions.bin`
-- `ESP32S3SuperMini-4MB-bootloader.bin`
-- `ESP32S3SuperMini-4MB-firmware.bin`
-- `ESP32S3SuperMini-4MB-littlefs.bin`
-- `ESP32S3SuperMini-4MB-partitions.bin`
+- `FPVGateAIO-8MB-littlefs.bin`
+- `XIAOS3Plus-16MB-partitions.bin`
 
 ### Testing Checklist
+
+Before tagging:
+- [ ] `lib/VERSION/version.h` has the right version **and an empty stage**
+- [ ] `cd tests && npx jest` passes
+- [ ] Every shipping environment builds, from PowerShell on Windows
+- [ ] `tools/concurrent_load.py` passes on each board that has hardware
+- [ ] The device self test (`/api/selftest`) passes on each board
 
 After releasing:
 - [ ] Visit https://fpvgate.xyz/flasher.html
 - [ ] Select new version from dropdown
-- [ ] Select ESP32-S3 DevKitC-1 (8MB) - verify all 4 files are found
-- [ ] Select ESP32-S3 Super Mini (4MB) - verify all 4 files are found
+- [ ] For each of the five boards, verify all 4 files are found
 - [ ] Test flashing on actual hardware
+- [ ] Confirm the flashed device reports the expected version at `/version`
 - [ ] Verify GitHub release has all individual binaries as assets
 - [ ] Check that release notes are correct
 
@@ -251,7 +252,7 @@ After releasing:
 ### Wrong File Names
 - **Problem**: Binaries have wrong naming convention
 - **Solution**: Rename files to match exact pattern above (case-sensitive)
-- **Key**: Must include `-8MB-` or `-4MB-` in boards/ directory files
+- **Key**: Must include the flash size, `-8MB-` or `-16MB-`, in boards/ directory files
 
 ### Release Assets Not Uploading
 - **Problem**: GitHub Actions fails to create release

@@ -3,35 +3,66 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
-Development towards 1.8.0. Builds from `main` report `1.8.0-dev`.
+## [1.8.0] - 2026-09-16
+
+### Upgrade note — read this first
+**Upgrading from 1.7.x requires a full wired flash. Over-the-air will not work.**
+The 8MB partition table changed, and an over-the-air update replaces the app
+only, leaving the old 1MB `spiffs` partition in place. A 1.8.0 filesystem image
+does not fit it. Use the web flasher at https://fpvgate.xyz or flash bootloader,
+partitions, firmware and filesystem together over USB. Once on 1.8.0, later
+over-the-air updates work normally.
 
 ### Added
-- Visual Marshal: RotorHazard-style RSSI graph for reviewing and editing lap
-  times, with the RSSI trace recorded to an SD sidecar during each race
-- Merged race editor: Edit and Marshal are now a single screen, with race
-  details alongside the graph. Races without an RSSI trace fall back to typed
-  lap entry
-- `docs/BATTERY_MONITORING.md` covering divider sizing, the settings, per-board
-  defaults, calibration and troubleshooting
+- **USB networking.** The gate presents itself as a USB network adapter over
+  USB-C and serves the full web UI at `http://192.168.7.1`, with no WiFi and no
+  network infrastructure. Available on every supported board. Windows and Linux
+  are supported; **macOS is not**, as Apple removed RNDIS support
+- **Over-the-air updates**, driven from the device's own settings screen. It can
+  install a firmware and filesystem pair from a local file or pull a chosen
+  release straight from fpvgate.xyz, with a toggle for pre-release builds
+- **Visual Marshal**: a RotorHazard-style RSSI graph for reviewing and editing
+  lap times, with the RSSI trace recorded to an SD sidecar during each race
+- **Merged race editor**: Edit and Marshal are now one screen, race details
+  alongside the graph. Races with no RSSI trace fall back to typed lap entry
+- Race details now expand inside the race card rather than in a separate view
+- `/api/system/info`, reporting board identity, chip, partition layout and the
+  measured size of each application slot, so an updater can pick the right binary
+- A validation suite under `tools/`: race-day simulation, an unattended
+  reliability check, a soak harness and a concurrent page-load test, with
+  `VALIDATION_PLAN.md` describing what each layer proves and what it does not
+- `docs/USB_NETWORKING.md` and `docs/BATTERY_MONITORING.md`
 
 ### Changed
-- 8MB partition table: `spiffs` grown from 1MB to 3.875MB and a `coredump`
+- **Web assets are now served gzipped.** A cold load of the UI was 788KB of
+  uncompressed text, `script.js` alone being 382KB; it is now about 190KB. On
+  both an FPVGateAIO and an ESP32-S3 DevKitC-1 this took a full page load from
+  around 7 seconds to roughly 2, and fixed loads failing outright when a browser
+  opened several connections at once
+- **8MB partition table**: `spiffs` grown from 1MB to 3.875MB and a `coredump`
   partition added, using flash that was previously unallocated. `nvs`, `otadata`,
-  `app0` and `app1` keep their offsets and sizes, so OTA app updates are
-  unaffected
+  `app0` and `app1` keep their offsets and sizes
+- The web UI paints a skeleton layout and the correct theme before first paint,
+  instead of flashing the wrong theme and then correcting itself
 - Battery monitoring documentation corrected: the low battery alert is raised by
   the browser, not by the gate
 
 ### Fixed
-- Race history is sorted newest-first. Race files are named `DDMMYY-HHMMSS`, so
-  without an explicit sort a race from 2 August ordered ahead of one from
+- **Race history is sorted newest-first.** Race files are named `DDMMYY-HHMMSS`,
+  so without an explicit sort a race from 2 August ordered ahead of one from
   11 September and recent races appeared last
+- Marshal no longer writes to the SD card from the lap loop, and streams the
+  RSSI response rather than assembling it in memory
+- An over-the-air update now uploads firmware before the filesystem. The old
+  order could leave a device with a gzipped filesystem under pre-gzip firmware,
+  which serves "Web UI not found" with no way to retry from the browser
+- USB networking no longer advertises the gate as the host's DNS server, which
+  previously broke internet access on the machine it was plugged into
 
-### Upgrade note
-Devices that update over the air receive the app only and keep their existing
-1MB partition table, so they cannot take a filesystem image built against the new
-one. Migrating requires a single full reflash of bootloader, partitions, firmware
-and filesystem.
+### Removed
+- The old USB serial-CDC transport, superseded by USB networking
+- An unfinished I2S audio output that was built only for the DevKitC-1 and did
+  nothing, saving 129KB of flash on that board
 
 ## [1.7.3] - 2026-05-18
 
