@@ -3,7 +3,17 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
-## [1.8.0] - 2026-09-16
+## [1.8.0-rc-2] - 2026-09-18
+
+Release candidate, published to the pre-release channel on
+https://fpvgate.xyz/flasher.html. Everything below is what 1.8.0 will carry;
+this section becomes `[1.8.0]` when the final release goes out.
+
+Verified on an FPVGate AIO flashed from the published release artifacts: 90 of
+90 assets across ten concurrent page loads with no failures, and 18 of 18 on the
+device self test. The ESP32-S3 DevKitC-1 and FPVGate Solo have both run this
+code; SeeedXIAOESP32S3 and XIAOS3Plus are built and published but have not been
+run on hardware.
 
 ### Upgrade note — read this first
 **Upgrading from 1.7.x requires a full wired flash. Over-the-air will not work.**
