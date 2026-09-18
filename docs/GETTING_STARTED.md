@@ -365,12 +365,19 @@ pio run -e ESP32S3SuperMini -t uploadfs
    - `http://fpvgate.local` (preferred)
    - `http://192.168.4.1` (fallback)
 
-**USB Connection (Optional):**
+**USB Connection (firmware 1.8.0 and later):**
 
-1. Connect ESP32-S3 via USB
-2. Download [Electron app](https://github.com/LouisHitchcock/FPVGate/releases)
-3. Launch app and select COM port
-4. All features work identically
+1. Connect the gate to your computer with a USB-C cable
+2. Open a browser and go to `http://192.168.7.1`
+
+Nothing to install and nothing to configure — the gate presents itself as a
+network adapter. Windows and Linux only; macOS does not support it, so use WiFi
+on a Mac. WiFi keeps working at the same time.
+
+If nothing appears, **unplug the cable and plug it back in** — after a flash the
+board waits in its bootloader until power is removed. See
+[USER_GUIDE.md § USB troubleshooting](USER_GUIDE.md#usb-troubleshooting) if it
+still will not connect.
 
 ### Step 2: Configure Your VTx Frequency
 

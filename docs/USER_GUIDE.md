@@ -46,35 +46,71 @@ FPVGate creates its own WiFi Access Point on startup.
 - Multiple devices can connect simultaneously
 - Forget network after use to avoid auto-reconnecting
 
-### USB Connection (ESP32-S3 Only)
+### USB Connection (ESP32-S3, firmware 1.8.0 and later)
 
-Direct USB connection provides lower latency and eliminates WiFi issues.
+From 1.8.0 the gate presents itself over USB-C as a **network adapter**. Plug it
+into a computer and the full web interface is reachable at a normal address, with
+no WiFi, no app to install and no drivers to find.
 
-**Option A: Electron Desktop App**
+**Steps:**
 
-1. Download [Electron app from releases](https://github.com/LouisHitchcock/FPVGate/releases)
-2. Extract and run `FPVGate.exe` (Windows) or equivalent
-3. Connect ESP32-S3 via USB-C cable
-4. In Configuration -> System Setup:
-   - Connection mode selector appears
-   - Click "USB" mode
-   - Select your COM port from dropdown
-5. App automatically uses USB transport
+1. **Connect** the gate to your computer with a USB-C cable
+2. **Wait a few seconds** for it to appear as a network device
+3. **Open a browser** and go to `http://192.168.7.1`
 
-**Option B: Web Browser (Chrome/Edge)**
+That is the whole procedure. There is no connection mode to pick, no COM port to
+choose, and no permission prompt.
 
-1. Connect ESP32-S3 via USB
-2. Open Chrome or Edge browser
-3. Navigate to `http://192.168.4.1` (still via WiFi) or use local file
-4. Click USB connection mode in Configuration
-5. Grant serial port permissions when prompted
-6. Select COM port
+**Supported systems:**
 
-**USB Benefits:**
-- Zero WiFi latency
-- Works completely offline
-- More reliable for race control
-- WiFi remains available for spectators/timing screens
+| System | Supported | Notes |
+|---|---|---|
+| Windows 10 / 11 | Yes | Driver is built in |
+| Linux | Yes | Driver is built in |
+| **macOS** | **No** | Apple removed support for the RNDIS protocol the gate uses. Use WiFi on a Mac. |
+
+**Good to know:**
+
+- **WiFi keeps working at the same time.** The gate stays on `192.168.4.1` over
+  its own access point while USB is connected, so a timing screen or a phone can
+  stay on WiFi while you use the cable.
+- **A COM port also appears.** That is the serial console for development. You do
+  not need it, and the web interface does not use it.
+- **The cable carries data, not just power.** Some USB-C cables are
+  charge-only — if nothing appears at all, try a different cable before anything
+  else.
+- **Upgrading from 1.7.x needs a wired flash.** The partition layout changed in
+  1.8.0, so an over-the-air update cannot make the jump. Use the web flasher at
+  [fpvgate.xyz](https://fpvgate.xyz/flasher.html) once, and later updates can go
+  over the air.
+
+#### USB troubleshooting
+
+**Nothing appears after flashing.**
+This is expected, and it is the single most common cause of "my gate is dead
+after updating". Flashing leaves the board waiting in its bootloader, and that
+state survives a reset — only removing power clears it. **Unplug the cable and
+plug it back in.** Pressing the reset button is not enough.
+
+**The gate appears in Device Manager but `192.168.7.1` does not load.**
+Unplug and replug once more. Windows occasionally brings the network adapter back
+disabled after the device reconnects, and a second power cycle clears it. In
+Device Manager the symptom is a *Remote NDIS based Internet Sharing Device* with
+a warning triangle, or an adapter shown as Disabled under Network Connections.
+
+**It still will not connect.**
+The gate is always reachable over WiFi as a fallback — join `FPVGate_XXXX` with
+password `fpvgate1` and open `http://192.168.4.1`. Everything works the same way
+there, so a USB problem never leaves you unable to run a race.
+
+**Nothing at all, on any port.**
+Hold the **BOOT** button while plugging the cable in, release it, then reflash
+with the web flasher. This forces the board into its recovery bootloader and
+works even when the firmware is not starting. Check too that nothing is pressing
+the BOOT button by accident — a board held in recovery mode will never start
+normally.
+
+**On a Mac.** USB networking will not work and cannot be made to. Use WiFi.
 
 ### WiFi Status Display
 

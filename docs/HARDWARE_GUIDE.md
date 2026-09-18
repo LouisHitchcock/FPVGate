@@ -743,18 +743,38 @@ Before final assembly, test each component:
 - Check Serial Monitor for stack traces
 - Reflash firmware (may be corrupted)
 
-### USB Connection Issues (ESP32-S3)
+### USB Connection Issues (ESP32-S3, firmware 1.8.0 and later)
 
-**Symptoms:**
-- COM port not detected
-- Electron app can't find device
+From 1.8.0 the gate appears over USB-C as a network adapter and is reached at
+`http://192.168.7.1`. There are no drivers to install on Windows or Linux, and
+no COM port to select.
 
-**Solutions:**
-- Install CP2102 or CH340 drivers
-- Use "USB CDC" in PlatformIO
-- Check Device Manager (Windows)
-- Try different USB cable
-- Enable USB in device firmware
+**Nothing appears after flashing**
+- **Unplug the cable and plug it back in.** Flashing leaves the board waiting in
+  its bootloader, and that survives a reset — only removing power clears it.
+  This is by far the most common cause.
+
+**Device is listed but `192.168.7.1` will not load**
+- Unplug and replug once more. Windows sometimes brings the adapter back
+  disabled, and a second power cycle clears it.
+- In Device Manager the symptom is *Remote NDIS based Internet Sharing Device*
+  with a warning triangle, or a Disabled adapter under Network Connections.
+
+**Nothing on any port at all**
+- Try a different USB-C cable; charge-only cables carry no data.
+- Hold **BOOT** while plugging in, release, then reflash from
+  [fpvgate.xyz](https://fpvgate.xyz/flasher.html). This forces recovery mode and
+  works even when the firmware will not start.
+- Check nothing is pressing the BOOT button. A board held in recovery mode never
+  starts normally, and on a board in an enclosure this is easy to miss.
+
+**Using a Mac**
+- USB networking cannot work on macOS — Apple removed the RNDIS support it
+  relies on. Use WiFi instead; every feature is available there.
+
+**Fallback**
+- WiFi always works in parallel. Join `FPVGate_XXXX` (password `fpvgate1`) and
+  open `http://192.168.4.1`, so a USB problem never stops a race running.
 
 ### Phantom Laps
 

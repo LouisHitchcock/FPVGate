@@ -1,5 +1,11 @@
 # USB Networking on ESP32-S3 — findings
 
+> **Looking for how to use USB networking?** See
+> [USER_GUIDE.md § USB Connection](USER_GUIDE.md#usb-connection-esp32-s3-firmware-180-and-later)
+> for connecting, supported systems and troubleshooting. This document is an
+> engineering log of how the feature was built and what failed on the way; it is
+> written for whoever maintains the USB code, not for people using a gate.
+
 Record of the investigation into presenting FPVGate over USB-C as a network
 interface, so the existing web UI is reachable at a URL without WiFi.
 
