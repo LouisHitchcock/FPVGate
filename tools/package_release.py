@@ -68,7 +68,22 @@ Notes
 """
 
 
-def run(command):
+def pio_command(arguments):
+    """Build a PlatformIO invocation that does not depend on PATH.
+
+    `pio` is only on PATH if the user installed the shell shims, which is not
+    the case inside PlatformIO's own virtualenv - the obvious `["pio", ...]`
+    fails there with WinError 2. Running it as a module off the interpreter
+    executing this script always resolves.
+    """
+    executable = shutil.which("pio") or shutil.which("platformio")
+    if executable:
+        return [executable] + arguments
+    return [sys.executable, "-m", "platformio"] + arguments
+
+
+def run(arguments):
+    command = pio_command(arguments)
     print(f"  $ {' '.join(command)}", flush=True)
     result = subprocess.run(command)
     if result.returncode != 0:
@@ -125,8 +140,8 @@ def main():
     for environment, size, description in boards:
         print(f"\n=== {environment} ({size}) ===")
         if not args.skip_build:
-            run(["pio", "run", "-e", environment])
-            run(["pio", "run", "-e", environment, "-t", "buildfs"])
+            run(["run", "-e", environment])
+            run(["run", "-e", environment, "-t", "buildfs"])
 
         build = os.path.join(".pio", "build", environment)
         for part in PARTS:
@@ -137,6 +152,24 @@ def main():
                 continue
             shutil.copy2(source, os.path.join(root, f"{environment}-{part}.bin"))
             shutil.copy2(source, os.path.join(board_dir, f"{environment}-{size}-{part}.bin"))
+            # Third copy, in the "modern" per-board layout, used by two
+            # consumers that both address it by board id:
+            #
+            #   the device updater  <site>/<firmware|preRelease>/<tag>/<board>/
+            #                       firmware.bin and littlefs.bin only
+            #                       (otaBuildUrls() in data/script.js)
+            #   the web flasher     the same directory, but all four images
+            #                       (generateManifest() in the website's
+            #                       flasher.js, which maps filesystem.bin to
+            #                       littlefs.bin)
+            #
+            # So all four are copied: the flasher 404s on bootloader or
+            # partitions otherwise, and the updater simply ignores the two it
+            # does not need. The directory name must be exactly the board id
+            # reported by /api/system/info.
+            ota_dir = os.path.join(root, environment)
+            os.makedirs(ota_dir, exist_ok=True)
+            shutil.copy2(source, os.path.join(ota_dir, f"{part}.bin"))
             print(f"  {part:11} {os.path.getsize(source) / 1024:7.0f} KB")
 
         offset = filesystem_offset(environment) or "0x410000"
