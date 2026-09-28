@@ -67,11 +67,6 @@ extern bool loopTaskWDTEnabled;
 // - Change "opMode" in config via web interface (0=WiFi, 1=RotorHazard)
 // - Requires REBOOT to take effect
 // - Setting is stored in EEPROM and persists across reboots
-//
-// PHYSICAL MODE SWITCH (when installed):
-// - GPIO9 to GND = Force WiFi mode (overrides software setting)
-// - GPIO9 floating = Use software config setting
-// - Hardware switch always takes priority over software setting
 
 static RX5808 rx(PIN_RX5808_RSSI, PIN_RX5808_DATA, PIN_RX5808_SELECT, PIN_RX5808_CLOCK);
 static Config config;
@@ -277,26 +272,11 @@ void setup() {
     config.init();
     
     /* DISABLED: RotorHazard mode detection
-    // Check physical mode switch
-    pinMode(PIN_MODE_SWITCH, INPUT_PULLUP);
-    delay(10);  // Allow pin to settle
-    
-    int modePin = digitalRead(PIN_MODE_SWITCH);
-    
-    // Physical switch overrides software setting
-    // If pin is explicitly pulled LOW (to GND), force WiFi mode
-    // If pin reads HIGH (floating with pullup), use software config
-    if (modePin == WIFI_MODE) {
-        // Physical switch connected to GND = force WiFi mode
+    uint8_t configMode = config.getOperationMode();
+    if (configMode == 0) {
         currentMode = MODE_WIFI;
     } else {
-        // Pin is HIGH (floating) = use software config
-        uint8_t configMode = config.getOperationMode();
-        if (configMode == 0) {
-            currentMode = MODE_WIFI;
-        } else {
-            currentMode = MODE_ROTORHAZARD;
-        }
+        currentMode = MODE_ROTORHAZARD;
     }
     */
     

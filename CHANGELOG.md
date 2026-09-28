@@ -3,6 +3,24 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
+## [1.8.0-rc-3] - 2026-09-28
+
+Release candidate for the FPVGate AIO and Seeed XIAO ESP32S3 only, published to
+the pre-release channel on https://fpvgate.xyz/flasher.html. Built but not yet
+run on hardware.
+
+### Fixed
+- **Battery monitoring on the Seeed XIAO ESP32S3.** It was enabled but read
+  GPIO0, which has no ADC channel on the S3, so the reported voltage was
+  meaningless and could raise false low battery alerts. It now reads D0 (GPIO1).
+  The XIAO has no onboard divider, so an external 100K/100K divider from the
+  battery to D0 is required
+
+### Removed
+- The legacy physical mode switch pin definitions. The switch code had been
+  disabled for some time, and on the AIO and XIAO its D0 assignment collided
+  with battery sense
+
 ## [1.8.0-rc-2] - 2026-09-18
 
 Release candidate, published to the pre-release channel on

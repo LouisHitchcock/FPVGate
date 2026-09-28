@@ -37,7 +37,6 @@
 #define PIN_RX5808_CLOCK 4     // CH3 on Pin 4
 #define PIN_BUZZER 5
 #define BUZZER_INVERTED false
-//#define PIN_MODE_SWITCH 1      // Mode selection: LOW=WiFi, HIGH=RotorHazard
 // SD Card SPI pins
 #define PIN_SD_CS 8
 #define PIN_SD_SCK 2
@@ -59,7 +58,6 @@
 #define PIN_RX5808_CLOCK 12    // SAME AS DEVKITC: CH3 on Pin 12
 #define PIN_BUZZER 5           // SAME AS DEVKITC: Buzzer on Pin 5
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 9      // SAME AS DEVKITC: Mode selection
 // SD Card SPI pins (SAME AS DEVKITC)
 #define PIN_SD_CS 39           // SAME AS DEVKITC
 #define PIN_SD_SCK 36          // SAME AS DEVKITC
@@ -129,7 +127,6 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 1      // D0
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
@@ -184,7 +181,7 @@
 #define PIN_LED 21             // Onboard user LED
 #define PIN_RGB_LED 44         // NeoPixel signal on D7 (GPIO44)
 #define NUM_LEDS 2
-#define PIN_VBAT 0             // External divider required if used
+#define PIN_VBAT 1             // D0 (GPIO1) - needs external divider, none on the XIAO
 #define VBAT_SCALE 2
 #define VBAT_ADD 2
 #define PIN_RX5808_RSSI 3      // D2
@@ -193,7 +190,6 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 1      // D0
 // SD Card SPI pins (XIAO S3 per user wiring)
 #define PIN_SD_CS 2            // D1 (CS)
 #define PIN_SD_SCK 7           // D8 (SCK)
@@ -215,7 +211,6 @@
 #define PIN_RX5808_CLOCK 12    // CH3 on Pin 12
 #define PIN_BUZZER 6           // Buzzer on GPIO6 (GPIO5 used for RGB LED)
 #define BUZZER_INVERTED false
-#define PIN_MODE_SWITCH 9      // Mode selection: LOW=WiFi, HIGH=RotorHazard
 // SD Card SPI pins (tested and working configuration)
 #define PIN_SD_CS 39
 #define PIN_SD_SCK 36
@@ -292,10 +287,6 @@
 #if defined(ESP32S3) && defined(PIN_I2S_BCLK)
     #define HAS_I2S_AUDIO 1
 #endif
-
-// Mode selection constants
-#define WIFI_MODE LOW          // GND on switch pin = WiFi/Standalone mode
-#define ROTORHAZARD_MODE HIGH  // HIGH (floating/pullup) = RotorHazard node mode
 
 #define EEPROM_RESERVED_SIZE 832
 #define CONFIG_MAGIC_MASK (0b11U << 30)
