@@ -29,6 +29,9 @@ private:
     uint32_t lastLapMs_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t enteredMs_[C5Link::C5_MAX_PILOTS] = {};
     uint8_t filtered_[C5Link::C5_MAX_PILOTS] = {};
+    // Filled by update() in the main loop, drained by takeLap() from the web
+    // task on the other core, so guarded by a spinlock.
     C5LapEvent pending_[C5Link::C5_MAX_PILOTS] = {};
     uint8_t pendingCount_ = 0;
+    portMUX_TYPE lapMux_ = portMUX_INITIALIZER_UNLOCKED;
 };

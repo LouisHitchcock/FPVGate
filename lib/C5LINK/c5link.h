@@ -14,8 +14,12 @@ public:
 
     void begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin);
     void poll(uint32_t nowMs);
-    // A valid line from the C5 within the last ONLINE_TIMEOUT_MS.
-    bool online(uint32_t nowMs) const { return heardAny_ && (nowMs - lastLineMs_) < ONLINE_TIMEOUT_MS; }
+    // A valid line from the C5 within the last ONLINE_TIMEOUT_MS. Signed
+    // difference: the web task (other core) passes a "now" taken a moment
+    // before poll() may have stamped a newer line.
+    bool online(uint32_t nowMs) const {
+        return heardAny_ && (int32_t)(nowMs - lastLineMs_) < (int32_t)ONLINE_TIMEOUT_MS;
+    }
     bool online() const { return online_; }
     uint8_t enabledCount() const;
     bool tuningReady() const { return tuningReady_; }
@@ -37,8 +41,8 @@ private:
     uint8_t rssi_[C5_MAX_PILOTS] = {};
     bool samplePending_[C5_MAX_PILOTS] = {};
     uint8_t activePilot_ = 0;
-    uint32_t lastLineMs_ = 0;
-    bool heardAny_ = false;
+    volatile uint32_t lastLineMs_ = 0;   // read by the web task on the other core
+    volatile bool heardAny_ = false;
     uint16_t requestedFrequency_ = 0;
     uint16_t reportedFrequency_ = 0;
     bool tuningReady_ = false;

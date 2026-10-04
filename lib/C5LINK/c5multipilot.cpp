@@ -41,8 +41,16 @@ void C5MultiPilot::update(uint32_t nowMs) {
             inside_[i] = false;
             uint32_t crossing = sampleMs;
             uint32_t lap = lastLapMs_[i] ? (crossing - lastLapMs_[i]) : (crossing - enteredMs_[i]);
-            if (lap >= config_->getMinLapMs() && pendingCount_ < C5Link::C5_MAX_PILOTS) {
-                pending_[pendingCount_++] = {i, lap};
+            bool queued = false;
+            if (lap >= config_->getMinLapMs()) {
+                portENTER_CRITICAL(&lapMux_);
+                if (pendingCount_ < C5Link::C5_MAX_PILOTS) {
+                    pending_[pendingCount_++] = {i, lap};
+                    queued = true;
+                }
+                portEXIT_CRITICAL(&lapMux_);
+            }
+            if (queued) {
                 lastLapMs_[i] = crossing;
             } else if (!lastLapMs_[i]) {
                 lastLapMs_[i] = crossing;
@@ -53,9 +61,14 @@ void C5MultiPilot::update(uint32_t nowMs) {
 }
 
 bool C5MultiPilot::takeLap(C5LapEvent &event) {
-    if (!pendingCount_) return false;
-    event = pending_[0];
-    for (uint8_t i = 1; i < pendingCount_; ++i) pending_[i - 1] = pending_[i];
-    --pendingCount_;
-    return true;
+    bool got = false;
+    portENTER_CRITICAL(&lapMux_);
+    if (pendingCount_) {
+        event = pending_[0];
+        for (uint8_t i = 1; i < pendingCount_; ++i) pending_[i - 1] = pending_[i];
+        --pendingCount_;
+        got = true;
+    }
+    portEXIT_CRITICAL(&lapMux_);
+    return got;
 }
