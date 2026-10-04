@@ -60,6 +60,10 @@ void C5Link::sendTune(uint8_t pilot) {
     char command[24];
     snprintf(command, sizeof(command), "F,%u", frequency);
     sendPayload(command);
+    tuneSentUs_ = micros();
+    tuningReceivedUs_ = 0;
+    readyReceivedUs_ = 0;
+    firstSampleRecorded_ = false;
     if (gainDirty_) {
         snprintf(command, sizeof(command), "G,%u", gain_);
         sendPayload(command);
@@ -136,6 +140,12 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             sampleQueue_[pilot][sampleHead_[pilot]] = {(uint16_t)value, micros()};
             sampleHead_[pilot] = next;
             ++acceptedSamples_;
+            if (!firstSampleRecorded_ && readyReceivedUs_ != 0) {
+                const uint32_t firstSampleUs = micros();
+                readyToFirstSampleUs_ = firstSampleUs - readyReceivedUs_;
+                tuneToFirstSampleUs_ = firstSampleUs - tuneSentUs_;
+                firstSampleRecorded_ = true;
+            }
             online_ = true;
         }
     } else if (line[0] == 'S' && line[1] == ',') {
@@ -145,8 +155,15 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             reportedFrequency_ = (uint16_t)freq;
             reportedGain_ = (uint8_t)gain;
             strlcpy(state_, status, sizeof(state_));
+            const uint32_t statusUs = micros();
+            if (strcmp(status, "TUNING") == 0 && reportedFrequency_ == requestedFrequency_ && tuneSentUs_ != 0) {
+                tuningReceivedUs_ = statusUs;
+                tuneToTuningUs_ = statusUs - tuneSentUs_;
+            }
             if (strcmp(status, "OK") == 0 && reportedFrequency_ == requestedFrequency_) {
                 tuningReady_ = true;
+                if (tuningReceivedUs_ != 0) tuningToReadyUs_ = statusUs - tuningReceivedUs_;
+                readyReceivedUs_ = statusUs;
             }
             online_ = true;
         }

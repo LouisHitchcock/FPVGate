@@ -39,6 +39,10 @@ public:
     uint32_t sampleSequenceGaps() const { return sampleSequenceGaps_; }
     uint32_t sampleQueueDrops() const { return sampleQueueDrops_; }
     uint32_t acceptedSamples() const { return acceptedSamples_; }
+    uint32_t tuneToTuningUs() const { return tuneToTuningUs_; }
+    uint32_t tuningToReadyUs() const { return tuningToReadyUs_; }
+    uint32_t readyToFirstSampleUs() const { return readyToFirstSampleUs_; }
+    uint32_t tuneToFirstSampleUs() const { return tuneToFirstSampleUs_; }
     const char *state() const { return state_; }
     uint16_t tunedFrequency() const { return reportedFrequency_; }
 
@@ -60,6 +64,14 @@ private:
     uint32_t sampleSequenceGaps_ = 0;
     uint32_t sampleQueueDrops_ = 0;
     uint32_t acceptedSamples_ = 0;
+    uint32_t tuneSentUs_ = 0;
+    uint32_t tuningReceivedUs_ = 0;
+    uint32_t readyReceivedUs_ = 0;
+    bool firstSampleRecorded_ = false;
+    uint32_t tuneToTuningUs_ = 0;
+    uint32_t tuningToReadyUs_ = 0;
+    uint32_t readyToFirstSampleUs_ = 0;
+    uint32_t tuneToFirstSampleUs_ = 0;
     uint8_t activePilot_ = 0;
     volatile uint32_t lastLineMs_ = 0;   // read by the web task on the other core
     volatile bool heardAny_ = false;

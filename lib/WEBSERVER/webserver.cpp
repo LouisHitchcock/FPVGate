@@ -351,6 +351,14 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         String payload;
         serializeJson(rssiDoc, payload);
         events.send(payload.c_str(), "c5Rssi");
+        char timingPayload[128];
+        snprintf(timingPayload, sizeof(timingPayload),
+                 "{\"tuneToTuningUs\":%lu,\"tuningToReadyUs\":%lu,\"readyToFirstSampleUs\":%lu,\"tuneToFirstSampleUs\":%lu}",
+                 (unsigned long)c5Link->tuneToTuningUs(),
+                 (unsigned long)c5Link->tuningToReadyUs(),
+                 (unsigned long)c5Link->readyToFirstSampleUs(),
+                 (unsigned long)c5Link->tuneToFirstSampleUs());
+        events.send(timingPayload, "c5Timing");
         C5LapEvent lap;
         while (c5MultiPilot->takeLap(lap)) {
             JsonDocument lapDoc;
