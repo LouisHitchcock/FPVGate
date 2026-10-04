@@ -14,7 +14,10 @@ public:
     // timestamps improve crossing accuracy independently of slot duration.
     static constexpr uint32_t SLOT_MS = 20;
     static constexpr uint32_t ONLINE_TIMEOUT_MS = 2500;  // the C5 sends status at least every second
-    static constexpr uint8_t SAMPLE_QUEUE_DEPTH = 8;
+    // UART reads can arrive in bursts while the main loop is servicing other
+    // peripherals. Keep enough history to absorb a full short burst without
+    // overwriting samples before C5MultiPilot drains them.
+    static constexpr uint8_t SAMPLE_QUEUE_DEPTH = 64;
 
     void begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin);
     void poll(uint32_t nowMs);
