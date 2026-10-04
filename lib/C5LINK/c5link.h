@@ -35,6 +35,7 @@ public:
     bool takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs);
     uint32_t sampleSequenceGaps() const { return sampleSequenceGaps_; }
     uint32_t sampleQueueDrops() const { return sampleQueueDrops_; }
+    uint32_t acceptedSamples() const { return acceptedSamples_; }
     const char *state() const { return state_; }
     uint16_t tunedFrequency() const { return reportedFrequency_; }
 
@@ -55,6 +56,7 @@ private:
     bool sampleSeqValid_ = false;
     uint32_t sampleSequenceGaps_ = 0;
     uint32_t sampleQueueDrops_ = 0;
+    uint32_t acceptedSamples_ = 0;
     uint8_t activePilot_ = 0;
     volatile uint32_t lastLineMs_ = 0;   // read by the web task on the other core
     volatile bool heardAny_ = false;

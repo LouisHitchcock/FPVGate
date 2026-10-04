@@ -130,6 +130,7 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             }
             sampleQueue_[pilot][sampleHead_[pilot]] = {(uint16_t)value, micros()};
             sampleHead_[pilot] = next;
+            ++acceptedSamples_;
             online_ = true;
         }
     } else if (line[0] == 'S' && line[1] == ',') {

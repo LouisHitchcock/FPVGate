@@ -343,6 +343,11 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         rssiDoc["mhz"] = c5Link->tunedFrequency();
         rssiDoc["gain"] = c5Link->reportedGain();
         rssiDoc["race"] = c5MultiPilot->running();
+        rssiDoc["pilot"] = c5Link->currentPilot();
+        rssiDoc["ready"] = c5Link->tuningReady();
+        rssiDoc["samples"] = c5Link->acceptedSamples();
+        rssiDoc["seqGaps"] = c5Link->sampleSequenceGaps();
+        rssiDoc["queueDrops"] = c5Link->sampleQueueDrops();
         String payload;
         serializeJson(rssiDoc, payload);
         events.send(payload.c_str(), "c5Rssi");
