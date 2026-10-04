@@ -12,7 +12,7 @@ public:
     // Keep enough time for the C5's F/G -> TUNING -> OK handshake and several
     // RSSI samples before advancing to the next pilot. The microsecond sample
     // timestamps improve crossing accuracy independently of slot duration.
-    static constexpr uint32_t SLOT_MS = 20;
+    static constexpr uint32_t SLOT_MS = 16;
     static constexpr uint32_t ONLINE_TIMEOUT_MS = 2500;  // the C5 sends status at least every second
     // UART reads can arrive in bursts while the main loop is servicing other
     // peripherals. Keep enough history to absorb a full short burst without
