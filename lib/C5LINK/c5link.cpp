@@ -14,6 +14,7 @@ void C5Link::begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t tx
     // pilots added later are picked up by poll().
     port_ = port;
     gain_ = config_->getC5Gain();
+    gainDirty_ = true;
     port_->begin(BAUD, SERIAL_8N1, rxPin, txPin);
     sendPayload("Q");
     activePilot_ = C5_MAX_PILOTS - 1;   // the first slot tuned is the first enabled one
@@ -59,8 +60,11 @@ void C5Link::sendTune(uint8_t pilot) {
     char command[24];
     snprintf(command, sizeof(command), "F,%u", frequency);
     sendPayload(command);
-    snprintf(command, sizeof(command), "G,%u", gain_);
-    sendPayload(command);
+    if (gainDirty_) {
+        snprintf(command, sizeof(command), "G,%u", gain_);
+        sendPayload(command);
+        gainDirty_ = false;
+    }
     activePilot_ = pilot;
     requestedFrequency_ = frequency;
     tuningReady_ = false;
@@ -71,6 +75,7 @@ void C5Link::poll(uint32_t nowMs) {
     if (!port_) return;
     if (config_->getC5Gain() != gain_) {
         gain_ = config_->getC5Gain();
+        gainDirty_ = true;
         activePilot_ = C5_MAX_PILOTS - 1;
         tuneNext();
         lastSlotMs_ = nowMs;

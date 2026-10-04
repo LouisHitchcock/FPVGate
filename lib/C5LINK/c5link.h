@@ -66,6 +66,7 @@ private:
     uint16_t requestedFrequency_ = 0;
     uint16_t reportedFrequency_ = 0;
     bool tuningReady_ = false;
+    bool gainDirty_ = true;
     uint8_t gain_ = 40;          // last gain sent
     uint8_t reportedGain_ = 0;   // gain in the C5's last status
     bool online_ = false;
