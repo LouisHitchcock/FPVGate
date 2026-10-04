@@ -17,7 +17,7 @@
 
 const C5UI = (() => {
   const SLOTS = 8;
-  const MIN_MHZ = 5180, MAX_MHZ = 5885;   // what the C5 node accepts (C5_MIN_MHZ/C5_MAX_MHZ)
+  const MIN_MHZ = 5180, MAX_MHZ = 5917;   // includes Raceband R8 via the C5 PHY hop path
   const COLORS = ["#ff6b6b", "#f7b32b", "#06d6a0", "#4cc9f0", "#a78bfa", "#f78c6b", "#7bd389", "#f472b6"];
   const HISTORY_S = 125;
   const SAVE_DELAY_MS = 800;
@@ -404,7 +404,7 @@ const C5UI = (() => {
       msg = `C5 online · ${live.st || "?"}${live.mhz ? " · tuning " + live.mhz + " MHz (" + channelName(live.mhz) + ")" : ""}` +
             ` · gain ${live.gain ?? gain} · ${enabled} pilot${enabled === 1 ? "" : "s"}, each read every ${enabled * 20} ms` +
             (live.race ? " · race running: laps counted" : " · laps count while a race runs");
-      if (err) msg += live.st === "ERR_FREQ" ? " · frequency outside 5180–5885 MHz" : " · the C5 reported an RF error";
+      if (err) msg += live.st === "ERR_FREQ" ? " · frequency outside 5180–5917 MHz" : " · the C5 reported an RF error";
     }
     el.className = "c5p-status " + cls;
     txt.textContent = msg;

@@ -240,7 +240,7 @@
 // Frequencies the ESP32-C5 RF node accepts (docs/C5_RF_NODE_AGENT_SPEC.md);
 // it answers ERR_FREQ outside this range.
 #define C5_MIN_MHZ 5180
-#define C5_MAX_MHZ 5885
+#define C5_MAX_MHZ 5917
 
 // Optional ESP32-C5 RF-node UART. Override in a board target when the carrier
 // routes the co-processor to different pins.
