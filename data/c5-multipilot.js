@@ -17,6 +17,7 @@
 
 const C5UI = (() => {
   const SLOTS = 8;
+  const RSSI_SCALE = 4; // C5 wire value is 0..1023; profiles remain 0..255.
   const MIN_MHZ = 5180, MAX_MHZ = 5917;   // includes Raceband R8 via the C5 PHY hop path
   const COLORS = ["#ff6b6b", "#f7b32b", "#06d6a0", "#4cc9f0", "#a78bfa", "#f78c6b", "#7bd389", "#f472b6"];
   const HISTORY_S = 125;
@@ -334,7 +335,7 @@ const C5UI = (() => {
 
   function onRssi(d) {
     const t = now();
-    const rssi = d.rssi || [];
+    const rssi = (d.rssi || []).map(v => Number(v) / RSSI_SCALE);
     live = { on: !!d.on, started: d.started !== false, st: d.st || "", mhz: d.mhz || 0, gain: d.gain,
              race: !!d.race, inside: d.in || [], at: t };
     for (let i = 0; i < SLOTS; i++) {

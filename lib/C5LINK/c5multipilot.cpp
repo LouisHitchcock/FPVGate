@@ -11,8 +11,8 @@ void C5MultiPilot::start(uint32_t nowMs) {
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         inside_[i] = false;
         seen_[i] = false;
-        enteredMs_[i] = nowMs;
-        lastLapMs_[i] = 0;
+        enteredUs_[i] = nowMs * 1000u;
+        lastLapUs_[i] = 0;
     }
 }
 
@@ -26,21 +26,24 @@ void C5MultiPilot::update(uint32_t nowMs) {
             inside_[i] = false;
             continue;
         }
-        uint8_t value = 0;
-        uint32_t sampleMs = 0;
-        if (!link_->takeSample(i, value, sampleMs)) continue;
+        uint16_t value = 0;
+        uint32_t sampleUs = 0;
+        if (!link_->takeSample(i, value, sampleUs)) continue;
         // A small EMA keeps the C5's 1 kHz stream useful after UART slotting.
-        filtered_[i] = (uint8_t)(((uint16_t)filtered_[i] * 3 + value) / 4);
+        filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
         if (!running_) continue;
         const uint8_t enter = config_->getC5EnterRssi(i);
         const uint8_t exit = config_->getC5ExitRssi(i);
-        if (!inside_[i] && filtered_[i] >= enter) {
+        const uint16_t enterHi = (uint16_t)enter * 4u;
+        const uint16_t exitHi = (uint16_t)exit * 4u;
+        if (!inside_[i] && filtered_[i] >= enterHi) {
             inside_[i] = true;
-            enteredMs_[i] = sampleMs;
-        } else if (inside_[i] && filtered_[i] <= exit) {
+            enteredUs_[i] = sampleUs;
+        } else if (inside_[i] && filtered_[i] <= exitHi) {
             inside_[i] = false;
-            uint32_t crossing = sampleMs;
-            uint32_t lap = lastLapMs_[i] ? (crossing - lastLapMs_[i]) : (crossing - enteredMs_[i]);
+            uint32_t crossingUs = sampleUs;
+            uint32_t lapUs = lastLapUs_[i] ? (crossingUs - lastLapUs_[i]) : (crossingUs - enteredUs_[i]);
+            uint32_t lap = (lapUs + 500u) / 1000u;
             bool queued = false;
             if (lap >= config_->getMinLapMs()) {
                 portENTER_CRITICAL(&lapMux_);
@@ -51,9 +54,9 @@ void C5MultiPilot::update(uint32_t nowMs) {
                 portEXIT_CRITICAL(&lapMux_);
             }
             if (queued) {
-                lastLapMs_[i] = crossing;
-            } else if (!lastLapMs_[i]) {
-                lastLapMs_[i] = crossing;
+                lastLapUs_[i] = crossingUs;
+            } else if (!lastLapUs_[i]) {
+                lastLapUs_[i] = crossingUs;
             }
         }
     }

@@ -547,7 +547,9 @@ function setupWiFiEvents() {
     // ESP32-C5 multi-pilot: live RSSI and laps (data/c5-multipilot.js).
     eventSource.addEventListener("c5Rssi", function (e) {
       const data = JSON.parse(e.data);
-      window.c5PilotRssi = data.rssi || [];
+      // The C5 wire value is 10-bit (0..1023); keep the public/UI calibration
+      // scale at 0..255 with quarter-step resolution.
+      window.c5PilotRssi = (data.rssi || []).map(v => Number(v) / 4);
       if (typeof C5UI !== "undefined") C5UI.onRssi(data);
     }, false);
 

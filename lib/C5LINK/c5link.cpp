@@ -110,9 +110,12 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
 
     if (line[0] == 'R' && line[1] == ',') {
         unsigned seq = 0, value = 0;
-        if (sscanf(line, "R,%u,%u", &seq, &value) == 2 && tuningReady_ && value <= 255) {
-            rssi_[activePilot_] = (uint8_t)value;
-            lastSampleMs_[activePilot_] = nowMs;
+        if (sscanf(line, "R,%u,%u", &seq, &value) == 2 && tuningReady_ && value <= 1023) {
+            rssi_[activePilot_] = (uint16_t)value;
+            // UART parsing is still driven by the millisecond main-loop
+            // timestamp for link liveness, but retain sub-millisecond timing
+            // for lap detection. The line protocol remains unchanged.
+            lastSampleUs_[activePilot_] = micros();
             samplePending_[activePilot_] = true;
             online_ = true;
         }
@@ -131,10 +134,10 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
     }
 }
 
-bool C5Link::takeSample(uint8_t pilot, uint8_t &value, uint32_t &timestampMs) {
+bool C5Link::takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs) {
     if (pilot >= C5_MAX_PILOTS || !samplePending_[pilot]) return false;
     samplePending_[pilot] = false;
     value = rssi_[pilot];
-    timestampMs = lastSampleMs_[pilot];
+    timestampUs = lastSampleUs_[pilot];
     return true;
 }

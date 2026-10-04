@@ -9,7 +9,10 @@ class C5Link {
 public:
     static constexpr uint8_t C5_MAX_PILOTS = 8;
     static constexpr uint32_t BAUD = 921600;
-    static constexpr uint32_t SLOT_MS = 20;            // time on each enabled pilot
+    // Keep enough time for the C5's F/G -> TUNING -> OK handshake and several
+    // RSSI samples before advancing to the next pilot. The microsecond sample
+    // timestamps improve crossing accuracy independently of slot duration.
+    static constexpr uint32_t SLOT_MS = 20;
     static constexpr uint32_t ONLINE_TIMEOUT_MS = 2500;  // the C5 sends status at least every second
 
     void begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin);
@@ -27,8 +30,8 @@ public:
     uint8_t reportedGain() const { return reportedGain_; }
     bool started() const { return port_ != nullptr; }
     uint8_t currentPilot() const { return activePilot_; }
-    uint8_t rssi(uint8_t pilot) const { return pilot < C5_MAX_PILOTS ? rssi_[pilot] : 0; }
-    bool takeSample(uint8_t pilot, uint8_t &value, uint32_t &timestampMs);
+    uint16_t rssi(uint8_t pilot) const { return pilot < C5_MAX_PILOTS ? rssi_[pilot] : 0; }
+    bool takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs);
     const char *state() const { return state_; }
     uint16_t tunedFrequency() const { return reportedFrequency_; }
 
@@ -37,8 +40,8 @@ private:
     HardwareSerial *port_ = nullptr;
     uint32_t lastSlotMs_ = 0;
     uint32_t lastStatusMs_ = 0;
-    uint32_t lastSampleMs_[C5_MAX_PILOTS] = {};
-    uint8_t rssi_[C5_MAX_PILOTS] = {};
+    uint32_t lastSampleUs_[C5_MAX_PILOTS] = {};
+    uint16_t rssi_[C5_MAX_PILOTS] = {};
     bool samplePending_[C5_MAX_PILOTS] = {};
     uint8_t activePilot_ = 0;
     volatile uint32_t lastLineMs_ = 0;   // read by the web task on the other core

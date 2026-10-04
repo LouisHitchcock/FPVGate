@@ -15,7 +15,7 @@ public:
     void stop();
     void update(uint32_t nowMs);
     bool running() const { return running_; }
-    uint8_t rssi(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? filtered_[pilot] : 0; }
+    uint16_t rssi(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? filtered_[pilot] : 0; }
     // Above the enter threshold and not yet below exit (only while a race runs).
     bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
     bool takeLap(C5LapEvent &event);
@@ -26,9 +26,11 @@ private:
     bool running_ = false;
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
     bool seen_[C5Link::C5_MAX_PILOTS] = {};
-    uint32_t lastLapMs_[C5Link::C5_MAX_PILOTS] = {};
-    uint32_t enteredMs_[C5Link::C5_MAX_PILOTS] = {};
-    uint8_t filtered_[C5Link::C5_MAX_PILOTS] = {};
+    // Keep the crossing clock in microseconds; the public lap event remains
+    // milliseconds for compatibility with the existing timer/web API.
+    uint32_t lastLapUs_[C5Link::C5_MAX_PILOTS] = {};
+    uint32_t enteredUs_[C5Link::C5_MAX_PILOTS] = {};
+    uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
     // Filled by update() in the main loop, drained by takeLap() from the web
     // task on the other core, so guarded by a spinlock.
     C5LapEvent pending_[C5Link::C5_MAX_PILOTS] = {};
