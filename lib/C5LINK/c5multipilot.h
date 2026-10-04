@@ -16,6 +16,8 @@ public:
     void update(uint32_t nowMs);
     bool running() const { return running_; }
     uint8_t rssi(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? filtered_[pilot] : 0; }
+    // Above the enter threshold and not yet below exit (only while a race runs).
+    bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
     bool takeLap(C5LapEvent &event);
 
 private:

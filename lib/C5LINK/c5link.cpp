@@ -9,16 +9,37 @@ static uint8_t xorChecksum(const char *s) {
 
 void C5Link::begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin) {
     config_ = config;
+    if (!port || rxPin < 0 || txPin < 0) return;
+    // Start the UART even with no pilot set, so the C5's status shows up and
+    // pilots added later are picked up by poll().
     port_ = port;
-    if (!port_ || rxPin < 0 || txPin < 0 || config_->getC5PilotCount() == 0) return;
-    configuredCount_ = config_->getC5PilotCount() > C5_MAX_PILOTS ? C5_MAX_PILOTS : config_->getC5PilotCount();
     gain_ = config_->getC5Gain();
     port_->begin(BAUD, SERIAL_8N1, rxPin, txPin);
-    configuredCount_ = configuredCount_ ? configuredCount_ : 1;
     sendPayload("Q");
-    sendTune(0);
+    activePilot_ = C5_MAX_PILOTS - 1;   // the first slot tuned is the first enabled one
+    tuneNext();
     lastSlotMs_ = millis();
-    DEBUG("C5 link started: %u pilot slots at %lu baud (UART RX=%d TX=%d)\n", configuredCount_, BAUD, rxPin, txPin);
+    DEBUG("C5 link started at %lu baud (UART RX=%d TX=%d)\n", BAUD, rxPin, txPin);
+}
+
+uint8_t C5Link::enabledCount() const {
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < C5_MAX_PILOTS; ++i) n += config_ && config_->getC5Frequency(i) ? 1 : 0;
+    return n;
+}
+
+void C5Link::tuneNext() {
+    // Round robin over the slots that have a frequency; empty slots are
+    // skipped so a gap can't stall the cycle.
+    for (uint8_t step = 1; step <= C5_MAX_PILOTS; ++step) {
+        uint8_t slot = (uint8_t)((activePilot_ + step) % C5_MAX_PILOTS);
+        if (config_->getC5Frequency(slot)) {
+            sendTune(slot);
+            return;
+        }
+    }
+    tuningReady_ = false;   // nothing to tune
+    requestedFrequency_ = 0;
 }
 
 void C5Link::sendPayload(const char *payload) {
@@ -32,7 +53,7 @@ void C5Link::sendPayload(const char *payload) {
 }
 
 void C5Link::sendTune(uint8_t pilot) {
-    if (!port_ || pilot >= configuredCount_) return;
+    if (!port_ || pilot >= C5_MAX_PILOTS) return;
     uint16_t frequency = config_->getC5Frequency(pilot);
     if (!frequency) return;
     char command[24];
@@ -46,14 +67,12 @@ void C5Link::sendTune(uint8_t pilot) {
 }
 
 void C5Link::poll(uint32_t nowMs) {
-    if (!port_ || !configuredCount_) return;
-    uint8_t requestedCount = config_->getC5PilotCount();
-    if (requestedCount > C5_MAX_PILOTS) requestedCount = C5_MAX_PILOTS;
-    if (requestedCount != configuredCount_ || config_->getC5Gain() != gain_) {
-        configuredCount_ = requestedCount ? requestedCount : 1;
+    if (!port_) return;
+    if (config_->getC5Gain() != gain_) {
         gain_ = config_->getC5Gain();
-        activePilot_ = 0;
-        sendTune(activePilot_);
+        activePilot_ = C5_MAX_PILOTS - 1;
+        tuneNext();
+        lastSlotMs_ = nowMs;
     }
     while (port_->available()) {
         char c = (char)port_->read();
@@ -69,9 +88,9 @@ void C5Link::poll(uint32_t nowMs) {
     }
     // A slot is intentionally long enough to collect several 1 kHz samples,
     // but short enough that all eight pilots remain responsive.
-    if ((nowMs - lastSlotMs_) >= 20) {
+    if ((nowMs - lastSlotMs_) >= SLOT_MS) {
         lastSlotMs_ = nowMs;
-        sendTune((uint8_t)((activePilot_ + 1) % configuredCount_));
+        tuneNext();
     }
     if ((nowMs - lastStatusMs_) >= 1000) {
         lastStatusMs_ = nowMs;
@@ -86,6 +105,8 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
     char *end = nullptr;
     unsigned long supplied = strtoul(star + 1, &end, 16);
     if (!end || *end || supplied != xorChecksum(line)) return;
+    lastLineMs_ = nowMs;
+    heardAny_ = true;
 
     if (line[0] == 'R' && line[1] == ',') {
         unsigned seq = 0, value = 0;
@@ -100,7 +121,7 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
         char status[12] = {};
         if (sscanf(line, "S,%u,%u,%11[^,]", &freq, &gain, status) >= 3) {
             reportedFrequency_ = (uint16_t)freq;
-            gain_ = (uint8_t)gain;
+            reportedGain_ = (uint8_t)gain;
             strlcpy(state_, status, sizeof(state_));
             if (strcmp(status, "OK") == 0 && reportedFrequency_ == requestedFrequency_) {
                 tuningReady_ = true;

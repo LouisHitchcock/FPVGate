@@ -154,7 +154,7 @@ void Config::load(void) {
                 conf.c5EnterRssi[i] = conf.enterRssi;
                 conf.c5ExitRssi[i] = conf.exitRssi;
             }
-            conf.c5Gain = 40;
+            conf.c5Gain = 30;
             conf.version = CONFIG_VERSION | CONFIG_MAGIC;
             modified = true;
             write();
@@ -386,6 +386,38 @@ void Config::load(void) {
             conf.exitRssi = 68;
         }
         modified = true;
+    }
+
+    // Sanity: receiver type and the ESP32-C5 pilot slots. Configs migrated
+    // from before v23 never initialised the C5 fields (they reused old
+    // reserved bytes), so anything out of range goes back to defaults.
+    if (conf.receiverRadio > 2) {
+        conf.receiverRadio = 0;
+        modified = true;
+    }
+    if (conf.c5Gain > 89) {
+        conf.c5Gain = 30;
+        modified = true;
+    }
+    {
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < 8; ++i) {
+            uint16_t f = conf.c5Frequencies[i];
+            if (f && (f < C5_MIN_MHZ || f > C5_MAX_MHZ)) {
+                conf.c5Frequencies[i] = 0;
+                modified = true;
+            }
+            if (conf.c5EnterRssi[i] < 1 || conf.c5EnterRssi[i] == 0xFF || conf.c5ExitRssi[i] >= conf.c5EnterRssi[i]) {
+                conf.c5EnterRssi[i] = 72;
+                conf.c5ExitRssi[i] = 68;
+                modified = true;
+            }
+            if (conf.c5Frequencies[i]) count = i + 1;
+        }
+        if (conf.c5PilotCount != count) {
+            conf.c5PilotCount = count;
+            modified = true;
+        }
     }
 
     const char* normalizedVoice = normalizeSelectedVoiceValue(conf.selectedVoice);
@@ -908,24 +940,29 @@ void Config::fromJson(JsonObject source) {
         modified = true;
     }
     // Receiver radio
-    if (!source["receiverRadio"].isNull() && source["receiverRadio"] != conf.receiverRadio) {
-        uint8_t val = source["receiverRadio"].as<uint8_t>();
-        if (val <= 1) {
-            conf.receiverRadio = val;
-            modified = true;
-        }
+    if (!source["receiverRadio"].isNull()) {
+        setReceiverRadio(source["receiverRadio"].as<uint8_t>());   // 0 RX5808, 1 Novacore, 2 ESP32-C5
     }
     if (!source["c5Gain"].isNull()) {
         setC5Gain(source["c5Gain"].as<uint8_t>());
     }
     if (!source["c5Pilots"].isNull()) {
+        // The list is the complete set of 8 slots: a slot that isn't in it
+        // (or has frequency 0) is switched off, so clearing a pilot sticks.
         JsonArray pilots = source["c5Pilots"].as<JsonArray>();
-        uint8_t count = 0;
+        bool given[8] = {};
+        uint8_t index = 0;
         for (JsonObject pilot : pilots) {
-            uint8_t id = pilot["id"] | count;
+            uint8_t id = pilot["id"] | index;
+            ++index;
             if (id >= 8) continue;
+            given[id] = true;
             setC5Profile(id, pilot["frequency"] | 0, pilot["enterRssi"] | 72, pilot["exitRssi"] | 68);
-            if (id + 1 > count) count = id + 1;
+        }
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < 8; ++i) {
+            if (!given[i]) setC5Profile(i, 0, conf.c5EnterRssi[i], conf.c5ExitRssi[i]);
+            if (conf.c5Frequencies[i]) count = i + 1;
         }
         setC5PilotCount(count);
     }
@@ -1558,7 +1595,7 @@ void Config::setC5PilotCount(uint8_t count) {
 }
 void Config::setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi) {
     if (pilot >= 8) return;
-    if (frequency > 0 && (frequency < 5180 || frequency > 5885)) frequency = 0;
+    if (frequency > 0 && (frequency < C5_MIN_MHZ || frequency > C5_MAX_MHZ)) frequency = 0;
     if (enterRssi < 1) enterRssi = 1;
     if (exitRssi >= enterRssi) exitRssi = enterRssi > 1 ? enterRssi - 1 : 0;
     if (conf.c5Frequencies[pilot] != frequency || conf.c5EnterRssi[pilot] != enterRssi || conf.c5ExitRssi[pilot] != exitRssi) {
@@ -1691,7 +1728,7 @@ void Config::setDefaults(void) {
     conf.c5Frequencies[0] = conf.frequency;
     conf.c5EnterRssi[0] = conf.enterRssi;
     conf.c5ExitRssi[0] = conf.exitRssi;
-    conf.c5Gain = 40;
+    conf.c5Gain = 30;  // the C5's bench-tested gain; a close quad clips above it
     // Novacore filter defaults
     conf.novaFilterKalman = 1;       // Kalman on
     conf.novaFilterMedian = 0;       // Median off

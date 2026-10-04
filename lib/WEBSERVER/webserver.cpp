@@ -324,13 +324,25 @@ void Webserver::update(uint32_t currentTimeMs) {
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
     static uint32_t lastC5EventMs = 0;
     if (c5Link && c5MultiPilot && servicesStarted && conf->getReceiverRadio() == 2 &&
-        (currentTimeMs - lastC5EventMs) >= WEB_RSSI_SEND_TIMEOUT_MS) {
+        (currentTimeMs - lastC5EventMs) >= WEB_C5_SEND_TIMEOUT_MS) {
         lastC5EventMs = currentTimeMs;
+        // All 8 slots (frequency 0 = off), the filtered RSSI the lap
+        // detector uses, who is in the gate, and the link's state.
         JsonDocument rssiDoc;
         JsonArray values = rssiDoc["rssi"].to<JsonArray>();
-        uint8_t count = conf->getC5PilotCount();
-        if (count > C5Link::C5_MAX_PILOTS) count = C5Link::C5_MAX_PILOTS;
-        for (uint8_t i = 0; i < count; ++i) values.add(c5MultiPilot->rssi(i));
+        JsonArray freqs = rssiDoc["freq"].to<JsonArray>();
+        JsonArray inside = rssiDoc["in"].to<JsonArray>();
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            values.add(c5MultiPilot->rssi(i));
+            freqs.add(conf->getC5Frequency(i));
+            inside.add(c5MultiPilot->inside(i) ? 1 : 0);
+        }
+        rssiDoc["on"] = c5Link->online(currentTimeMs);
+        rssiDoc["started"] = c5Link->started();
+        rssiDoc["st"] = c5Link->state();
+        rssiDoc["mhz"] = c5Link->tunedFrequency();
+        rssiDoc["gain"] = c5Link->reportedGain();
+        rssiDoc["race"] = c5MultiPilot->running();
         String payload;
         serializeJson(rssiDoc, payload);
         events.send(payload.c_str(), "c5Rssi");

@@ -20,9 +20,12 @@ void C5MultiPilot::stop() { running_ = false; }
 
 void C5MultiPilot::update(uint32_t nowMs) {
     if (!config_ || !link_) return;
-    uint8_t count = config_->getC5PilotCount();
-    if (count > C5Link::C5_MAX_PILOTS) count = C5Link::C5_MAX_PILOTS;
-    for (uint8_t i = 0; i < count; ++i) {
+    for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+        if (!config_->getC5Frequency(i)) {   // slot switched off
+            filtered_[i] = 0;
+            inside_[i] = false;
+            continue;
+        }
         uint8_t value = 0;
         uint32_t sampleMs = 0;
         if (!link_->takeSample(i, value, sampleMs)) continue;
