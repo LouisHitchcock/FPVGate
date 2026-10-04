@@ -200,6 +200,25 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+.c5-calibration-card { margin-top: 14px; }
+.c5-calib-phase { color: var(--secondary-color); font-size: 12px; font-weight: 400; }
+.c5-calib-help, .c5-calib-note { color: var(--secondary-color); font-size: 12px; line-height: 1.45; margin: 4px 0 12px; }
+.c5-calib-note { margin: 12px 0; padding: 9px 11px; background: var(--bg-secondary); border-radius: 5px; }
+.c5-calib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.c5-calib-stop { background: var(--secondary-color); }
+.c5-calib-sample-count { color: var(--secondary-color); font-size: 12px; }
+.c5-calib-table-wrap { overflow-x: auto; }
+.c5-calib-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.c5-calib-table th { text-align: right; color: var(--secondary-color); font-weight: 500; padding: 7px 8px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+.c5-calib-table th:first-child, .c5-calib-table td:first-child { text-align: left; }
+.c5-calib-table td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+.c5-calib-table tr.c5-disabled { opacity: .4; }
+.c5-calib-table .c5-live { color: var(--primary-color); font-weight: 700; }
+.c5-calib-table .c5-threshold input { width: 58px; padding: 3px 5px; text-align: right; }
+.c5-calib-table .c5-good { color: #62d98b; }
+.c5-calib-table .c5-warn { color: #f0bd52; }
+.c5-calib-table .c5-bad { color: #ef7474; }
+
 /* Mobile responsive for calibration */
 @media screen and (max-width: 768px) {
   .calib-channel-grid,

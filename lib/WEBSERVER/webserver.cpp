@@ -114,6 +114,11 @@ void Webserver::setTransportManager(TransportManager *tm) {
     transportMgr = tm;
 }
 
+void Webserver::setC5Receiver(C5Link *link, C5MultiPilot *multiPilot) {
+    c5Link = link;
+    c5MultiPilot = multiPilot;
+}
+
 void Webserver::recheckWifiMode() {
     // Re-evaluate WiFi mode based on current config
     // Called after config is restored from SD backup
@@ -317,6 +322,28 @@ void Webserver::update(uint32_t currentTimeMs) {
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
+    static uint32_t lastC5EventMs = 0;
+    if (c5Link && c5MultiPilot && servicesStarted && conf->getReceiverRadio() == 2 &&
+        (currentTimeMs - lastC5EventMs) >= WEB_RSSI_SEND_TIMEOUT_MS) {
+        lastC5EventMs = currentTimeMs;
+        JsonDocument rssiDoc;
+        JsonArray values = rssiDoc["rssi"].to<JsonArray>();
+        uint8_t count = conf->getC5PilotCount();
+        if (count > C5Link::C5_MAX_PILOTS) count = C5Link::C5_MAX_PILOTS;
+        for (uint8_t i = 0; i < count; ++i) values.add(c5MultiPilot->rssi(i));
+        String payload;
+        serializeJson(rssiDoc, payload);
+        events.send(payload.c_str(), "c5Rssi");
+        C5LapEvent lap;
+        while (c5MultiPilot->takeLap(lap)) {
+            JsonDocument lapDoc;
+            lapDoc["pilot"] = lap.pilot;
+            lapDoc["lapTimeMs"] = lap.lapTimeMs;
+            payload = String();
+            serializeJson(lapDoc, payload);
+            events.send(payload.c_str(), "c5Lap");
+        }
+    }
     // A reboot asked for over HTTP. Deferred rather than immediate so the
     // response reaches the client first; restarting inside the handler drops
     // the connection and the caller cannot tell success from a crash.
@@ -1935,6 +1962,10 @@ EEPROM:\n\
 
     // Calibration wizard endpoints
     server.on("/calibration/start", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"error\":\"C5 mode uses the multi-pilot calibration screen\"}");
+            return;
+        }
         timer->startCalibrationWizard();
         request->send(200, "application/json", "{\"status\": \"OK\"}");
         led->on(200);
@@ -1972,7 +2003,7 @@ EEPROM:\n\
         RgbLed* rgbForTest = nullptr;
 #endif
         std::vector<TestResult> tests;
-        tests.push_back(selftest->testRX5808(rx));
+        tests.push_back(selftest->testRX5808(conf->getReceiverRadio() == 2 ? nullptr : rx));
         tests.push_back(selftest->testLapTimer(timer));
         tests.push_back(selftest->testAudio(buz));
         tests.push_back(selftest->testConfig(conf));
@@ -2026,6 +2057,10 @@ EEPROM:\n\
 
     // SPI mod test endpoint
     server.on("/api/spitest", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"error\":\"RX5808 is disabled in C5 mode\"}");
+            return;
+        }
         if (!rx) {
             request->send(500, "application/json", "{\"error\":\"RX5808 not initialized\"}");
             return;

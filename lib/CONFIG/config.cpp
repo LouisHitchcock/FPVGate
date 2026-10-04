@@ -143,6 +143,22 @@ void Config::load(void) {
             write();
             DEBUG("Migration complete, config preserved\n");
         }
+        else if (version == 22) {
+            // v23 adds C5 profiles in the existing reserved tail.
+            conf.c5PilotCount = 1;
+            conf.c5Frequencies[0] = conf.frequency;
+            conf.c5EnterRssi[0] = conf.enterRssi;
+            conf.c5ExitRssi[0] = conf.exitRssi;
+            for (uint8_t i = 1; i < 8; ++i) {
+                conf.c5Frequencies[i] = 0;
+                conf.c5EnterRssi[i] = conf.enterRssi;
+                conf.c5ExitRssi[i] = conf.exitRssi;
+            }
+            conf.c5Gain = 40;
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+        }
         // Migration from version 19 to 22: add raceCountdownMode + maxHeatTime30s
         // (carved out of _reservedELRS padding). Preserve the post-merge
         // behaviour (10-second visible countdown) for existing installs.
@@ -481,6 +497,15 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     
     // Receiver radio
     config["receiverRadio"] = conf.receiverRadio;
+    JsonArray c5Pilots = config["c5Pilots"].to<JsonArray>();
+    for (uint8_t i = 0; i < conf.c5PilotCount && i < 8; ++i) {
+        JsonObject pilot = c5Pilots.add<JsonObject>();
+        pilot["id"] = i;
+        pilot["frequency"] = conf.c5Frequencies[i];
+        pilot["enterRssi"] = conf.c5EnterRssi[i];
+        pilot["exitRssi"] = conf.c5ExitRssi[i];
+    }
+    config["c5Gain"] = conf.c5Gain;
     
     // Novacore filter config
     config["novaFilterKalman"] = conf.novaFilterKalman;
@@ -889,6 +914,20 @@ void Config::fromJson(JsonObject source) {
             conf.receiverRadio = val;
             modified = true;
         }
+    }
+    if (!source["c5Gain"].isNull()) {
+        setC5Gain(source["c5Gain"].as<uint8_t>());
+    }
+    if (!source["c5Pilots"].isNull()) {
+        JsonArray pilots = source["c5Pilots"].as<JsonArray>();
+        uint8_t count = 0;
+        for (JsonObject pilot : pilots) {
+            uint8_t id = pilot["id"] | count;
+            if (id >= 8) continue;
+            setC5Profile(id, pilot["frequency"] | 0, pilot["enterRssi"] | 72, pilot["exitRssi"] | 68);
+            if (id + 1 > count) count = id + 1;
+        }
+        setC5PilotCount(count);
     }
     // Novacore filter config
     if (!source["novaFilterKalman"].isNull() && source["novaFilterKalman"] != conf.novaFilterKalman) {
@@ -1502,10 +1541,36 @@ uint8_t Config::getReceiverRadio() {
 }
 
 void Config::setReceiverRadio(uint8_t radio) {
-    if (radio <= 1 && conf.receiverRadio != radio) {
+    if (radio <= 2 && conf.receiverRadio != radio) {
         conf.receiverRadio = radio;
         modified = true;
     }
+}
+
+uint8_t Config::getC5PilotCount() { return conf.c5PilotCount; }
+uint16_t Config::getC5Frequency(uint8_t pilot) { return pilot < 8 ? conf.c5Frequencies[pilot] : 0; }
+uint8_t Config::getC5EnterRssi(uint8_t pilot) { return pilot < 8 ? conf.c5EnterRssi[pilot] : 72; }
+uint8_t Config::getC5ExitRssi(uint8_t pilot) { return pilot < 8 ? conf.c5ExitRssi[pilot] : 68; }
+uint8_t Config::getC5Gain() { return conf.c5Gain; }
+void Config::setC5PilotCount(uint8_t count) {
+    uint8_t safe = count > 8 ? 8 : count;
+    if (conf.c5PilotCount != safe) { conf.c5PilotCount = safe; modified = true; }
+}
+void Config::setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi) {
+    if (pilot >= 8) return;
+    if (frequency > 0 && (frequency < 5180 || frequency > 5885)) frequency = 0;
+    if (enterRssi < 1) enterRssi = 1;
+    if (exitRssi >= enterRssi) exitRssi = enterRssi > 1 ? enterRssi - 1 : 0;
+    if (conf.c5Frequencies[pilot] != frequency || conf.c5EnterRssi[pilot] != enterRssi || conf.c5ExitRssi[pilot] != exitRssi) {
+        conf.c5Frequencies[pilot] = frequency;
+        conf.c5EnterRssi[pilot] = enterRssi;
+        conf.c5ExitRssi[pilot] = exitRssi;
+        modified = true;
+    }
+}
+void Config::setC5Gain(uint8_t gain) {
+    if (gain > 89) gain = 89;
+    if (conf.c5Gain != gain) { conf.c5Gain = gain; modified = true; }
 }
 
 uint8_t Config::getNovaFilterKalman() { return conf.novaFilterKalman; }
@@ -1622,6 +1687,11 @@ void Config::setDefaults(void) {
     conf.autoThresholdEnabled = 0;  // Manual threshold mode by default
     conf.autoThresholdOffset = 65;  // Default baseline RSSI (ambient floor)
     conf.receiverRadio = 0;  // Default to RX5808
+    conf.c5PilotCount = 1;
+    conf.c5Frequencies[0] = conf.frequency;
+    conf.c5EnterRssi[0] = conf.enterRssi;
+    conf.c5ExitRssi[0] = conf.exitRssi;
+    conf.c5Gain = 40;
     // Novacore filter defaults
     conf.novaFilterKalman = 1;       // Kalman on
     conf.novaFilterMedian = 0;       // Median off

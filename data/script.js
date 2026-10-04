@@ -169,6 +169,17 @@ var debugRssiChart = null;
 var debugRssiSeries = new TimeSeries();
 var debugCrossingSeries = new TimeSeries();
 
+// C5 multi-pilot calibration state. Samples arrive from the c5Rssi SSE event
+// at a throttled rate, so the browser can safely retain a short calibration
+// capture without adding firmware RAM or a new endpoint.
+var c5Calibration = {
+  phase: "idle", // idle, ambient, recording, complete
+  startedAt: 0,
+  ambient: [],
+  samples: [],
+  results: []
+};
+
 // RSSI calibration threshold sync model:
 //  - Device is the single source of truth for enterRssi / exitRssi.
 //  - Dragging the calibration sliders is a UI preview only: updateEnterRssi /
@@ -543,6 +554,23 @@ function setupWiFiEvents() {
       },
       false
     );
+
+    eventSource.addEventListener("c5Rssi", function (e) {
+      window.c5PilotRssi = JSON.parse(e.data).rssi || [];
+      recordC5CalibrationSample(window.c5PilotRssi);
+      window.c5PilotRssi.forEach((value, index) => {
+        const el = document.getElementById(`c5Rssi${index}`);
+        if (el) el.textContent = value;
+      });
+    }, false);
+
+    eventSource.addEventListener("c5Lap", function (e) {
+      const data = JSON.parse(e.data);
+      window.c5PilotLaps = window.c5PilotLaps || {};
+      const list = window.c5PilotLaps[data.pilot] || (window.c5PilotLaps[data.pilot] = []);
+      list.push(data.lapTimeMs);
+      console.log(`[C5] Pilot ${Number(data.pilot) + 1} lap: ${(data.lapTimeMs / 1000).toFixed(2)}s`);
+    }, false);
 
 
     eventSource.addEventListener(
@@ -1368,6 +1396,8 @@ onload = async function (e) {
     if (receiverRadioSelect && configData.receiverRadio !== undefined) {
       receiverRadioSelect.value = configData.receiverRadio;
     }
+    loadC5Profiles(configData.c5Pilots || [], configData.c5Gain);
+    toggleNovaFilterSection();
 
     // Load Novacore filter settings
     const filterFields = [
@@ -1721,10 +1751,164 @@ function toggleNovaFilterSection() {
   var section = document.getElementById("novaFilterSection");
   if (!sel || !section) return;
   section.style.display = sel.value === "1" ? "block" : "none";
+  var c5 = document.getElementById("c5PilotSection");
+  if (c5) c5.style.display = sel.value === "2" ? "block" : "none";
+  var c5Calib = document.getElementById("c5CalibrationSection");
+  if (c5Calib) c5Calib.style.display = sel.value === "2" ? "block" : "none";
+  var legacyChannel = document.getElementById("legacyCalibrationChannelCard");
+  if (legacyChannel) legacyChannel.style.display = sel.value === "2" ? "none" : "block";
+  var legacyThresholds = document.getElementById("legacyCalibrationThresholdCard");
+  if (legacyThresholds) legacyThresholds.style.display = sel.value === "2" ? "none" : "block";
   // Sync slider visibility with toggle state
   toggleNovaFilterSlider("kalman");
   toggleNovaFilterSlider("ema");
   toggleNovaFilterSlider("step");
+}
+
+function loadC5Profiles(profiles, gain) {
+  const rows = document.getElementById("c5PilotRows");
+  if (!rows) return;
+  if (gain !== undefined) document.getElementById("c5Gain").value = gain;
+  const byId = {};
+  (profiles || []).forEach(p => { byId[p.id] = p; });
+  rows.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const p = byId[i] || { frequency: i === 0 ? 5658 : 0, enterRssi: 72, exitRssi: 68 };
+    rows.insertAdjacentHTML("beforeend", `<div class="config-item c5-pilot-row" data-pilot="${i}" style="margin-bottom:6px"><label>Pilot ${i + 1}</label><input class="c5-freq" type="number" min="0" max="5885" placeholder="MHz" value="${p.frequency || 0}" style="width:90px"><input class="c5-enter" type="number" min="1" max="255" value="${p.enterRssi || 72}" style="width:70px" title="Enter RSSI"><input class="c5-exit" type="number" min="0" max="254" value="${p.exitRssi || 68}" style="width:70px" title="Exit RSSI"><span style="min-width:70px;color:var(--primary-color)">RSSI <span id="c5Rssi${i}">--</span></span></div>`);
+  }
+  renderC5CalibrationTable();
+}
+
+function c5Percentile(values, fraction) {
+  if (!values || !values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const position = (sorted.length - 1) * fraction;
+  const lower = Math.floor(position), upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function c5Clamp(value, min, max) { return Math.max(min, Math.min(max, Math.round(value))); }
+
+function c5CalibrationProfiles() {
+  return Array.from(document.querySelectorAll(".c5-pilot-row")).map((row, id) => ({
+    id,
+    frequency: parseInt(row.querySelector(".c5-freq")?.value || 0),
+    enter: parseInt(row.querySelector(".c5-enter")?.value || 72),
+    exit: parseInt(row.querySelector(".c5-exit")?.value || 68)
+  }));
+}
+
+function startC5Calibration() {
+  const sel = document.getElementById("receiverRadio");
+  if (!sel || sel.value !== "2") {
+    alert("Select ESP32-C5 Multi-Pilot as the receiver first.");
+    return;
+  }
+  c5Calibration = { phase: "ambient", startedAt: Date.now(), ambient: [], samples: [], results: [] };
+  const start = document.getElementById("c5CalibrationStart");
+  const stop = document.getElementById("c5CalibrationStop");
+  if (start) { start.disabled = true; start.textContent = "Capturing ambient…"; }
+  if (stop) stop.disabled = true;
+  const phase = document.getElementById("c5CalibrationPhase");
+  if (phase) phase.textContent = "Ambient capture (5 s)";
+  setTimeout(() => {
+    if (c5Calibration.phase !== "ambient") return;
+    c5Calibration.phase = "recording";
+    c5Calibration.samples = [];
+    if (start) start.textContent = "Recording passes…";
+    if (stop) stop.disabled = false;
+    if (phase) phase.textContent = "Record passes";
+    renderC5CalibrationTable();
+  }, 5000);
+  renderC5CalibrationTable();
+}
+
+function recordC5CalibrationSample(values) {
+  if (!c5Calibration || (c5Calibration.phase !== "ambient" && c5Calibration.phase !== "recording")) return;
+  const sample = values.slice(0, 8).map(v => Number(v) || 0);
+  if (c5Calibration.phase === "ambient") c5Calibration.ambient.push(sample);
+  else c5Calibration.samples.push(sample);
+  const count = document.getElementById("c5CalibrationSampleCount");
+  if (count) count.textContent = `${c5Calibration.ambient.length} ambient / ${c5Calibration.samples.length} flight samples`;
+  renderC5CalibrationTable();
+}
+
+function calculateC5Calibration() {
+  const profiles = c5CalibrationProfiles();
+  c5Calibration.results = profiles.map((profile, index) => {
+    const ambient = c5Calibration.ambient.map(s => s[index]).filter(v => Number.isFinite(v));
+    const flight = c5Calibration.samples.map(s => s[index]).filter(v => Number.isFinite(v));
+    if (!profile.frequency || ambient.length < 3 || flight.length < 3) return { floor: null, peak: null, enter: profile.enter, exit: profile.exit, samples: flight.length };
+    const floor = c5Percentile(ambient, 0.50);
+    const noise = c5Percentile(ambient, 0.95);
+    const peak = c5Percentile(flight, 0.95);
+    const range = Math.max(0, peak - floor);
+    // Leave a noise margin, then use hysteresis so exit is lower than enter.
+    const enter = c5Clamp(Math.max(noise + 8, floor + range * 0.55), 1, 255);
+    const exit = c5Clamp(Math.max(noise + 3, floor + range * 0.25), 0, Math.max(0, enter - 1));
+    return { floor: Math.round(floor), noise: Math.round(noise), peak: Math.round(peak), enter, exit, samples: flight.length };
+  });
+  profiles.forEach((profile, index) => {
+    const result = c5Calibration.results[index];
+    if (!result || result.enter == null || !profile.frequency) return;
+    const row = document.querySelectorAll(".c5-pilot-row")[index];
+    if (!row) return;
+    row.querySelector(".c5-enter").value = result.enter;
+    row.querySelector(".c5-exit").value = result.exit;
+  });
+}
+
+function stopC5Calibration() {
+  if (c5Calibration.phase !== "recording") return;
+  calculateC5Calibration();
+  c5Calibration.phase = "complete";
+  const start = document.getElementById("c5CalibrationStart");
+  const stop = document.getElementById("c5CalibrationStop");
+  if (start) { start.disabled = false; start.textContent = "Start new capture"; }
+  if (stop) stop.disabled = true;
+  const phase = document.getElementById("c5CalibrationPhase");
+  if (phase) phase.textContent = "Calculated — review and save";
+  renderC5CalibrationTable();
+}
+
+function updateC5CalibrationThreshold(index, field, value) {
+  const rows = document.querySelectorAll(".c5-pilot-row");
+  const input = rows[index]?.querySelector(field === "enter" ? ".c5-enter" : ".c5-exit");
+  if (input) input.value = value;
+}
+
+function renderC5CalibrationTable() {
+  const body = document.getElementById("c5CalibrationTableBody");
+  if (!body) return;
+  const profiles = c5CalibrationProfiles();
+  const live = window.c5PilotRssi || [];
+  body.innerHTML = profiles.map((profile, index) => {
+    const result = c5Calibration.results[index] || {};
+    const floor = result.floor == null ? "—" : result.floor;
+    const peak = result.peak == null ? "—" : result.peak;
+    const sampleCount = result.samples == null ? c5Calibration.samples.length : result.samples;
+    const active = profile.frequency > 0;
+    let status = active ? "Ready" : "Disabled";
+    let statusClass = active ? "c5-warn" : "";
+    if (result.peak != null) {
+      const margin = result.peak - (result.noise == null ? 0 : result.noise);
+      status = margin >= 10 ? "Good margin" : "Weak margin";
+      statusClass = margin >= 10 ? "c5-good" : "c5-bad";
+    }
+    const enter = active ? `<input type="number" min="1" max="255" value="${profile.enter}" onchange="updateC5CalibrationThreshold(${index}, 'enter', this.value)">` : "—";
+    const exit = active ? `<input type="number" min="0" max="254" value="${profile.exit}" onchange="updateC5CalibrationThreshold(${index}, 'exit', this.value)">` : "—";
+    return `<tr class="${active ? "" : "c5-disabled"}"><td>Pilot ${index + 1}</td><td>${active ? profile.frequency + " MHz" : "—"}</td><td class="c5-live">${live[index] == null ? "—" : live[index]}</td><td>${floor}</td><td>${peak}</td><td class="c5-threshold">${enter}</td><td class="c5-threshold">${exit}</td><td>${sampleCount}</td><td class="${statusClass}">${status}</td></tr>`;
+  }).join("");
+}
+
+function getC5ProfilesForSave() {
+  return Array.from(document.querySelectorAll(".c5-pilot-row")).map((row, id) => ({
+    id,
+    frequency: parseInt(row.querySelector(".c5-freq")?.value || 0),
+    enterRssi: parseInt(row.querySelector(".c5-enter")?.value || 72),
+    exitRssi: parseInt(row.querySelector(".c5-exit")?.value || 68)
+  })).filter(p => p.frequency > 0);
 }
 
 function restoreDefaultNovaFilters() {
@@ -2195,6 +2379,8 @@ async function saveConfig() {
     maxLaps: maxLaps,
     maxHeatTime30s: maxHeatTime30s,
     receiverRadio: receiverRadioSelect ? parseInt(receiverRadioSelect.value) : 0,
+    c5Gain: parseInt(document.getElementById("c5Gain")?.value || 40),
+    c5Pilots: getC5ProfilesForSave(),
     novaFilterKalman: document.getElementById("novaFilterKalman") ? (document.getElementById("novaFilterKalman").checked ? 1 : 0) : 1,
     novaFilterMedian: document.getElementById("novaFilterMedian") ? (document.getElementById("novaFilterMedian").checked ? 1 : 0) : 0,
     novaFilterMA: document.getElementById("novaFilterMA") ? (document.getElementById("novaFilterMA").checked ? 1 : 0) : 0,

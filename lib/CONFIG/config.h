@@ -86,6 +86,7 @@
 #ifndef BUZZER_PASSIVE
 #define BUZZER_PASSIVE 1
 #endif
+
 // MLT-8530 passive: resonant ~2.7 kHz (loudest / spec SPL usually at square wave ~2700 Hz). Override if you use another part.
 #ifndef BUZZER_PWM_FREQ_HZ
 #define BUZZER_PWM_FREQ_HZ 2700
@@ -127,6 +128,8 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
@@ -148,6 +151,8 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
@@ -169,6 +174,8 @@
 #define PIN_RX5808_CLOCK 4     // D3 (GPIO4)
 #define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1 (GPIO2)
 #define PIN_SD_SCK 7           // D8 (GPIO7)
@@ -190,6 +197,8 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins (XIAO S3 per user wiring)
 #define PIN_SD_CS 2            // D1 (CS)
 #define PIN_SD_SCK 7           // D8 (SCK)
@@ -226,6 +235,15 @@
 // #define PIN_I2S_LRC  17
 // #define PIN_I2S_DOUT 18
 
+#endif
+
+// Optional ESP32-C5 RF-node UART. Override in a board target when the carrier
+// routes the co-processor to different pins.
+#ifndef C5_UART_RX_PIN
+#define C5_UART_RX_PIN 44
+#endif
+#ifndef C5_UART_TX_PIN
+#define C5_UART_TX_PIN 43
 #endif
 
 // ====================================================================
@@ -291,7 +309,7 @@
 #define EEPROM_RESERVED_SIZE 832
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 22U
+#define CONFIG_VERSION 23U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -383,7 +401,14 @@ typedef struct {
     // preserve EEPROM layout for already-deployed devices). Active ELRS
     // development lives on the feature/ELRSBackpack branch; when it is
     // merged back these bytes will be re-reintroduced as typed fields.
-    uint8_t _reservedELRS[36];
+    // ESP32-C5 single-radio multi-pilot profiles.  These fields deliberately
+    // occupy the old reserved tail so the EEPROM footprint stays unchanged.
+    uint8_t c5PilotCount;
+    uint16_t c5Frequencies[8];
+    uint8_t c5EnterRssi[8];
+    uint8_t c5ExitRssi[8];
+    uint8_t c5Gain;
+    uint8_t _reservedELRS[2];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -531,6 +556,16 @@ class Config {
     // Maximum heat time in 30-second blocks (0 = unlimited)
     uint8_t getMaxHeatTime30s();
     void setMaxHeatTime30s(uint8_t blocks);
+
+    // ESP32-C5 multi-pilot receiver profiles
+    uint8_t getC5PilotCount();
+    uint16_t getC5Frequency(uint8_t pilot);
+    uint8_t getC5EnterRssi(uint8_t pilot);
+    uint8_t getC5ExitRssi(uint8_t pilot);
+    uint8_t getC5Gain();
+    void setC5PilotCount(uint8_t count);
+    void setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi);
+    void setC5Gain(uint8_t gain);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();

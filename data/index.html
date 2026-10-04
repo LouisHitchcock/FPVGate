@@ -369,7 +369,7 @@
         </div>
 
         <!-- Channel Selection Card -->
-        <div class="calib-card">
+        <div id="legacyCalibrationChannelCard" class="calib-card">
           <div class="calib-card-header">
             <span data-i18n="calib.channel_selection">Channel Selection</span>
             <div class="calib-freq-badge" id="calibFreqOutput">R1 5658MHz</div>
@@ -416,8 +416,30 @@
           </div>
         </div>
 
+        <!-- ESP32-C5 multi-pilot calibration. Hidden for RX5808/Novacore. -->
+        <div id="c5CalibrationSection" class="calib-card c5-calibration-card" style="display:none">
+          <div class="calib-card-header">
+            <span>ESP32-C5 Multi-Pilot Calibration</span>
+            <span id="c5CalibrationPhase" class="c5-calib-phase">Idle</span>
+          </div>
+          <p class="c5-calib-help">Leave the gate clear for the ambient phase, then fly each configured pilot through the gate several times. Thresholds are calculated independently from each pilot’s signal.</p>
+          <div class="c5-calib-actions">
+            <button id="c5CalibrationStart" class="calib-wizard-btn" onclick="startC5Calibration()">Start ambient capture</button>
+            <button id="c5CalibrationStop" class="calib-wizard-btn c5-calib-stop" onclick="stopC5Calibration()" disabled>Calculate thresholds</button>
+            <span id="c5CalibrationSampleCount" class="c5-calib-sample-count">No capture running</span>
+          </div>
+          <div class="c5-calib-table-wrap">
+            <table class="c5-calib-table">
+              <thead><tr><th>Pilot</th><th>Frequency</th><th>Live</th><th>Floor</th><th>Peak</th><th>Enter</th><th>Exit</th><th>Samples</th><th>Status</th></tr></thead>
+              <tbody id="c5CalibrationTableBody"></tbody>
+            </table>
+          </div>
+          <div class="c5-calib-note">Suggested values use the 95th-percentile ambient level as the noise ceiling, then place Enter and Exit between the noise floor and recorded peak. Review them against the live signal before saving.</div>
+          <button class="calib-save-btn" onclick="saveConfig()">Save C5 pilot thresholds</button>
+        </div>
+
         <!-- Threshold Controls Card -->
-        <div class="calib-card">
+        <div id="legacyCalibrationThresholdCard" class="calib-card">
           <div class="calib-card-header">
             <span data-i18n="calib.thresholds">Detection Thresholds</span>
           </div>
@@ -1391,7 +1413,15 @@
                 <select id="receiverRadio" onchange="toggleNovaFilterSection()">
                   <option value="0" data-i18n="settings.system.receiver_options.rx5808">RX5808</option>
                   <option value="1" data-i18n="settings.system.receiver_options.novacore">Novacore</option>
+                  <option value="2">ESP32-C5 Multi-Pilot</option>
                 </select>
+              </div>
+
+              <div id="c5PilotSection" style="display: none; margin-top: 12px; padding: 16px; background-color: var(--bg-secondary); border-radius: 8px;">
+                <h4 style="margin: 0 0 4px 0">ESP32-C5 Pilot Profiles</h4>
+                <p style="margin: 0 0 12px 0; font-size: 12px; color: var(--secondary-color)">The C5 retunes one RF receiver across all enabled pilots. Supported frequencies: 5180–5885 MHz.</p>
+                <div class="config-item"><label for="c5Gain">RF gain (0–89):</label><input id="c5Gain" type="number" min="0" max="89" value="40" style="width: 90px"></div>
+                <div id="c5PilotRows"></div>
               </div>
 
               <!-- Novacore Signal Filtering (shown when Novacore selected) -->

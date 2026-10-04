@@ -5,6 +5,8 @@
 #include "webserver.h"
 #include "racehistory.h"
 #include "race_rssi_recorder.h"
+#include "c5link.h"
+#include "c5multipilot.h"
 #include "storage.h"
 #include <time.h>
 #include <algorithm>
@@ -69,6 +71,8 @@ extern bool loopTaskWDTEnabled;
 // - Setting is stored in EEPROM and persists across reboots
 
 static RX5808 rx(PIN_RX5808_RSSI, PIN_RX5808_DATA, PIN_RX5808_SELECT, PIN_RX5808_CLOCK);
+static C5Link c5Link;
+static C5MultiPilot c5MultiPilot;
 static Config config;
 static Storage storage;
 static SelfTest selfTest;
@@ -167,7 +171,7 @@ static void parallelTask(void *pvArgs) {
 #endif
         ws.handleWebUpdate(currentTimeMs);
         config.handleEeprom(currentTimeMs);
-        rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
+        if (config.getReceiverRadio() != 2) rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
 #ifdef HAS_BATTERY_MONITOR
         monitor.checkBatteryState(currentTimeMs, config.getAlarmThreshold());
 #endif
@@ -249,12 +253,6 @@ void setup() {
     powerManager.init(PIN_POWER_SWITCH, LCD_BACKLIGHT);
 #endif
 #endif
-#if defined(WAVESHARE_ESP32S3_LCD2) && defined(PIN_RX5808_POWER_CTRL)
-    // PNP high-side: LOW powers RX5808; assert before LCD/storage init (rx.init() repeats for safety).
-    pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
-    digitalWrite(PIN_RX5808_POWER_CTRL, LOW);
-#endif
-
     // ====================================================================
     // ROTORHAZARD MODE DETECTION - CURRENTLY DISABLED
     // Mode switching has been disabled - system now runs in WiFi mode only
@@ -270,6 +268,14 @@ void setup() {
     // Initialize config and connect to storage for SD backup/restore
     config.setStorage(&storage);
     config.init();
+
+#if defined(WAVESHARE_ESP32S3_LCD2) && defined(PIN_RX5808_POWER_CTRL)
+    if (config.getReceiverRadio() != 2) {
+        // PNP high-side: LOW powers RX5808; assert before peripheral init.
+        pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
+        digitalWrite(PIN_RX5808_POWER_CTRL, LOW);
+    }
+#endif
     
     /* DISABLED: RotorHazard mode detection
     uint8_t configMode = config.getOperationMode();
@@ -368,7 +374,7 @@ void setup() {
     esp_task_wdt_deinit();
     loopTaskWDTEnabled = false;
 #endif
-    rx.init();
+    if (config.getReceiverRadio() != 2) rx.init();
     buzzer.init(PIN_BUZZER, BUZZER_INVERTED);
     buzzer.setVolume(config.getBeepVolume());  // Apply saved volume
     led.init(PIN_LED, false);
@@ -501,6 +507,14 @@ void setup() {
 #ifdef FPVGATE_USB_NET
     usbnet_boot_mark(USBNET_BOOT_SETUP_COMPLETE);
 #endif
+    ws.setC5Receiver(&c5Link, &c5MultiPilot);
+
+    // Start the C5 UART last so no later peripheral initialization can reclaim
+    // its pins. XIAO D3/D4 are also the legacy RX5808 clock/data pins.
+    if (config.getReceiverRadio() == 2) {
+        c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
+        c5MultiPilot.begin(&config, &c5Link);
+    }
 }
 
 #ifdef ENABLE_POWER_SWITCH
@@ -530,11 +544,13 @@ static void shutdownForDeepSleep() {
         vTaskSuspend(xTimerTask);
         delay(10);
     }
-    rx.setFrequency(POWER_DOWN_FREQ_MHZ);
+    if (config.getReceiverRadio() != 2) rx.setFrequency(POWER_DOWN_FREQ_MHZ);
 #if defined(PIN_RX5808_POWER_CTRL)
     // PNP high-side: HIGH turns transistor off — remove VCC from RX5808 (lower deep-sleep drain).
-    pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
-    digitalWrite(PIN_RX5808_POWER_CTRL, HIGH);
+    if (config.getReceiverRadio() != 2) {
+        pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
+        digitalWrite(PIN_RX5808_POWER_CTRL, HIGH);
+    }
 #endif
 
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
@@ -593,7 +609,17 @@ void loop() {
     // External LEDs on GPIO5 are handled by rgbLed instead
     
     // Timing always runs
-    timer.handleLapTimerUpdate(currentTimeMs);
+    if (config.getReceiverRadio() != 2) timer.handleLapTimerUpdate(currentTimeMs);
+    if (config.getReceiverRadio() == 2) {
+        if (!c5Link.started()) {
+            c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
+            c5MultiPilot.begin(&config, &c5Link);
+        }
+        c5Link.poll(currentTimeMs);
+        if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(currentTimeMs);
+        if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
+        c5MultiPilot.update(currentTimeMs);
+    }
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Feed live RSSI and timing data to LCD UI

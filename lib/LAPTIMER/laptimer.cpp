@@ -185,6 +185,10 @@ void LapTimer::stop() {
 }
 
 void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
+    // C5 mode supplies per-pilot RSSI through C5Link; never touch the
+    // RX5808 ADC path while its GPIOs are the C5 UART.
+    if (conf->getReceiverRadio() == 2) return;
+
     // Check if receiver type changed and update Kalman tuning
     uint8_t currentRadio = conf->getReceiverRadio();
     if (currentRadio != activeReceiverRadio) {
