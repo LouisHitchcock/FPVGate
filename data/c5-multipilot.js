@@ -23,7 +23,9 @@ const C5UI = (() => {
   const HISTORY_S = 125;
   const SAVE_DELAY_MS = 800;
 
-  const pilots = Array.from({ length: SLOTS }, () => ({ freq: 0, enter: 72, exit: 68, hidden: false }));
+  // Frequency alone is not a unique channel identity: F8 and R7 are both
+  // 5880 MHz. Keep the selected band alongside each UI profile.
+  const pilots = Array.from({ length: SLOTS }, () => ({ freq: 0, bandIndex: 4, enter: 72, exit: 68, hidden: false }));
   const hist = Array.from({ length: SLOTS }, () => ({ t: [], v: [] }));
   const laps = Array.from({ length: SLOTS }, () => ({ count: 0, last: null, best: null, flashUntil: 0 }));
   let gain = 30;
@@ -56,9 +58,17 @@ const C5UI = (() => {
       ? bandDefinitions.map(b => ({ ...b, freqs: freqLookup[b.index] || [] })) : [];
   }
 
-  function channelName(freq) {
+  function channelName(freq, preferredBandIndex) {
     if (!freq) return "Off";
-    for (const b of bandTables().filter(b => b.system === "analog")) {
+    const bands = bandTables().filter(b => b.system === "analog");
+    // C5 profiles historically store only MHz; Raceband is the default C5
+    // profile set, so use it as the unambiguous fallback for shared values.
+    const preferred = bands.find(b => b.index === preferredBandIndex) || bands.find(b => b.value === "R");
+    if (preferred) {
+      const i = preferred.freqs.indexOf(freq);
+      if (i >= 0) return preferred.value + (i + 1);
+    }
+    for (const b of bands) {
       const i = b.freqs.indexOf(freq);
       if (i >= 0) return b.value + (i + 1);
     }
@@ -67,16 +77,19 @@ const C5UI = (() => {
 
   // ---- building the panel ----------------------------------------------------------
 
-  function freqOptions(selected) {
+  function freqOptions(selected, preferredBandIndex) {
     let html = `<option value="0"${selected ? "" : " selected"}>Off</option>`;
     let found = !selected;
-    for (const b of bandTables()) {
+    const tables = bandTables();
+    const preferred = tables.find(b => b.index === preferredBandIndex);
+    const preferredHas = preferred && preferred.freqs.includes(selected);
+    for (const b of tables) {
       if (b.system !== "analog") continue;
       html += `<optgroup label="${b.label}">`;
       b.freqs.forEach((f, i) => {
         if (!f) return;
         const ok = inRange(f);
-        const sel = f === selected && !found ? " selected" : "";
+        const sel = f === selected && !found && (!preferredHas || b.index === preferredBandIndex) ? " selected" : "";
         if (sel) found = true;
         html += `<option value="${f}"${sel}${ok ? "" : " disabled"}>${b.value}${i + 1} · ${f}${ok ? "" : " (not supported)"}</option>`;
       });
@@ -136,7 +149,7 @@ const C5UI = (() => {
       <div class="c5p-card" data-i="${i}" style="--c:${COLORS[i]}">
         <div class="c5p-card-head">
           <span class="c5p-name">P${i + 1}</span>
-          <select class="c5p-freq" data-i="${i}">${freqOptions(p.freq)}</select>
+          <select class="c5p-freq" data-i="${i}">${freqOptions(p.freq, p.bandIndex)}</select>
           <button class="c5p-eye" data-i="${i}" title="Show or hide on the chart">${p.hidden ? "◌" : "●"}</button>
         </div>
         <div class="c5p-liverow"><span class="c5p-val" id="c5pVal${i}">–</span><span class="c5p-gate" id="c5pGate${i}"></span></div>
@@ -156,7 +169,7 @@ const C5UI = (() => {
       card.classList.toggle("c5p-focus", i === focus);
       card.classList.toggle("c5p-hidden", pilots[i].hidden);
       const name = card.querySelector(".c5p-name");
-      if (name) name.textContent = `P${i + 1}` + (pilots[i].freq ? " · " + channelName(pilots[i].freq) : "");
+      if (name) name.textContent = `P${i + 1}` + (pilots[i].freq ? " · " + channelName(pilots[i].freq, pilots[i].bandIndex) : "");
       const eye = card.querySelector(".c5p-eye");
       if (eye) eye.textContent = pilots[i].hidden ? "◌" : "●";
       card.querySelectorAll(".c5p-in").forEach(inp => {
@@ -210,7 +223,8 @@ const C5UI = (() => {
           f = Number.isFinite(v) && inRange(v) ? v : pilots[i].freq;
           t.innerHTML = freqOptions(f);
         }
-        setFreq(i, +f);
+        const selectedBand = +$("#c5pBand").value;
+        setFreq(i, +f, Number.isInteger(selectedBand) ? selectedBand : pilots[i].bandIndex);
       } else if (t.classList.contains("c5p-in")) {
         setThreshold(i, t.dataset.th, parseInt(t.value, 10));
       }
@@ -259,8 +273,9 @@ const C5UI = (() => {
     scheduleSave();
   }
 
-  function setFreq(i, f) {
+  function setFreq(i, f, bandIndex) {
     pilots[i].freq = f && inRange(f) ? f : 0;
+    if (Number.isInteger(bandIndex)) pilots[i].bandIndex = bandIndex;
     hist[i].t.length = hist[i].v.length = 0;
     laps[i] = { count: 0, last: null, best: null, flashUntil: 0 };
     calib.results[i] = undefined;
@@ -292,6 +307,7 @@ const C5UI = (() => {
       const f = b.freqs[i] || 0;
       if (f && !inRange(f)) skipped.push(`${b.value}${i + 1} (${f} MHz)`);
       pilots[i].freq = f && inRange(f) ? f : 0;
+      pilots[i].bandIndex = idx;
       hist[i].t.length = hist[i].v.length = 0;
       laps[i] = { count: 0, last: null, best: null, flashUntil: 0 };
     }
@@ -516,7 +532,7 @@ const C5UI = (() => {
         if (sel) {
           ctx.setLineDash([]);
           ctx.fillStyle = COLORS[i];
-          const label = `${channelName(p.freq)} ${which} ${p[which]}`;
+          const label = `${channelName(p.freq, p.bandIndex)} ${which} ${p[which]}`;
           const w = ctx.measureText(label).width + 10;
           ctx.globalAlpha = 0.9;
           ctx.fillRect(box.l + 6, y - (which === "enter" ? 17 : -3), w, 14);
@@ -572,7 +588,7 @@ const C5UI = (() => {
       ctx.globalAlpha = 1;
       ctx.fillStyle = c;
       ctx.beginPath(); ctx.arc(l.x, clamp(l.y, box.t, box.b), 2.5, 0, 2 * Math.PI); ctx.fill();
-      ctx.fillText(`${channelName(pilots[l.i].freq)} ${l.v}`, box.r + 7, l.ly);
+      ctx.fillText(`${channelName(pilots[l.i].freq, pilots[l.i].bandIndex)} ${l.v}`, box.r + 7, l.ly);
     });
     ctx.textBaseline = "alphabetic";
   }
@@ -594,7 +610,7 @@ const C5UI = (() => {
       let j = clamp(lowerBound(h.t, t), 0, h.t.length - 1);
       if (j > 0 && Math.abs(h.t[j - 1] - t) < Math.abs(h.t[j] - t)) j--;
       if (Math.abs(h.t[j] - t) > 1) return;
-      html += `<div><span class="c5p-sw" style="background:${COLORS[i]}"></span>${channelName(p.freq)} <b>${h.v[j]}</b> <span class="c5p-dim">(enter ${p.enter} / exit ${p.exit})</span></div>`;
+      html += `<div><span class="c5p-sw" style="background:${COLORS[i]}"></span>${channelName(p.freq, p.bandIndex)} <b>${h.v[j]}</b> <span class="c5p-dim">(enter ${p.enter} / exit ${p.exit})</span></div>`;
     });
     tip.innerHTML = html;
     tip.style.display = "block";
@@ -681,7 +697,7 @@ const C5UI = (() => {
       // Update in place, so a refresh after a save doesn't disturb the page.
       freqChanged.forEach(i => {
         const sel = document.querySelector(`.c5p-freq[data-i="${i}"]`);
-        if (sel) sel.innerHTML = freqOptions(pilots[i].freq);
+        if (sel) sel.innerHTML = freqOptions(pilots[i].freq, pilots[i].bandIndex);
         hist[i].t.length = hist[i].v.length = 0;
       });
       refreshCardStates();
