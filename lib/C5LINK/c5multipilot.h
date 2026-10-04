@@ -31,6 +31,8 @@ private:
     uint32_t lastLapUs_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t enteredUs_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
+    uint32_t previousSampleUs_[C5Link::C5_MAX_PILOTS] = {};
+    bool previousSampleValid_[C5Link::C5_MAX_PILOTS] = {};
     // Filled by update() in the main loop, drained by takeLap() from the web
     // task on the other core, so guarded by a spinlock.
     C5LapEvent pending_[C5Link::C5_MAX_PILOTS] = {};

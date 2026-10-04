@@ -14,6 +14,7 @@ public:
     // timestamps improve crossing accuracy independently of slot duration.
     static constexpr uint32_t SLOT_MS = 20;
     static constexpr uint32_t ONLINE_TIMEOUT_MS = 2500;  // the C5 sends status at least every second
+    static constexpr uint8_t SAMPLE_QUEUE_DEPTH = 8;
 
     void begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin);
     void poll(uint32_t nowMs);
@@ -32,6 +33,8 @@ public:
     uint8_t currentPilot() const { return activePilot_; }
     uint16_t rssi(uint8_t pilot) const { return pilot < C5_MAX_PILOTS ? rssi_[pilot] : 0; }
     bool takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs);
+    uint32_t sampleSequenceGaps() const { return sampleSequenceGaps_; }
+    uint32_t sampleQueueDrops() const { return sampleQueueDrops_; }
     const char *state() const { return state_; }
     uint16_t tunedFrequency() const { return reportedFrequency_; }
 
@@ -40,9 +43,18 @@ private:
     HardwareSerial *port_ = nullptr;
     uint32_t lastSlotMs_ = 0;
     uint32_t lastStatusMs_ = 0;
-    uint32_t lastSampleUs_[C5_MAX_PILOTS] = {};
+    struct Sample {
+        uint16_t value;
+        uint32_t timestampUs;
+    };
+    Sample sampleQueue_[C5_MAX_PILOTS][SAMPLE_QUEUE_DEPTH] = {};
+    uint8_t sampleHead_[C5_MAX_PILOTS] = {};
+    uint8_t sampleTail_[C5_MAX_PILOTS] = {};
     uint16_t rssi_[C5_MAX_PILOTS] = {};
-    bool samplePending_[C5_MAX_PILOTS] = {};
+    uint8_t lastSampleSeq_ = 0;
+    bool sampleSeqValid_ = false;
+    uint32_t sampleSequenceGaps_ = 0;
+    uint32_t sampleQueueDrops_ = 0;
     uint8_t activePilot_ = 0;
     volatile uint32_t lastLineMs_ = 0;   // read by the web task on the other core
     volatile bool heardAny_ = false;

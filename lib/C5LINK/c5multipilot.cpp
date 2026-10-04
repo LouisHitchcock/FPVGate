@@ -13,6 +13,7 @@ void C5MultiPilot::start(uint32_t nowMs) {
         seen_[i] = false;
         enteredUs_[i] = nowMs * 1000u;
         lastLapUs_[i] = 0;
+        previousSampleValid_[i] = false;
     }
 }
 
@@ -26,38 +27,57 @@ void C5MultiPilot::update(uint32_t nowMs) {
             inside_[i] = false;
             continue;
         }
-        uint16_t value = 0;
-        uint32_t sampleUs = 0;
-        if (!link_->takeSample(i, value, sampleUs)) continue;
-        // A small EMA keeps the C5's 1 kHz stream useful after UART slotting.
-        filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
-        if (!running_) continue;
         const uint8_t enter = config_->getC5EnterRssi(i);
         const uint8_t exit = config_->getC5ExitRssi(i);
         const uint16_t enterHi = (uint16_t)enter * 4u;
         const uint16_t exitHi = (uint16_t)exit * 4u;
-        if (!inside_[i] && filtered_[i] >= enterHi) {
-            inside_[i] = true;
-            enteredUs_[i] = sampleUs;
-        } else if (inside_[i] && filtered_[i] <= exitHi) {
-            inside_[i] = false;
+        uint16_t value = 0;
+        uint32_t sampleUs = 0;
+        while (link_->takeSample(i, value, sampleUs)) {
+            // A small EMA keeps the C5's 1 kHz stream useful after UART slotting.
+            const uint16_t prior = filtered_[i];
+            const uint32_t priorUs = previousSampleUs_[i];
+            filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
+            if (!running_) {
+                previousSampleUs_[i] = sampleUs;
+                previousSampleValid_[i] = true;
+                continue;
+            }
             uint32_t crossingUs = sampleUs;
-            uint32_t lapUs = lastLapUs_[i] ? (crossingUs - lastLapUs_[i]) : (crossingUs - enteredUs_[i]);
-            uint32_t lap = (lapUs + 500u) / 1000u;
-            bool queued = false;
-            if (lap >= config_->getMinLapMs()) {
-                portENTER_CRITICAL(&lapMux_);
-                if (pendingCount_ < C5Link::C5_MAX_PILOTS) {
-                    pending_[pendingCount_++] = {i, lap};
-                    queued = true;
+            const bool entering = !inside_[i] && filtered_[i] >= enterHi;
+            const bool exiting = inside_[i] && filtered_[i] <= exitHi;
+            if ((entering || exiting) && previousSampleValid_[i]) {
+                const uint16_t threshold = entering ? enterHi : exitHi;
+                const int32_t change = (int32_t)filtered_[i] - (int32_t)prior;
+                const int32_t distance = (int32_t)threshold - (int32_t)prior;
+                const uint32_t intervalUs = sampleUs - priorUs;
+                const bool movesTowardThreshold = (entering && change > 0 && distance >= 0) ||
+                                                   (exiting && change < 0 && distance <= 0);
+                if (movesTowardThreshold) {
+                    uint32_t offsetUs = (uint32_t)(((uint64_t)intervalUs * (uint32_t)abs(distance)) / (uint32_t)abs(change));
+                    if (offsetUs <= intervalUs) crossingUs = priorUs + offsetUs;
                 }
-                portEXIT_CRITICAL(&lapMux_);
             }
-            if (queued) {
-                lastLapUs_[i] = crossingUs;
-            } else if (!lastLapUs_[i]) {
-                lastLapUs_[i] = crossingUs;
+            if (entering) {
+                inside_[i] = true;
+                enteredUs_[i] = crossingUs;
+            } else if (exiting) {
+                inside_[i] = false;
+                uint32_t lapUs = lastLapUs_[i] ? (crossingUs - lastLapUs_[i]) : (crossingUs - enteredUs_[i]);
+                uint32_t lap = (lapUs + 500u) / 1000u;
+                bool queued = false;
+                if (lap >= config_->getMinLapMs()) {
+                    portENTER_CRITICAL(&lapMux_);
+                    if (pendingCount_ < C5Link::C5_MAX_PILOTS) {
+                        pending_[pendingCount_++] = {i, lap};
+                        queued = true;
+                    }
+                    portEXIT_CRITICAL(&lapMux_);
+                }
+                if (queued || !lastLapUs_[i]) lastLapUs_[i] = crossingUs;
             }
+            previousSampleUs_[i] = sampleUs;
+            previousSampleValid_[i] = true;
         }
     }
     (void)nowMs;

@@ -64,6 +64,7 @@ void C5Link::sendTune(uint8_t pilot) {
     activePilot_ = pilot;
     requestedFrequency_ = frequency;
     tuningReady_ = false;
+    sampleSeqValid_ = false;
 }
 
 void C5Link::poll(uint32_t nowMs) {
@@ -111,12 +112,24 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
     if (line[0] == 'R' && line[1] == ',') {
         unsigned seq = 0, value = 0;
         if (sscanf(line, "R,%u,%u", &seq, &value) == 2 && tuningReady_ && value <= 1023) {
+            const uint8_t sequence = (uint8_t)seq;
+            if (sampleSeqValid_ && sequence != (uint8_t)(lastSampleSeq_ + 1u)) {
+                ++sampleSequenceGaps_;
+            }
+            lastSampleSeq_ = sequence;
+            sampleSeqValid_ = true;
             rssi_[activePilot_] = (uint16_t)value;
             // UART parsing is still driven by the millisecond main-loop
             // timestamp for link liveness, but retain sub-millisecond timing
             // for lap detection. The line protocol remains unchanged.
-            lastSampleUs_[activePilot_] = micros();
-            samplePending_[activePilot_] = true;
+            const uint8_t pilot = activePilot_;
+            const uint8_t next = (uint8_t)((sampleHead_[pilot] + 1u) % SAMPLE_QUEUE_DEPTH);
+            if (next == sampleTail_[pilot]) {
+                ++sampleQueueDrops_;
+                sampleTail_[pilot] = (uint8_t)((sampleTail_[pilot] + 1u) % SAMPLE_QUEUE_DEPTH);
+            }
+            sampleQueue_[pilot][sampleHead_[pilot]] = {(uint16_t)value, micros()};
+            sampleHead_[pilot] = next;
             online_ = true;
         }
     } else if (line[0] == 'S' && line[1] == ',') {
@@ -135,9 +148,10 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
 }
 
 bool C5Link::takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs) {
-    if (pilot >= C5_MAX_PILOTS || !samplePending_[pilot]) return false;
-    samplePending_[pilot] = false;
-    value = rssi_[pilot];
-    timestampUs = lastSampleUs_[pilot];
+    if (pilot >= C5_MAX_PILOTS || sampleTail_[pilot] == sampleHead_[pilot]) return false;
+    const Sample &sample = sampleQueue_[pilot][sampleTail_[pilot]];
+    value = sample.value;
+    timestampUs = sample.timestampUs;
+    sampleTail_[pilot] = (uint8_t)((sampleTail_[pilot] + 1u) % SAMPLE_QUEUE_DEPTH);
     return true;
 }
