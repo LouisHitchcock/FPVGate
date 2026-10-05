@@ -51,12 +51,18 @@ def summarize(record: dict) -> dict:
     values = sorted(set(rssis))
     steps = [b - a for a, b in zip(values, values[1:]) if b > a]
     laps = [float(e["data"]["lapTimeMs"]) for e in lap_events if "lapTimeMs" in e["data"]]
+    pilots = sum(1 for f in last.get("freq", []) if int(f)) or 1
+    bad_records = int(last.get("badRecords", 0)) - int(first.get("badRecords", 0))
 
     return {
         "rssiEvents": len(rssi_events),
         "rssiEventRateHz": len(rssi_events) / elapsed,
         "acceptedSamples": samples,
         "acceptedSampleRateHz": samples / elapsed,
+        "pilots": pilots,
+        "perPilotSampleRateHz": samples / elapsed / pilots,
+        "scanMode": bool(last.get("scan", False)),
+        "badRecords": bad_records,
         "sequenceGaps": gaps,
         "queueDrops": drops,
         "onlineFraction": sum(bool(e["data"].get("on")) for e in rssi_events) / len(rssi_events),

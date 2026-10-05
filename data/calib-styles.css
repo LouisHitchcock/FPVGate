@@ -209,6 +209,18 @@
 .c5p-status.c5p-warn .c5p-dot { background: #f0b429; }
 .c5p-status.c5p-bad .c5p-dot { background: #ef5350; }
 .c5p-status.c5p-bad { border-color: #ef5350; }
+.c5p-card.c5p-race { box-shadow: 0 0 0 2px var(--c); }
+.c5p-card.c5p-race .c5p-name::after { content: "RACE"; margin-left: 6px; padding: 1px 5px; border-radius: 4px; font-size: 10px;
+                                       font-weight: 700; background: var(--c); color: #111; vertical-align: middle; }
+.c5p-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
+.c5p-stats:empty { display: none; }
+.c5p-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 9px; border-radius: 12px; font-size: 12px;
+            font-variant-numeric: tabular-nums; background: var(--bg-primary); border: 1px solid var(--border-color);
+            color: var(--text-color); }
+.c5p-chip-l { opacity: 0.65; }
+.c5p-chip-warn { border-color: #f0b429; }
+.c5p-chip-bad { border-color: #ef5350; color: #ef5350; }
+.c5p-chip-new { font-weight: 600; color: #ef5350; }
 .c5p-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; font-size: 13px; color: var(--text-color); }
 .c5p-toolbar select, .c5p-toolbar input[type=number] { padding: 4px 6px; border-radius: 5px; border: 1px solid var(--border-color);
                                                        background: var(--bg-primary); color: var(--text-color); font: inherit; }

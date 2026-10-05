@@ -348,6 +348,13 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         rssiDoc["samples"] = c5Link->acceptedSamples();
         rssiDoc["seqGaps"] = c5Link->sampleSequenceGaps();
         rssiDoc["queueDrops"] = c5Link->sampleQueueDrops();
+        rssiDoc["scan"] = c5Link->scanMode();
+        rssiDoc["racePilot"] = c5MultiPilot->racePilot();
+        rssiDoc["raceFreq"] = conf->getFrequency();
+        rssiDoc["records"] = c5Link->scanRecords();
+        rssiDoc["badRecords"] = c5Link->badRecords();
+        rssiDoc["pollGapMaxUs"] = c5Link->takePollGapMaxUs();
+        rssiDoc["pollBytesMax"] = c5Link->takePollBytesMax();
         String payload;
         serializeJson(rssiDoc, payload);
         events.send(payload.c_str(), "c5Rssi");

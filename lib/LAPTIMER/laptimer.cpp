@@ -667,6 +667,20 @@ bool LapTimer::isLapAvailable() {
     return lapAvailable;
 }
 
+bool LapTimer::recordCrossing(uint32_t crossingMs) {
+    if (state != RUNNING) return false;
+    if ((int32_t)(crossingMs - raceStartTimeMs) < 0) return false;   // from before the start
+    const bool isGate1 = (lapCount == 0 && !lapCountWraparound);
+    if (!isGate1 && (int32_t)(crossingMs - startTimeMs) <= (int32_t)conf->getMinLapMs()) {
+        DEBUG("[C5] crossing %u ms into the lap ignored (min lap %u)\n", crossingMs - startTimeMs, conf->getMinLapMs());
+        return false;
+    }
+    rssiPeakTimeMs = crossingMs;
+    finishLap();
+    startLap();
+    return true;
+}
+
 void LapTimer::addManualLap(uint32_t lapTimeMs) {
     DEBUG("addManualLap: Adding manual lap %u ms (lapCount=%u, wraparound=%d)\n", lapTimeMs, lapCount, lapCountWraparound);
     

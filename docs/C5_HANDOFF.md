@@ -1,6 +1,59 @@
 # C5 Multi-Pilot Handoff
 
-Updated: 2026-10-05
+Updated: 2026-10-05 (evening)
+
+## 2026-10-05 build: 1 kHz per pilot achieved
+
+Result (`tools/c5_timing_validation.py`, 60 s, 8 Raceband pilots):
+**~1030 Hz per pilot, continuous**, 0 sequence gaps, 0 queue drops, 0 bad
+records, 100% online/ready. Was 116 Hz per pilot in 16 ms bursts.
+
+| Step | Per-pilot rate |
+|---|---|
+| Slot cycle (start) | 116 Hz |
+| C5 scan mode + binary records | 761 Hz |
+| Single-pass `power()` meter | 904 Hz |
+| Non-blocking USB view (a 2 ms wait every 20 ms took 10%) | 987 Hz |
+| Lighter C5 main loop | 990 Hz |
+| Block-periodic coefficients in registers | 1032 Hz (S3 then dropped samples) |
+| S3 `c5Task` + bulk UART reads | 1028-1032 Hz, clean |
+
+C5 per visit (`nodeprof`): hop 68, dump 10, power 33, other ~10 = ~121 us
+of the 125 us budget. Little headroom; `noden 192/128` trades noise for time.
+
+How it works:
+
+- C5 firmware 2: `P,<MHz x8>` puts the node in scan mode (state `SCAN`). It
+  cycles the slots itself with `hopNoWait` (skip 3), n=256 dumps and
+  `BandMeter::power()`, and sends one binary record per cycle (format in
+  `node_core.h` and `c5link.h`) with each slot's C5 dump timestamp. Older
+  S3 firmware never sends `P` and still gets the F/OK protocol.
+- S3: `C5Link` detects firmware >= 2 from the status line, sends the slot
+  list (resent while the C5 isn't in SCAN), parses records next to the
+  ASCII lines, and maps the C5 clock to `micros()` with a min-latency
+  filter. Serviced by `c5Task` (core 1, priority 3, every 1 ms), with
+  256-byte bulk UART reads: per-byte `read()` cost ~20 us and starved it.
+- Lap detection (`C5MultiPilot`): per pilot Enter/Exit hysteresis, pass
+  timed at the filtered RSSI peak. The slot on the Configuration pilot
+  frequency is the race pilot: its crossings go to
+  `LapTimer::recordCrossing()` from `loop()`, so Gate 1, minimum lap, the
+  lap table, announcer, RotorHazard and race history work unchanged. All
+  slots still produce `c5Lap` events for the Calibration cards.
+- Calibration tab: live link chips (mode, per-pilot Hz, total, gaps,
+  drops, bad records, S3 poll gap) and a RACE badge on the race pilot.
+
+Open items:
+
+1. Post-hop spikes (~1%, cause unknown; median-of-3 hides them).
+2. Skip mask 3 and settle-free dumps were VTX-checked only on R1 from 37 MHz
+   below; check across the band and the R8 -> R1 wrap.
+3. First single-quad race (R5) worked; lap accuracy against video/stopwatch
+   not yet measured.
+4. Multi-pilot races: next piece of work (race UI, history, announcer).
+5. Image rejection ~18 dB: ghosts possible on ~20 MHz-spaced channel plans.
+
+Diagnostics left in: `nodeprof` (C5 console), `pollGapMaxUs` /
+`pollBytesMax` (c5Rssi event).
 
 ## 2026-10-05 research: path to 1 kHz per pilot
 
@@ -55,7 +108,7 @@ Planned order:
 5. Later/optional: IQ-imbalance correction, then two pilots per dump.
 
 The research commands (`hopprof`, `hopspikes`, `bandshape`, `hopNoWait`)
-are in the C5 working tree, flashed, not yet committed.
+are committed in the C5 repo (24e1aa5).
 
 ## Current project state
 
@@ -66,10 +119,8 @@ are in the C5 working tree, flashed, not yet committed.
 - XIAO S3: `192.168.0.201`
 - C5 USB/flash port: `COM3`
 - C5 link: 921600 baud, 8N1
-- XIAO slot source is restored to `SLOT_MS = 16`.
-- C5 source default is `settleUs = 25`.
-
-The final 16 ms XIAO OTA restore was started but interrupted during the build. The source is definitely back at 16 ms, but tomorrow verify the hardware is also running that build and reflash if necessary.
+- The XIAO and C5 both run the scan-mode builds (C5 firmware 2).
+- `SLOT_MS = 16` and `settleUs = 25` only apply to the older F/OK path.
 
 Do not stage or modify the existing unrelated worktree items:
 

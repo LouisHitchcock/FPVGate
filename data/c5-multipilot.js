@@ -9,8 +9,10 @@
 // shown.
 //
 // Data: the "c5Rssi" SSE event (lib/WEBSERVER/webserver.cpp), 10 per second:
-//   { rssi:[8], freq:[8], in:[8], on, started, st, mhz, gain, race }
-// and "c5Lap" { pilot, lapTimeMs }.
+//   { rssi:[8], freq:[8], in:[8], on, started, st, mhz, gain, race,
+//     samples, seqGaps, queueDrops, scan, records, badRecords, pollGapMaxUs }
+// and "c5Lap" { pilot, lapTimeMs }. The counters are running totals; the
+// stats row shows rates and recent increases worked out from them.
 //
 // Uses freqLookup and bandDefinitions from script.js.
 "use strict";
@@ -22,6 +24,9 @@ const C5UI = (() => {
   const COLORS = ["#ff6b6b", "#f7b32b", "#06d6a0", "#4cc9f0", "#a78bfa", "#f78c6b", "#7bd389", "#f472b6"];
   const HISTORY_S = 125;
   const SAVE_DELAY_MS = 800;
+  const RATE_WINDOW_S = 2;    // sample rate averaged over this
+  const RECENT_S = 10;        // link errors counted as "recent" within this
+  const SLOT_MS = 16;         // older C5 firmware: one 16 ms slot per pilot (C5Link::SLOT_MS)
 
   // Frequency alone is not a unique channel identity: F8 and R7 are both
   // 5880 MHz. Keep the selected band alongside each UI profile.
@@ -30,7 +35,10 @@ const C5UI = (() => {
   const laps = Array.from({ length: SLOTS }, () => ({ count: 0, last: null, best: null, flashUntil: 0 }));
   let gain = 30;
   let focus = 0;
-  let live = { on: false, started: false, st: "", mhz: 0, gain: null, race: false, inside: [], at: 0 };
+  let live = { on: false, started: false, st: "", mhz: 0, gain: null, race: false, inside: [], at: 0, scan: false };
+  // Running link counters from each event: { t, samples, gaps, drops, bad, pollUs }.
+  let linkHist = [];
+  let shownRacePilot = -1;   // the card currently marked as the race pilot
   let windowS = 30;
   let frozenAt = null;
   let showAllThresholds = false;
@@ -111,6 +119,7 @@ const C5UI = (() => {
     }).join("");
     host.innerHTML = `
       <div class="c5p-status" id="c5pStatus"><span class="c5p-dot"></span><span id="c5pStatusText">Waiting for data from FPVGate…</span></div>
+      <div class="c5p-stats" id="c5pStats"></div>
       <div class="c5p-toolbar">
         <label class="c5p-lbl">Band <select id="c5pBand">${bandOpts}</select></label>
         <button class="c5p-btn" id="c5pFill" title="Put the band's channels in pilots 1-8">Fill pilots from band</button>
@@ -170,6 +179,7 @@ const C5UI = (() => {
       card.classList.toggle("c5p-hidden", pilots[i].hidden);
       const name = card.querySelector(".c5p-name");
       if (name) name.textContent = `P${i + 1}` + (pilots[i].freq ? " · " + channelName(pilots[i].freq, pilots[i].bandIndex) : "");
+      card.classList.toggle("c5p-race", i === live.racePilot);
       const eye = card.querySelector(".c5p-eye");
       if (eye) eye.textContent = pilots[i].hidden ? "◌" : "●";
       card.querySelectorAll(".c5p-in").forEach(inp => {
@@ -353,7 +363,9 @@ const C5UI = (() => {
     const t = now();
     const rssi = (d.rssi || []).map(v => Number(v) / RSSI_SCALE);
     live = { on: !!d.on, started: d.started !== false, st: d.st || "", mhz: d.mhz || 0, gain: d.gain,
-             race: !!d.race, inside: d.in || [], at: t };
+             race: !!d.race, inside: d.in || [], at: t, scan: !!d.scan,
+             racePilot: d.racePilot == null ? -1 : +d.racePilot, raceFreq: +d.raceFreq || 0 };
+    recordLink(t, d);
     for (let i = 0; i < SLOTS; i++) {
       // Older firmware sends only the enabled pilots' RSSI, no "freq".
       const enabled = d.freq ? !!d.freq[i] : i < rssi.length;
@@ -368,6 +380,33 @@ const C5UI = (() => {
       }
     }
     recordCalibrationSample(rssi);
+  }
+
+  function recordLink(t, d) {
+    if (d.samples == null) return;   // older S3 firmware: no counters
+    const e = { t, samples: +d.samples || 0, gaps: +d.seqGaps || 0, drops: +d.queueDrops || 0,
+                bad: +d.badRecords || 0, pollUs: +d.pollGapMaxUs || 0 };
+    const prev = linkHist[linkHist.length - 1];
+    if (prev && e.samples < prev.samples) linkHist = [];   // the S3 restarted
+    linkHist.push(e);
+    const keep = lowerBound(linkHist.map(x => x.t), t - RECENT_S - 1);
+    if (keep > 0) linkHist.splice(0, keep);
+  }
+
+  // Rates over RATE_WINDOW_S, error increases over RECENT_S, worst S3 poll gap.
+  function linkStats() {
+    if (linkHist.length < 2) return null;
+    const last = linkHist[linkHist.length - 1];
+    if (now() - last.t > 3) return null;
+    const at = s => linkHist[Math.min(lowerBound(linkHist.map(x => x.t), last.t - s), linkHist.length - 2)];
+    const r = at(RATE_WINDOW_S), old = at(RECENT_S);
+    const dt = last.t - r.t;
+    const enabled = pilots.filter(p => p.freq).length;
+    const total = dt > 0 ? (last.samples - r.samples) / dt : 0;
+    let pollUs = 0;
+    for (const x of linkHist) if (x.t >= last.t - RECENT_S) pollUs = Math.max(pollUs, x.pollUs);
+    return { total, perPilot: enabled ? total / enabled : 0, enabled, last,
+             newGaps: last.gaps - old.gaps, newDrops: last.drops - old.drops, newBad: last.bad - old.bad, pollUs };
   }
 
   function onLap(d) {
@@ -417,18 +456,64 @@ const C5UI = (() => {
       msg = "C5 online. No pilots set: pick a band and press Fill, or choose a frequency on a card.";
     } else {
       const err = /^ERR/.test(live.st);
-      cls = err ? "c5p-bad" : "c5p-ok";
-      msg = `C5 online · ${live.st || "?"}${live.mhz ? " · tuning " + live.mhz + " MHz (" + channelName(live.mhz) + ")" : ""}` +
-            ` · gain ${live.gain ?? gain} · ${enabled} pilot${enabled === 1 ? "" : "s"}, each read every ${enabled * 20} ms` +
-            (live.race ? " · race running: laps counted" : " · laps count while a race runs");
+      const ls = linkStats();
+      const linkErr = ls && (ls.newGaps > 0 || ls.newDrops > 0 || ls.newBad > 0);
+      cls = err ? "c5p-bad" : linkErr ? "c5p-warn" : "c5p-ok";
+      const plural = `${enabled} pilot${enabled === 1 ? "" : "s"}`;
+      msg = live.scan
+        ? `C5 online · scanning ${plural} continuously`
+        : `C5 online · ${live.st || "?"}${live.mhz ? " · tuning " + live.mhz + " MHz (" + channelName(live.mhz) + ")" : ""}` +
+          ` · ${plural}, one ${SLOT_MS} ms slot each every ${enabled * SLOT_MS} ms (older C5 firmware)`;
+      msg += ` · gain ${live.gain ?? gain}`;
+      if (live.racePilot >= 0) {
+        const rp = pilots[live.racePilot];
+        msg += ` · race laps from P${live.racePilot + 1} (${channelName(rp.freq, rp.bandIndex)})` +
+               (live.race ? ", race running" : "");
+      } else if (live.raceFreq) {
+        msg += ` · no pilot on the race frequency ${live.raceFreq} MHz (${channelName(live.raceFreq)}, set in Configuration): races won't count laps`;
+        if (!err) cls = "c5p-warn";
+      }
       if (err) msg += live.st === "ERR_FREQ" ? " · frequency outside 5180–5917 MHz" : " · the C5 reported an RF error";
+      if (linkErr) msg += " · link errors in the last " + RECENT_S + " s";
     }
     el.className = "c5p-status " + cls;
     txt.textContent = msg;
+    renderStats();
+  }
+
+  // Measured link figures, one chip each. Red when a counter rose recently.
+  function renderStats() {
+    const el = $("#c5pStats");
+    if (!el) return;
+    const s = linkStats();
+    if (!s || !live.on) { el.innerHTML = ""; return; }
+    const fmtHz = v => v >= 1000 ? (v / 1000).toFixed(2) + " kHz" : Math.round(v) + " Hz";
+    const chip = (label, value, state, title) =>
+      `<span class="c5p-chip${state ? " c5p-chip-" + state : ""}" title="${title}"><span class="c5p-chip-l">${label}</span>${value}</span>`;
+    const err = (n, total) => `${total}${n > 0 ? ` <span class="c5p-chip-new">+${n}</span>` : ""}`;
+    el.innerHTML = [
+      chip("Mode", live.scan ? "Scan" : "Slots", live.scan ? "" : "warn",
+           live.scan ? "The C5 cycles through every pilot itself" : "Older C5 firmware: the S3 tunes one pilot per 16 ms slot"),
+      chip("Per pilot", s.enabled ? fmtHz(s.perPilot) : "–", s.enabled && s.perPilot < 900 ? "warn" : "",
+           `Samples per second for each pilot, averaged over ${RATE_WINDOW_S} s`),
+      chip("Total", fmtHz(s.total), "", `All pilots together, averaged over ${RATE_WINDOW_S} s`),
+      chip("Seq gaps", err(s.newGaps, s.last.gaps), s.newGaps > 0 ? "bad" : "",
+           `Records or samples lost on the UART (total; +new in the last ${RECENT_S} s)`),
+      chip("Queue drops", err(s.newDrops, s.last.drops), s.newDrops > 0 ? "bad" : "",
+           `Samples the S3 couldn't process in time (total; +new in the last ${RECENT_S} s)`),
+      chip("Bad records", err(s.newBad, s.last.bad), s.newBad > 0 ? "bad" : "",
+           `Records failing their checksum (total; +new in the last ${RECENT_S} s)`),
+      chip("S3 poll", s.pollUs ? (s.pollUs / 1000).toFixed(1) + " ms" : "–", s.pollUs > 20000 ? "warn" : "",
+           `Longest time between the S3's reads of the C5 link in the last ${RECENT_S} s`),
+    ].join("");
   }
 
   function renderCards() {
     const t = now();
+    if (live.racePilot !== shownRacePilot) {
+      shownRacePilot = live.racePilot;
+      refreshCardStates();
+    }
     pilots.forEach((p, i) => {
       const val = $(`#c5pVal${i}`);
       if (!val) return;

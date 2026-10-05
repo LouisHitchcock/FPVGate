@@ -185,6 +185,26 @@ static void initParallelTask() {
     xTaskCreatePinnedToCore(parallelTask, "parallelTask", 8192, NULL, 0, &xTimerTask, 0);
 }
 
+// The C5 link at ~8k samples/s: serviced every millisecond, above loop()'s
+// priority on the same core, so a slow loop pass (web, SD, JSON) can't let
+// the per-pilot sample queues overflow.
+static void c5Task(void *) {
+    for (;;) {
+        if (config.getReceiverRadio() == 2) {
+            const uint32_t nowMs = millis();
+            if (!c5Link.started()) {
+                c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
+                c5MultiPilot.begin(&config, &c5Link);
+            }
+            c5Link.poll(nowMs);
+            if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(nowMs);
+            if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
+            c5MultiPilot.update(nowMs);
+        }
+        vTaskDelay(1);
+    }
+}
+
 static void onSdCardReady() {
     // Ensure SD has required directories (they were created on LittleFS at boot, before SD mounted)
     DEBUG("Creating SD folders: /races, /tracks, /tracks/images\n");
@@ -515,6 +535,8 @@ void setup() {
         c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
         c5MultiPilot.begin(&config, &c5Link);
     }
+    // loop() runs at priority 1 on core 1.
+    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, 3, NULL, 1);
 }
 
 #ifdef ENABLE_POWER_SWITCH
@@ -610,16 +632,7 @@ void loop() {
     
     // Timing always runs
     if (config.getReceiverRadio() != 2) timer.handleLapTimerUpdate(currentTimeMs);
-    if (config.getReceiverRadio() == 2) {
-        if (!c5Link.started()) {
-            c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
-            c5MultiPilot.begin(&config, &c5Link);
-        }
-        c5Link.poll(currentTimeMs);
-        if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(currentTimeMs);
-        if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
-        c5MultiPilot.update(currentTimeMs);
-    }
+    // The C5 receiver (receiverRadio 2) is serviced by c5Task.
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Feed live RSSI and timing data to LCD UI
@@ -846,6 +859,14 @@ void loop() {
     }
 #endif
     
+    // ESP32-C5: the race pilot's gate crossings (c5Task finds them) become
+    // laps here, one per pass so each is broadcast before the next.
+    uint32_t c5CrossingUs;
+    if (config.getReceiverRadio() == 2 && !timer.isLapAvailable() && c5MultiPilot.takeRaceCrossing(c5CrossingUs)) {
+        // micros() to millis() by age; the two clocks wrap differently.
+        timer.recordCrossing(millis() - (micros() - c5CrossingUs) / 1000u);
+    }
+
     // Broadcast lap events to all transports (WiFi + USB)
     if (timer.isLapAvailable()) {
         uint32_t lapTime = timer.getLapTime();
