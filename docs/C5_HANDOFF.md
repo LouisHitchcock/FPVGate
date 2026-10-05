@@ -2,6 +2,61 @@
 
 Updated: 2026-10-05
 
+## 2026-10-05 research: path to 1 kHz per pilot
+
+Goal: match RotorHazard's ~1 kHz RSSI rate **per pilot**, continuously.
+
+Where we are: the ~930 Hz below is the total over all eight pilots. Each
+pilot gets one 16 ms slot every 128 ms: ~116 samples/s, delivered as ~14
+samples then ~112 ms blind. Slot tuning cannot fix that. 1 kHz for eight
+pilots needs one pilot visit (hop + dump + maths) every 125 us.
+
+C5 bench measurements (`timer`, VTX off):
+
+| Stage | n=2048 | n=512 | n=256 |
+|---|---|---|---|
+| Stock PLL hop | 398 us | 398 | 398 |
+| Direct dump | 55 | 16 | 10 |
+| Meter | 422 | 117 | 66 |
+
+Hop finding (disassembly of Apache-2.0 libphy, esp32c5):
+`phy_set_rf_freq_offset` -> `phy_set_rfpll_freq` (PLL I2C writes, then a
+tail-call `ets_delay_us(300)`) -> `phy_ckgen_5g_cal` (3 I2C writes +
+`ets_delay_us(20)`) -> `phy_freq_mem_change_5g_`. All steps are exported.
+`radio::hopNoWait()` makes the same calls minus the 300 us wait: 103 us, or
+68 us also skipping ckgen_5g and freq_mem (skip mask 3).
+
+VTX bursts on R1 (5658):
+
+- `hopprof`: dumps 0-300 us after `hopNoWait` (either variant) read within
+  ~0.2 dB of steady state. The PLL is settled when the call returns.
+- `hopspikes` (500 dumps each, carrier on): readings 12-25 dB high, no
+  clipping, gain field unchanged: no hop 0, stock hop 4, hopNoWait 10,
+  hopNoWait skip 3: 4. With the VTX off: 0 in all modes. The spikes come from
+  hopping in general, not from removing the wait; the median-of-3 hides
+  them. Cause unknown: save a raw spike capture to find it.
+- `bandshape`: passband flat to +-15 MHz, -1.3 dB at +-18.5, -3 dB at ~+-21,
+  ~-10 dB by +-25. Image rejection only ~18 dB at gain 30. Two pilots per
+  dump (LO between a Raceband pair) would put each pilot's image on the
+  other at only -17 dB: not viable without digital IQ-imbalance correction.
+
+Budget with the proven hop: 68 + 10 + 66 us (n=256) = ~144 us -> ~870 Hz per
+pilot; a single-pass meter (~25-35 us) gives ~1.1-1.2 kHz.
+
+Planned order:
+
+1. C5 runs the scan itself: the S3 sends the pilot list once; no F/OK
+   handshake per slot.
+2. Binary, batched UART records with C5 dump timestamps (ASCII R lines at
+   8k samples/s need ~112 KB/s, over 921600 baud's ~92 KB/s); consider 2 Mbaud.
+   The S3 maps the C5 clock to its own instead of stamping on parse.
+3. `hopNoWait` (skip 3) in the scan; keep the median-of-3.
+4. n=256 and a single-pass, non-volatile meter.
+5. Later/optional: IQ-imbalance correction, then two pilots per dump.
+
+The research commands (`hopprof`, `hopspikes`, `bandshape`, `hopNoWait`)
+are in the C5 working tree, flashed, not yet committed.
+
 ## Current project state
 
 - FPVGate repository: `C:\Users\Louis\Desktop\Code\FPVGate`
