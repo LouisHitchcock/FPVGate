@@ -3,16 +3,19 @@
 // One panel on the Calibration tab: link status, a band picker that fills
 // the 8 pilot slots, the RF gain, a live chart of every pilot with labels
 // on each line, and a card per pilot with its frequency, live level and its
-// own Enter/Exit thresholds. The selected pilot's thresholds are drawn on
-// the chart and can be dragged. Changes save themselves (saveConfig() in
-// script.js), so the thresholds the lap detector uses are always the ones
-// shown.
+// own Enter/Exit thresholds, pilot name, spoken name, colour and Race switch.
+// The selected pilot's thresholds are drawn on the chart and can be dragged.
+// Changes save themselves (saveConfig() in script.js), so the thresholds the
+// lap detector uses are always the ones shown. Slots with Race on count in
+// races: one racer is a single-pilot race, two or more a multi-pilot race
+// (script.js asks getRacePilots()).
 //
 // Data: the "c5Rssi" SSE event (lib/WEBSERVER/webserver.cpp), 10 per second:
 //   { rssi:[8], freq:[8], in:[8], on, started, st, mhz, gain, race,
-//     samples, seqGaps, queueDrops, scan, records, badRecords, pollGapMaxUs }
-// and "c5Lap" { pilot, lapTimeMs }. The counters are running totals; the
-// stats row shows rates and recent increases worked out from them.
+//     samples, seqGaps, queueDrops, scan, records, badRecords, pollGapMaxUs,
+//     racers (bit mask), multi }
+// and "c5Lap" { pilot, lap, lapTimeMs, racer }. The counters are running
+// totals; the stats row shows rates and recent increases worked out from them.
 //
 // Uses freqLookup and bandDefinitions from script.js.
 "use strict";
@@ -30,7 +33,8 @@ const C5UI = (() => {
 
   // Frequency alone is not a unique channel identity: F8 and R7 are both
   // 5880 MHz. Keep the selected band alongside each UI profile.
-  const pilots = Array.from({ length: SLOTS }, () => ({ freq: 0, bandIndex: 4, enter: 72, exit: 68, hidden: false }));
+  const pilots = Array.from({ length: SLOTS }, (_, i) => ({ freq: 0, bandIndex: 4, enter: 72, exit: 68, hidden: false,
+                                                            name: "", phonetic: "", color: COLORS[i], race: false }));
   const hist = Array.from({ length: SLOTS }, () => ({ t: [], v: [] }));
   const laps = Array.from({ length: SLOTS }, () => ({ count: 0, last: null, best: null, flashUntil: 0 }));
   let gain = 30;
@@ -38,7 +42,6 @@ const C5UI = (() => {
   let live = { on: false, started: false, st: "", mhz: 0, gain: null, race: false, inside: [], at: 0, scan: false };
   // Running link counters from each event: { t, samples, gaps, drops, bad, pollUs }.
   let linkHist = [];
-  let shownRacePilot = -1;   // the card currently marked as the race pilot
   let windowS = 30;
   let frozenAt = null;
   let showAllThresholds = false;
@@ -57,6 +60,12 @@ const C5UI = (() => {
   const inRange = f => f >= MIN_MHZ && f <= MAX_MHZ;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const colorOf = i => pilots[i].color || COLORS[i];
+  const hexColor = n => "#" + (Number(n) >>> 0 & 0xffffff).toString(16).padStart(6, "0");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const isRacer = i => !!pilots[i].freq && pilots[i].race;
+  // "Louis" or, with no name, "P5 R5".
+  const pilotLabel = i => pilots[i].name || `P${i + 1}` + (pilots[i].freq ? " " + channelName(pilots[i].freq, pilots[i].bandIndex) : "");
 
   // ---- channel names ------------------------------------------------------------
 
@@ -155,12 +164,18 @@ const C5UI = (() => {
     const el = document.getElementById("c5pCards");
     if (!el) return;
     el.innerHTML = pilots.map((p, i) => `
-      <div class="c5p-card" data-i="${i}" style="--c:${COLORS[i]}">
+      <div class="c5p-card" data-i="${i}" style="--c:${colorOf(i)}">
         <div class="c5p-card-head">
           <span class="c5p-name">P${i + 1}</span>
           <select class="c5p-freq" data-i="${i}">${freqOptions(p.freq, p.bandIndex)}</select>
           <button class="c5p-eye" data-i="${i}" title="Show or hide on the chart">${p.hidden ? "◌" : "●"}</button>
         </div>
+        <div class="c5p-id">
+          <input type="text" class="c5p-pname" data-i="${i}" maxlength="20" placeholder="Pilot name" value="${esc(p.name)}">
+          <input type="color" class="c5p-pcolor" data-i="${i}" value="${p.color}" title="Pilot colour (chart, race table, gate LEDs)">
+          <label class="c5p-racetg" title="Count this pilot's laps in races"><input type="checkbox" class="c5p-racechk" data-i="${i}"${p.race ? " checked" : ""}> Race</label>
+        </div>
+        <input type="text" class="c5p-pphon" data-i="${i}" maxlength="20" placeholder="Spoken as (optional)" value="${esc(p.phonetic)}">
         <div class="c5p-liverow"><span class="c5p-val" id="c5pVal${i}">–</span><span class="c5p-gate" id="c5pGate${i}"></span></div>
         <div class="c5p-bar"><div class="c5p-fill" id="c5pFill${i}"></div><div class="c5p-mk c5p-mk-enter" id="c5pMkE${i}"></div><div class="c5p-mk c5p-mk-exit" id="c5pMkX${i}"></div></div>
         <div class="c5p-th"><span>Enter</span><span class="c5p-step"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="enter" data-d="-1">−</button><input type="number" min="1" max="255" class="c5p-in" data-i="${i}" data-th="enter" value="${p.enter}"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="enter" data-d="1">+</button></span></div>
@@ -179,7 +194,16 @@ const C5UI = (() => {
       card.classList.toggle("c5p-hidden", pilots[i].hidden);
       const name = card.querySelector(".c5p-name");
       if (name) name.textContent = `P${i + 1}` + (pilots[i].freq ? " · " + channelName(pilots[i].freq, pilots[i].bandIndex) : "");
-      card.classList.toggle("c5p-race", i === live.racePilot);
+      card.classList.toggle("c5p-race", isRacer(i));
+      card.style.setProperty("--c", colorOf(i));
+      for (const [cls, key] of [[".c5p-pname", "name"], [".c5p-pphon", "phonetic"]]) {
+        const inp = card.querySelector(cls);
+        if (inp && document.activeElement !== inp) inp.value = pilots[i][key];
+      }
+      const col = card.querySelector(".c5p-pcolor");
+      if (col && document.activeElement !== col) col.value = pilots[i].color;
+      const chk = card.querySelector(".c5p-racechk");
+      if (chk) chk.checked = pilots[i].race;
       const eye = card.querySelector(".c5p-eye");
       if (eye) eye.textContent = pilots[i].hidden ? "◌" : "●";
       card.querySelectorAll(".c5p-in").forEach(inp => {
@@ -237,7 +261,23 @@ const C5UI = (() => {
         setFreq(i, +f, Number.isInteger(selectedBand) ? selectedBand : pilots[i].bandIndex);
       } else if (t.classList.contains("c5p-in")) {
         setThreshold(i, t.dataset.th, parseInt(t.value, 10));
+      } else if (t.classList.contains("c5p-pname") || t.classList.contains("c5p-pphon")) {
+        pilots[i][t.classList.contains("c5p-pname") ? "name" : "phonetic"] = t.value.trim().slice(0, 20);
+        scheduleSave();
+      } else if (t.classList.contains("c5p-racechk")) {
+        pilots[i].race = t.checked;
+        refreshCardStates();
+        scheduleSave();
       }
+    });
+    // Colour previews live while the picker is open; saves on change.
+    cards.addEventListener("input", e => {
+      const t = e.target;
+      if (!t.classList.contains("c5p-pcolor")) return;
+      const i = +t.dataset.i;
+      pilots[i].color = t.value;
+      t.closest(".c5p-card").style.setProperty("--c", t.value);
+      if (e.type === "input") scheduleSave();
     });
 
     const cv = document.getElementById("c5pChart");
@@ -364,7 +404,7 @@ const C5UI = (() => {
     const rssi = (d.rssi || []).map(v => Number(v) / RSSI_SCALE);
     live = { on: !!d.on, started: d.started !== false, st: d.st || "", mhz: d.mhz || 0, gain: d.gain,
              race: !!d.race, inside: d.in || [], at: t, scan: !!d.scan,
-             racePilot: d.racePilot == null ? -1 : +d.racePilot, raceFreq: +d.raceFreq || 0 };
+             racers: +d.racers || 0, multi: !!d.multi };
     recordLink(t, d);
     for (let i = 0; i < SLOTS; i++) {
       // Older firmware sends only the enabled pilots' RSSI, no "freq".
@@ -413,10 +453,11 @@ const C5UI = (() => {
     const i = +d.pilot;
     if (!(i >= 0 && i < SLOTS)) return;
     const L = laps[i];
+    L.flashUntil = now() + 1.5;
+    if (+d.lap === 0) return;   // Gate 1: start to first pass, not a lap
     L.count++;
     L.last = d.lapTimeMs;
     L.best = L.best == null ? d.lapTimeMs : Math.min(L.best, d.lapTimeMs);
-    L.flashUntil = now() + 1.5;
   }
 
   function lowerBound(a, v) {
@@ -465,14 +506,16 @@ const C5UI = (() => {
         : `C5 online · ${live.st || "?"}${live.mhz ? " · tuning " + live.mhz + " MHz (" + channelName(live.mhz) + ")" : ""}` +
           ` · ${plural}, one ${SLOT_MS} ms slot each every ${enabled * SLOT_MS} ms (older C5 firmware)`;
       msg += ` · gain ${live.gain ?? gain}`;
-      if (live.racePilot >= 0) {
-        const rp = pilots[live.racePilot];
-        msg += ` · race laps from P${live.racePilot + 1} (${channelName(rp.freq, rp.bandIndex)})` +
-               (live.race ? ", race running" : "");
-      } else if (live.raceFreq) {
-        msg += ` · no pilot on the race frequency ${live.raceFreq} MHz (${channelName(live.raceFreq)}, set in Configuration): races won't count laps`;
+      const racers = pilots.map((_, i) => i).filter(isRacer);
+      if (racers.length === 1) {
+        msg += ` · single-pilot race: ${pilotLabel(racers[0])}`;
+      } else if (racers.length > 1) {
+        msg += ` · multi-pilot race: ${racers.map(pilotLabel).join(", ")}`;
+      } else {
+        msg += " · no pilot has Race on: races won't count laps";
         if (!err) cls = "c5p-warn";
       }
+      if (live.race) msg += " · race running";
       if (err) msg += live.st === "ERR_FREQ" ? " · frequency outside 5180–5917 MHz" : " · the C5 reported an RF error";
       if (linkErr) msg += " · link errors in the last " + RECENT_S + " s";
     }
@@ -510,10 +553,6 @@ const C5UI = (() => {
 
   function renderCards() {
     const t = now();
-    if (live.racePilot !== shownRacePilot) {
-      shownRacePilot = live.racePilot;
-      refreshCardStates();
-    }
     pilots.forEach((p, i) => {
       const val = $(`#c5pVal${i}`);
       if (!val) return;
@@ -607,7 +646,7 @@ const C5UI = (() => {
     pilots.forEach((p, i) => {
       if (!p.freq || p.hidden || (i !== focus && !showAllThresholds)) return;
       const sel = i === focus;
-      ctx.strokeStyle = COLORS[i];
+      ctx.strokeStyle = colorOf(i);
       ctx.globalAlpha = sel ? 0.95 : 0.4;
       for (const [which, dash] of [["enter", []], ["exit", [6, 5]]]) {
         const y = Y(p[which]);
@@ -616,7 +655,7 @@ const C5UI = (() => {
         ctx.beginPath(); ctx.moveTo(box.l, y); ctx.lineTo(box.r, y); ctx.stroke();
         if (sel) {
           ctx.setLineDash([]);
-          ctx.fillStyle = COLORS[i];
+          ctx.fillStyle = colorOf(i);
           const label = `${channelName(p.freq, p.bandIndex)} ${which} ${p[which]}`;
           const w = ctx.measureText(label).width + 10;
           ctx.globalAlpha = 0.9;
@@ -637,7 +676,7 @@ const C5UI = (() => {
       if (!p.freq || p.hidden) return;
       const h = hist[i];
       const j0 = Math.max(0, lowerBound(h.t, t0) - 1);
-      ctx.strokeStyle = COLORS[i];
+      ctx.strokeStyle = colorOf(i);
       ctx.lineWidth = i === focus ? 2.4 : 1.6;
       ctx.beginPath();
       let last = null;
@@ -666,7 +705,7 @@ const C5UI = (() => {
     ctx.font = "600 12px system-ui, sans-serif";
     ctx.textBaseline = "middle";
     labels.forEach(l => {
-      const c = COLORS[l.i];
+      const c = colorOf(l.i);
       ctx.strokeStyle = c;
       ctx.globalAlpha = 0.6;
       ctx.beginPath(); ctx.moveTo(l.x, clamp(l.y, box.t, box.b)); ctx.lineTo(box.r + 4, l.ly); ctx.stroke();
@@ -695,7 +734,7 @@ const C5UI = (() => {
       let j = clamp(lowerBound(h.t, t), 0, h.t.length - 1);
       if (j > 0 && Math.abs(h.t[j - 1] - t) < Math.abs(h.t[j] - t)) j--;
       if (Math.abs(h.t[j] - t) > 1) return;
-      html += `<div><span class="c5p-sw" style="background:${COLORS[i]}"></span>${channelName(p.freq, p.bandIndex)} <b>${h.v[j]}</b> <span class="c5p-dim">(enter ${p.enter} / exit ${p.exit})</span></div>`;
+      html += `<div><span class="c5p-sw" style="background:${colorOf(i)}"></span>${channelName(p.freq, p.bandIndex)} <b>${h.v[j]}</b> <span class="c5p-dim">(enter ${p.enter} / exit ${p.exit})</span></div>`;
     });
     tip.innerHTML = html;
     tip.style.display = "block";
@@ -775,6 +814,13 @@ const C5UI = (() => {
       pilots[i].freq = f;
       pilots[i].enter = p ? +p.enterRssi || 72 : pilots[i].enter;
       pilots[i].exit = p && Number.isFinite(+p.exitRssi) ? +p.exitRssi : pilots[i].exit;
+      // Pilot identity (firmware with config v24; older firmware omits it).
+      if (p && p.name !== undefined) {
+        pilots[i].name = String(p.name || "");
+        pilots[i].phonetic = String(p.phonetic || "");
+        pilots[i].color = p.color != null ? hexColor(p.color) : COLORS[i];
+        pilots[i].race = !!+p.race;
+      }
     }
     if (!built) {
       build();
@@ -793,7 +839,18 @@ const C5UI = (() => {
 
   function getProfilesForSave() {
     // All 8 slots: the firmware switches off any slot not sent.
-    return pilots.map((p, id) => ({ id, frequency: p.freq, enterRssi: p.enter, exitRssi: p.exit }));
+    return pilots.map((p, id) => ({ id, frequency: p.freq, enterRssi: p.enter, exitRssi: p.exit,
+                                    name: p.name, phonetic: p.phonetic,
+                                    color: parseInt(p.color.slice(1), 16), race: p.race ? 1 : 0 }));
+  }
+
+  // The slots that count in races (a frequency and Race on), for script.js:
+  // { slot, name, label, spoken, color (#rrggbb), freq, channel }.
+  function getRacePilots() {
+    return pilots.map((p, slot) => ({ p, slot })).filter(({ slot }) => isRacer(slot)).map(({ p, slot }) => ({
+      slot, name: p.name, label: pilotLabel(slot), spoken: p.phonetic || p.name || `Pilot ${slot + 1}`,
+      color: colorOf(slot), freq: p.freq, channel: channelName(p.freq, p.bandIndex),
+    }));
   }
 
   function setVisible(on) {
@@ -814,5 +871,6 @@ const C5UI = (() => {
   }
   requestAnimationFrame(frame);
 
-  return { load, getProfilesForSave, getGain: () => gain, onRssi, onLap, setVisible, saveState: () => saveState };
+  return { load, getProfilesForSave, getGain: () => gain, onRssi, onLap, setVisible, saveState: () => saveState,
+           getRacePilots };
 })();

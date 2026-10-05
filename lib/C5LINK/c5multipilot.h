@@ -3,15 +3,21 @@
 #include <Arduino.h>
 #include "c5link.h"
 
+// One lap of one C5 slot. lap 0 is Gate 1 (race start to the first pass).
 struct C5LapEvent {
     uint8_t pilot;
+    uint8_t lap;
     uint32_t lapTimeMs;
+    bool racer;   // the slot races (its laps count in the race result)
 };
 
 class C5MultiPilot {
 public:
+    static constexpr uint8_t MAX_RACE_LAPS = 64;
+
     void begin(Config *config, C5Link *link);
-    void start(uint32_t nowMs);
+    // raceStartMs: millis() when the race started (LapTimer::getRaceStartMs).
+    void start(uint32_t raceStartMs);
     void stop();
     void update(uint32_t nowMs);
     bool running() const { return running_; }
@@ -19,32 +25,51 @@ public:
     // Above the enter threshold and not yet below exit (only while a race runs).
     bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
     bool takeLap(C5LapEvent &event);
-    // The slot on the main pilot frequency (Configuration), whose gate
-    // crossings drive the race timer; -1 if no slot is on it.
-    int8_t racePilot() const { return racePilot_; }
+    // Highest filtered value since the last call (0..1023), for the RSSI
+    // debug popout: at 25 frames a second a pass's peak would otherwise fall
+    // between frames.
+    uint16_t takePeakHold(uint8_t pilot);
+
+    // Slots that have a frequency and race (Calibration tab "Race" switch).
+    uint8_t racerMask() const { return racerMask_; }
+    // Two or more racers: a multi-pilot race. One racer: a single-pilot race
+    // through LapTimer, as with the RX5808.
+    bool multiRace() const { return racerCount_ >= 2; }
+    // The only racer, or -1 when there are none or several.
+    int8_t racePilot() const { return racerCount_ == 1 ? (int8_t)__builtin_ctz(racerMask_) : -1; }
     // The race pilot's next gate crossing (micros(), at the RSSI peak of the
-    // pass), for LapTimer::recordCrossing(). Drained by loop().
+    // pass), for LapTimer::recordCrossing(). Single-racer races only.
     bool takeRaceCrossing(uint32_t &crossingUs);
+    // This race's laps so far (ms; [0] is Gate 1). Copies up to max; returns
+    // the count. Safe from another task.
+    uint8_t copyLaps(uint8_t pilot, uint32_t *out, uint8_t max);
 
 private:
     Config *config_ = nullptr;
     C5Link *link_ = nullptr;
-    bool running_ = false;
+    volatile bool running_ = false;
+    uint32_t raceStartUs_ = 0;
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
-    // Keep the crossing clock in microseconds; the public lap event remains
-    // milliseconds for compatibility with the existing timer/web API.
-    uint32_t lastLapUs_[C5Link::C5_MAX_PILOTS] = {};
+    uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
+    volatile uint16_t peakHold_[C5Link::C5_MAX_PILOTS] = {};
     // Highest filtered value inside the gate and when it was first reached.
     uint16_t peak_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t peakUs_[C5Link::C5_MAX_PILOTS] = {};
-    volatile int8_t racePilot_ = -1;
+    uint32_t lastCrossingUs_[C5Link::C5_MAX_PILOTS] = {};
+    uint32_t laps_[C5Link::C5_MAX_PILOTS][MAX_RACE_LAPS] = {};
+    uint8_t lapCount_[C5Link::C5_MAX_PILOTS] = {};
+    volatile uint8_t racerMask_ = 0;
+    volatile uint8_t racerCount_ = 0;
     static constexpr uint8_t CROSSING_QUEUE = 8;
     uint32_t crossings_[CROSSING_QUEUE] = {};
     uint8_t crossingCount_ = 0;
-    uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
-    // Filled by update() in c5Task, drained by takeLap() from the web task
-    // and takeRaceCrossing() from loop(), so guarded by a spinlock.
-    C5LapEvent pending_[C5Link::C5_MAX_PILOTS] = {};
+    // Filled by update() in c5Task; drained by takeLap() from the web task,
+    // takeRaceCrossing() from loop() and copyLaps() from HTTP handlers, so
+    // guarded by a spinlock.
+    static constexpr uint8_t LAP_QUEUE = 16;
+    C5LapEvent pending_[LAP_QUEUE] = {};
     uint8_t pendingCount_ = 0;
     portMUX_TYPE lapMux_ = portMUX_INITIALIZER_UNLOCKED;
+
+    void crossing(uint8_t pilot, uint32_t crossingUs);
 };

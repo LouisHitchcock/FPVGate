@@ -49,11 +49,35 @@ Open items:
    below; check across the band and the R8 -> R1 wrap.
 3. First single-quad race (R5) worked; lap accuracy against video/stopwatch
    not yet measured.
-4. Multi-pilot races: next piece of work (race UI, history, announcer).
+4. Multi-pilot races are built (below) but not yet run with two real pilots.
 5. Image rejection ~18 dB: ghosts possible on ~20 MHz-spaced channel plans.
+6. S3 stall of ~60 ms every 5 s (seen in `pollGapMaxUs`), occasionally ~130 ms,
+   which overflows the 4 KB UART buffer: about one lost record per 20-40 s.
+   Not `ESP.getHeapSize()` (replaced anyway; stall unchanged). Next test:
+   disable `loop()`'s 5 s alive message (its USB-CDC print). Ask Louis before
+   flashing: every OTA reboots the S3 and ends a race.
 
 Diagnostics left in: `nodeprof` (C5 console), `pollGapMaxUs` /
 `pollBytesMax` (c5Rssi event).
+
+## Multi-pilot races (config v24)
+
+- Each C5 slot has a pilot name, spoken name, colour and Race switch on its
+  Calibration card (config v24; EEPROM grown 832 -> 1280 bytes, which the
+  Arduino EEPROM library expands in place). Migration keeps every setting and
+  sets Race on the slot matching the main frequency.
+- One racer: the single-pilot path through `LapTimer::recordCrossing()`, as
+  before. Two or more: `C5MultiPilot` times every racer with LapTimer's rules
+  (Gate 1 from the race start, then pass to pass, minimum lap, RSSI-peak
+  timing), sends `c5Lap {pilot, lap, lapTimeMs, racer}` and serves
+  `GET /api/c5/race` for pages opened mid-race.
+- Race tab: column-per-pilot lap table and analysis charts, "Name, time"
+  announcements, gate LEDs in the lapping pilot's colour, per-pilot "finished"
+  at max laps (the race stops when all have), and a multi-pilot race history
+  entry (`pilots[]`, leader in the legacy fields).
+- RSSI debug popout: on the C5 it draws every pilot from `c5RssiFast` (25 Hz,
+  peak since the last frame, sent while the popout is open), with a chip per
+  pilot, the selected pilot's thresholds and a racers-only filter.
 
 ## 2026-10-05 research: path to 1 kHz per pilot
 
@@ -114,8 +138,10 @@ are committed in the C5 repo (24e1aa5).
 
 - FPVGate repository: `C:\Users\Louis\Desktop\Code\FPVGate`
 - Branch: `Multi-Pilot-Next-Gen`
-- C5 repository: `C:\Users\Louis\Desktop\Code\FPVGateC5RX-mp`
-- C5 branch: `feature/multipilot-dump`
+- C5 repository: `C:\Users\Louis\Desktop\Code\FPVGateC5MK` (private
+  `LouisHitchcock/FPVGateC5MK`, branch `main`). Never push C5 multi-pilot work
+  to the public FPVGateC5RX; the old `FPVGateC5RX-mp` checkout has its push
+  URL disabled.
 - XIAO S3: `192.168.0.201`
 - C5 USB/flash port: `COM3`
 - C5 link: 921600 baud, 8N1

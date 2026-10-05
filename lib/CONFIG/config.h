@@ -311,10 +311,10 @@
     #define HAS_I2S_AUDIO 1
 #endif
 
-#define EEPROM_RESERVED_SIZE 832
+#define EEPROM_RESERVED_SIZE 1280
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 23U
+#define CONFIG_VERSION 24U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -414,6 +414,13 @@ typedef struct {
     uint8_t c5ExitRssi[8];
     uint8_t c5Gain;
     uint8_t _reservedELRS[2];
+    // v24: who flies each ESP32-C5 slot (EEPROM grown from 832 to 1280
+    // bytes; the Arduino EEPROM library keeps the old contents when it grows).
+    char c5PilotName[8][21];
+    char c5PilotPhonetic[8][21];   // for announcements; empty = use the name
+    uint32_t c5PilotColor[8];      // 0xRRGGBB
+    uint8_t c5RaceMask;            // bit i: slot i's laps count in races
+    uint8_t _reservedC5[3];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -570,6 +577,11 @@ class Config {
     uint8_t getC5Gain();
     void setC5PilotCount(uint8_t count);
     void setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi);
+    const char* getC5PilotName(uint8_t pilot);
+    const char* getC5PilotPhonetic(uint8_t pilot);
+    uint32_t getC5PilotColor(uint8_t pilot);
+    uint8_t getC5RaceMask();
+    void setC5PilotIdentity(uint8_t pilot, const char* name, const char* phonetic, uint32_t color, bool races);
     void setC5Gain(uint8_t gain);
     
     // Novacore filter config
@@ -588,6 +600,9 @@ class Config {
     volatile uint32_t checkTimeMs = 0;
     Storage* storage = nullptr;
     void setDefaults();
+    // v24 C5 pilot fields: empty names, the Calibration tab's slot colours,
+    // and the slot on the main frequency racing (all slots if none is).
+    void initC5PilotIdentity();
 };
 
 #endif // CONFIG_H

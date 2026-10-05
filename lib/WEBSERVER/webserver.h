@@ -17,6 +17,7 @@
 #define WIFI_RECONNECT_TIMEOUT_MS 500
 #define WEB_C5_SEND_TIMEOUT_MS 100   // ESP32-C5 multi-pilot view, 10 per second
 #define WEB_RSSI_SEND_TIMEOUT_MS 200
+#define WEB_C5_FAST_SEND_MS 40       // C5 RSSI debug popout, 25 frames a second
 #define WEB_SSE_KEEPALIVE_MS 15000
 
 class Webserver : public TransportInterface {

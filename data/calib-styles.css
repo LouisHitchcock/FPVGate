@@ -209,7 +209,6 @@
 .c5p-status.c5p-warn .c5p-dot { background: #f0b429; }
 .c5p-status.c5p-bad .c5p-dot { background: #ef5350; }
 .c5p-status.c5p-bad { border-color: #ef5350; }
-.c5p-card.c5p-race { box-shadow: 0 0 0 2px var(--c); }
 .c5p-card.c5p-race .c5p-name::after { content: "RACE"; margin-left: 6px; padding: 1px 5px; border-radius: 4px; font-size: 10px;
                                        font-weight: 700; background: var(--c); color: #111; vertical-align: middle; }
 .c5p-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
@@ -257,6 +256,14 @@
 .c5p-name { font-weight: 700; white-space: nowrap; color: var(--c); }
 .c5p-freq { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 4px;
             border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-color); }
+.c5p-id { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.c5p-pname, .c5p-pphon { min-width: 0; font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 4px;
+                         border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-color); }
+.c5p-pname { flex: 1; font-weight: 600; }
+.c5p-pphon { width: 100%; box-sizing: border-box; margin-top: 4px; font-size: 11px; }
+.c5p-pcolor { width: 26px; height: 24px; padding: 0; border: 1px solid var(--border-color); border-radius: 4px;
+              background: none; cursor: pointer; flex: none; }
+.c5p-racetg { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .c5p-eye { border: none; background: none; color: var(--c); cursor: pointer; font-size: 14px; padding: 0 2px; }
 .c5p-liverow { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 0 2px; }
 .c5p-val { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }

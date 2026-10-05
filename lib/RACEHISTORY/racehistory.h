@@ -9,7 +9,7 @@
 
 #define MAX_RACES 50
 #define RACES_DIR "/races"
-#define MAX_PILOTS 6
+#define MAX_PILOTS 8   // an ESP32-C5 times up to 8 pilots
 
 // Pilot data for multi-pilot races
 struct PilotData {

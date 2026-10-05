@@ -197,7 +197,7 @@ static void c5Task(void *) {
                 c5MultiPilot.begin(&config, &c5Link);
             }
             c5Link.poll(nowMs);
-            if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(nowMs);
+            if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(timer.getRaceStartMs());
             if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
             c5MultiPilot.update(nowMs);
         }
@@ -599,7 +599,9 @@ void loop() {
         lastAliveMs = currentTimeMs;
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t minFreeHeap = ESP.getMinFreeHeap();
-        uint32_t heapSize = ESP.getHeapSize();
+        // The total never changes. ESP.getHeapSize() works it out by walking
+        // every heap block with the heap locked, every 5 s for no reason.
+        uint32_t heapSize = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
         uint32_t usedHeap = heapSize - freeHeap;
         float usedPercent = (usedHeap * 100.0f) / heapSize;
         

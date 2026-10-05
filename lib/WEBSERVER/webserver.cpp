@@ -349,8 +349,8 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         rssiDoc["seqGaps"] = c5Link->sampleSequenceGaps();
         rssiDoc["queueDrops"] = c5Link->sampleQueueDrops();
         rssiDoc["scan"] = c5Link->scanMode();
-        rssiDoc["racePilot"] = c5MultiPilot->racePilot();
-        rssiDoc["raceFreq"] = conf->getFrequency();
+        rssiDoc["racers"] = c5MultiPilot->racerMask();
+        rssiDoc["multi"] = c5MultiPilot->multiRace();
         rssiDoc["records"] = c5Link->scanRecords();
         rssiDoc["badRecords"] = c5Link->badRecords();
         rssiDoc["pollGapMaxUs"] = c5Link->takePollGapMaxUs();
@@ -370,7 +370,9 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         while (c5MultiPilot->takeLap(lap)) {
             JsonDocument lapDoc;
             lapDoc["pilot"] = lap.pilot;
+            lapDoc["lap"] = lap.lap;   // 0 = Gate 1
             lapDoc["lapTimeMs"] = lap.lapTimeMs;
+            lapDoc["racer"] = lap.racer;
             payload = String();
             serializeJson(lapDoc, payload);
             events.send(payload.c_str(), "c5Lap");
@@ -404,7 +406,22 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         }
     }
 
-    if (sendRssi && ((currentTimeMs - rssiSentMs) > WEB_RSSI_SEND_TIMEOUT_MS)) {
+    if (sendRssi && conf->getReceiverRadio() == 2) {
+        // RSSI debug popout on the C5: every slot's peak since the last frame
+        // (0..1023) and who the race detector has in the gate, 25 a second.
+        if (c5MultiPilot && servicesStarted && (currentTimeMs - rssiSentMs) >= WEB_C5_FAST_SEND_MS) {
+            rssiSentMs = currentTimeMs;
+            char buf[96];
+            int n = snprintf(buf, sizeof(buf), "{\"v\":[");
+            uint8_t in = 0;
+            for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+                n += snprintf(buf + n, sizeof(buf) - n, i ? ",%u" : "%u", c5MultiPilot->takePeakHold(i));
+                if (c5MultiPilot->inside(i)) in |= (uint8_t)(1u << i);
+            }
+            snprintf(buf + n, sizeof(buf) - n, "],\"in\":%u}", in);
+            events.send(buf, "c5RssiFast");
+        }
+    } else if (sendRssi && ((currentTimeMs - rssiSentMs) > WEB_RSSI_SEND_TIMEOUT_MS)) {
         sendRssiEvent(timer->getRssi());
         rssiSentMs = currentTimeMs;
     }
@@ -1094,6 +1111,32 @@ EEPROM:\n\
     // sizes are reported as measured rather than as a layout version number,
     // so an updater can simply compare an image against the space that exists
     // instead of tracking which layout shipped when.
+    // The current (or last) C5 race: every slot's laps so far, so a page
+    // opened or reloaded mid-race can rebuild the lap table.
+    server.on("/api/c5/race", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot) {
+            request->send(404, "application/json", "{\"error\":\"no C5 receiver\"}");
+            return;
+        }
+        JsonDocument doc;
+        doc["running"] = c5MultiPilot->running();
+        doc["racers"] = c5MultiPilot->racerMask();
+        doc["multi"] = c5MultiPilot->multiRace();
+        JsonArray pilots = doc["pilots"].to<JsonArray>();
+        uint32_t laps[C5MultiPilot::MAX_RACE_LAPS];
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            JsonObject p = pilots.add<JsonObject>();
+            p["slot"] = i;
+            p["frequency"] = conf->getC5Frequency(i);
+            JsonArray a = p["laps"].to<JsonArray>();
+            const uint8_t n = c5MultiPilot->copyLaps(i, laps, C5MultiPilot::MAX_RACE_LAPS);
+            for (uint8_t k = 0; k < n; ++k) a.add(laps[k]);
+        }
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
     server.on("/api/system/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
         doc["version"] = FPVGATE_VERSION_STRING();

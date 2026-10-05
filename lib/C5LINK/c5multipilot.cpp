@@ -6,15 +6,17 @@ void C5MultiPilot::begin(Config *config, C5Link *link) {
     pendingCount_ = 0;
 }
 
-void C5MultiPilot::start(uint32_t nowMs) {
-    (void)nowMs;
+void C5MultiPilot::start(uint32_t raceStartMs) {
+    // The race clock is millis(); samples are stamped in micros().
+    raceStartUs_ = micros() - (millis() - raceStartMs) * 1000u;
+    portENTER_CRITICAL(&lapMux_);
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         inside_[i] = false;
-        lastLapUs_[i] = 0;
         peak_[i] = 0;
+        lapCount_[i] = 0;
     }
-    portENTER_CRITICAL(&lapMux_);
     crossingCount_ = 0;
+    pendingCount_ = 0;
     portEXIT_CRITICAL(&lapMux_);
     running_ = true;
 }
@@ -28,11 +30,11 @@ void C5MultiPilot::stop() { running_ = false; }
 void C5MultiPilot::update(uint32_t nowMs) {
     (void)nowMs;
     if (!config_ || !link_) return;
-    int8_t race = -1;
-    const uint16_t mainFreq = config_->getFrequency();
-    for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS && race < 0; ++i)
-        if (mainFreq && config_->getC5Frequency(i) == mainFreq) race = (int8_t)i;
-    racePilot_ = race;
+    uint8_t mask = 0;
+    for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+        if (config_->getC5Frequency(i) && (config_->getC5RaceMask() >> i) & 1) mask |= (uint8_t)(1u << i);
+    racerMask_ = mask;
+    racerCount_ = (uint8_t)__builtin_popcount(mask);
 
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         if (!config_->getC5Frequency(i)) {   // slot switched off
@@ -46,6 +48,7 @@ void C5MultiPilot::update(uint32_t nowMs) {
         uint32_t sampleUs = 0;
         while (link_->takeSample(i, value, sampleUs)) {
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
+            if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
             if (!running_) continue;
             const uint16_t f = filtered_[i];
             if (!inside_[i]) {
@@ -62,27 +65,39 @@ void C5MultiPilot::update(uint32_t nowMs) {
             }
             if (f > exitHi) continue;
             inside_[i] = false;
-            const uint32_t crossingUs = peakUs_[i];
-            if (i == race) {
-                portENTER_CRITICAL(&lapMux_);
-                if (crossingCount_ < CROSSING_QUEUE) crossings_[crossingCount_++] = crossingUs;
-                portEXIT_CRITICAL(&lapMux_);
-            }
-            // Per-pilot laps for the Calibration cards. The first pass is
-            // the holeshot: it starts the clock. Passes inside the minimum
-            // lap time are ignored.
-            if (!lastLapUs_[i]) {
-                lastLapUs_[i] = crossingUs;
-                continue;
-            }
-            const uint32_t lap = (crossingUs - lastLapUs_[i] + 500u) / 1000u;
-            if (lap < config_->getMinLapMs()) continue;
-            lastLapUs_[i] = crossingUs;
-            portENTER_CRITICAL(&lapMux_);
-            if (pendingCount_ < C5Link::C5_MAX_PILOTS) pending_[pendingCount_++] = {i, lap};
-            portEXIT_CRITICAL(&lapMux_);
+            crossing(i, peakUs_[i]);
         }
     }
+}
+
+// LapTimer's rules for every slot: the first pass after the start is Gate 1
+// (timed from the start), then pass to pass, ignoring passes inside the
+// minimum lap time.
+void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs) {
+    const bool racer = (racerMask_ >> pilot) & 1;
+    if (racer && racerCount_ == 1) {
+        portENTER_CRITICAL(&lapMux_);
+        if (crossingCount_ < CROSSING_QUEUE) crossings_[crossingCount_++] = crossingUs;
+        portEXIT_CRITICAL(&lapMux_);
+    }
+    if ((int32_t)(crossingUs - raceStartUs_) <= 0) return;   // from before the start
+    const uint8_t n = lapCount_[pilot];
+    uint32_t lapUs;
+    if (n == 0) {
+        lapUs = crossingUs - raceStartUs_;
+    } else {
+        lapUs = crossingUs - lastCrossingUs_[pilot];
+        if (lapUs <= config_->getMinLapMs() * 1000u) return;
+    }
+    lastCrossingUs_[pilot] = crossingUs;
+    const C5LapEvent lap = {pilot, n, (lapUs + 500u) / 1000u, racer};
+    portENTER_CRITICAL(&lapMux_);
+    if (n < MAX_RACE_LAPS) {
+        laps_[pilot][n] = lap.lapTimeMs;
+        lapCount_[pilot] = n + 1;
+    }
+    if (pendingCount_ < LAP_QUEUE) pending_[pendingCount_++] = lap;
+    portEXIT_CRITICAL(&lapMux_);
 }
 
 bool C5MultiPilot::takeLap(C5LapEvent &event) {
@@ -98,6 +113,15 @@ bool C5MultiPilot::takeLap(C5LapEvent &event) {
     return got;
 }
 
+// Read and restart from the current value. A sample landing between the
+// two lines is at worst missed from this frame's peak, never stuck in it.
+uint16_t C5MultiPilot::takePeakHold(uint8_t pilot) {
+    if (pilot >= C5Link::C5_MAX_PILOTS) return 0;
+    const uint16_t v = peakHold_[pilot];
+    peakHold_[pilot] = filtered_[pilot];
+    return v;
+}
+
 bool C5MultiPilot::takeRaceCrossing(uint32_t &crossingUs) {
     bool got = false;
     portENTER_CRITICAL(&lapMux_);
@@ -109,4 +133,13 @@ bool C5MultiPilot::takeRaceCrossing(uint32_t &crossingUs) {
     }
     portEXIT_CRITICAL(&lapMux_);
     return got;
+}
+
+uint8_t C5MultiPilot::copyLaps(uint8_t pilot, uint32_t *out, uint8_t max) {
+    if (pilot >= C5Link::C5_MAX_PILOTS) return 0;
+    portENTER_CRITICAL(&lapMux_);
+    uint8_t n = lapCount_[pilot] < max ? lapCount_[pilot] : max;
+    memcpy(out, laps_[pilot], n * sizeof(uint32_t));
+    portEXIT_CRITICAL(&lapMux_);
+    return n;
 }

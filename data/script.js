@@ -551,15 +551,18 @@ function setupWiFiEvents() {
       // scale at 0..255 with quarter-step resolution.
       window.c5PilotRssi = (data.rssi || []).map(v => Number(v) / 4);
       if (typeof C5UI !== "undefined") C5UI.onRssi(data);
+      // A multi-pilot race already running when this page opened.
+      if (data.race && data.multi && !c5Race.active && c5RacePilotsNow().length >= 2) {
+        c5RaceReset(true);
+        c5RaceResync();
+      }
     }, false);
 
     eventSource.addEventListener("c5Lap", function (e) {
       const data = JSON.parse(e.data);
-      window.c5PilotLaps = window.c5PilotLaps || {};
-      const list = window.c5PilotLaps[data.pilot] || (window.c5PilotLaps[data.pilot] = []);
-      list.push(data.lapTimeMs);
       if (typeof C5UI !== "undefined") C5UI.onLap(data);
-      console.log(`[C5] Pilot ${Number(data.pilot) + 1} lap: ${(data.lapTimeMs / 1000).toFixed(2)}s`);
+      handleC5RaceLap(data);
+      console.log(`[C5] Pilot ${Number(data.pilot) + 1} ${+data.lap === 0 ? "Gate 1" : "lap " + data.lap}: ${(data.lapTimeMs / 1000).toFixed(2)}s`);
     }, false);
 
 
@@ -616,6 +619,10 @@ function handleRaceStateEvent(state) {
   
   if (state === "started") {
     // Race started (from master or local)
+    if (!c5Race.active || c5HasRaceLaps()) {
+      c5RaceReset(c5RacePilotsNow().length >= 2);
+      renderUnifiedRaceView();
+    }
     raceRunning = true;
     lapTimerStartMs = Date.now();
     startRaceTimer();
@@ -669,7 +676,8 @@ function resetLapDisplay() {
   
   // Clear remote pilots data
   remotePilots = {};
-  
+  c5RaceReset(false);
+
   // Re-render unified view (will show empty state)
   renderUnifiedRaceView();
 }
@@ -783,8 +791,149 @@ function getLocalPilotInfo() {
   return { pilotName, pilotColor, lapTimes: lapTimes.slice(), lapNo: lapNo };
 }
 
+// ============================================
+// ESP32-C5 multi-pilot races (one C5 timing several pilots)
+// ============================================
+//
+// The C5 slots with Race on (Calibration tab, C5UI.getRacePilots()) are the
+// pilots. Two or more racers make a multi-pilot race: the firmware times
+// every racer (Gate 1 from the start, then pass to pass, minimum lap) and
+// sends "c5Lap" { pilot, lap, lapTimeMs, racer }; GET /api/c5/race returns
+// the race so far. One racer stays a single-pilot race through LapTimer and
+// the normal "lap" event.
+
+// racers: the C5UI.getRacePilots() list when the race started.
+// laps[slot]: seconds, [0] = Gate 1. finished: slots past max laps.
+let c5Race = { active: false, racers: [], laps: {}, finished: {} };
+let c5RaceResyncing = false;
+
+function c5ReceiverSelected() {
+  const sel = document.getElementById("receiverRadio");
+  return !!sel && sel.value === "2" && typeof C5UI !== "undefined";
+}
+
+function c5RacePilotsNow() {
+  return c5ReceiverSelected() ? C5UI.getRacePilots() : [];
+}
+
+// A multi-pilot C5 race is running, or would be if one started now.
+function c5MultiRaceView() {
+  return c5Race.active || (raceSyncMode === 0 && c5RacePilotsNow().length >= 2);
+}
+
+function c5RaceRacers() {
+  return c5Race.active ? c5Race.racers : c5RacePilotsNow();
+}
+
+function c5ColorInt(hex) {
+  return parseInt(String(hex || "#0080ff").replace("#", ""), 16);
+}
+
+function c5RaceReset(active) {
+  c5Race = { active: !!active, racers: active ? c5RacePilotsNow() : [], laps: {}, finished: {} };
+}
+
+function c5HasRaceLaps() {
+  return Object.values(c5Race.laps).some((l) => l && l.length > 0);
+}
+
+// Laps in the race table and history, whichever kind of race this is.
+function hasRaceLaps() {
+  return lapTimes.length > 0 || c5HasRaceLaps();
+}
+
+// The racer with most laps, then the shortest total time: the race's
+// legacy single-pilot fields in history are theirs.
+function c5RaceLeader() {
+  let best = null;
+  for (const r of c5Race.racers) {
+    const laps = c5Race.laps[r.slot] || [];
+    const total = laps.reduce((s, t) => s + t, 0);
+    if (!best || laps.length > best.laps.length || (laps.length === best.laps.length && total < best.total)) {
+      best = { racer: r, laps, total };
+    }
+  }
+  return best;
+}
+
+// Rebuild the laps from the device (page opened mid-race, or a lap event
+// arrived out of order).
+function c5RaceResync() {
+  if (c5RaceResyncing) return;
+  c5RaceResyncing = true;
+  fetch("/api/c5/race")
+    .then((r) => r.json())
+    .then((d) => {
+      if (!c5Race.active) c5RaceReset(true);
+      for (const p of d.pilots || []) {
+        if (!((d.racers >> p.slot) & 1)) continue;
+        c5Race.laps[p.slot] = (p.laps || []).map((ms) => ms / 1000);
+      }
+      renderUnifiedRaceView();
+      updateAnalysisSectionVisibility();
+    })
+    .catch((e) => console.warn("[C5] race resync failed", e))
+    .finally(() => { c5RaceResyncing = false; });
+}
+
+function handleC5RaceLap(d) {
+  if (!d.racer) return;
+  if (!c5Race.active) {
+    // A race we didn't see start (another client, the LCD, a reload).
+    if (!raceRunning || c5RacePilotsNow().length < 2) return;
+    c5RaceReset(true);
+    c5RaceResync();
+    return;
+  }
+  const racer = c5Race.racers.find((r) => r.slot === +d.pilot);
+  if (!racer) return;   // Race switched on after the start
+  const laps = c5Race.laps[racer.slot] || (c5Race.laps[racer.slot] = []);
+  const idx = +d.lap;
+  if (idx > laps.length) {   // missed an event
+    c5RaceResync();
+    return;
+  }
+  laps[idx] = d.lapTimeMs / 1000;
+  renderUnifiedRaceView();
+  updateAnalysisSectionVisibility();
+  updateRaceLeader(racer.color);
+  announceC5RaceLap(racer, idx, laps[idx]);
+
+  // Max laps: each racer finishes on their own; the race stops when all have.
+  if (maxLaps > 0 && idx >= maxLaps && !c5Race.finished[racer.slot]) {
+    c5Race.finished[racer.slot] = true;
+    queueSpeak(`<p>${racer.spoken} finished</p>`);
+    if (c5Race.racers.every((r) => c5Race.finished[r.slot])) {
+      setTimeout(function () {
+        if (!stopRaceButton.disabled) {
+          stopRace();
+          queueSpeak(`<p>${i18n.t("settings.tts.race_complete")}</p>`);
+        }
+      }, 500);
+    }
+  }
+}
+
+// Always "pilot, time": with several pilots the name is what matters.
+function announceC5RaceLap(racer, idx, seconds) {
+  const mode = announcerSelect.options[announcerSelect.selectedIndex].value;
+  if (mode === "beep") {
+    beep(100, 330, "square");
+    return;
+  }
+  if (mode === "none" || mode === "") return;
+  const t = seconds.toFixed(2);
+  queueSpeak(idx === 0
+    ? `<p>${racer.spoken} ${i18n.t("settings.tts.gate1", { n: t })}</p>`
+    : `<p>${racer.spoken}, ${t}</p>`);
+}
+
 // Render the race view - switches between personal (single) and multi-pilot view
 function renderUnifiedRaceView() {
+  if (c5MultiRaceView()) {
+    renderMultiPilotRaceView();
+    return;
+  }
   // Use personal (single-pilot) view when sync is disabled
   if (raceSyncMode === 0) {
     renderPersonalRaceView();
@@ -867,7 +1016,15 @@ function renderMultiPilotRaceView() {
   
   // Collect all pilots
   const pilots = [];
-  
+
+  if (c5MultiRaceView()) {
+    // One column per C5 racer.
+    for (const r of c5RaceRacers()) {
+      const laps = c5Race.laps[r.slot] || [];
+      pilots.push({ id: 'c5-' + r.slot, name: r.label, color: c5ColorInt(r.color), lapTimes: laps,
+                    lapNo: laps.length - 1, isLocal: false });
+    }
+  } else {
   // Add local pilot first
   const localPilot = getLocalPilotInfo();
   pilots.push({
@@ -878,9 +1035,10 @@ function renderMultiPilotRaceView() {
     lapNo: localPilot.lapNo,
     isLocal: true
   });
-  
+  }
+
   // Add remote pilots
-  for (const hostname of Object.keys(remotePilots)) {
+  for (const hostname of (c5MultiRaceView() ? [] : Object.keys(remotePilots))) {
     const pilot = remotePilots[hostname];
     pilots.push({
       id: hostname,
@@ -3347,6 +3505,9 @@ async function startRace() {
   currentRaceSessionTimestamp = null;
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
+  // C5 racers are fixed for the race at the start.
+  c5RaceReset(c5RacePilotsNow().length >= 2);
+  renderUnifiedRaceView();
 
   // Fire countdown immediately so device LCD + I2S start right away.
   // Backend picks the right flow (visible 10s overlay vs. classic "less than 5"
@@ -3480,7 +3641,7 @@ function stopRace() {
   const afterStop = () => {
     // Auto-save after stop so the device can finalize its RSSI capture before
     // saveCurrentRace attaches the sidecar to the race.
-    if (lapTimes.length > 0) {
+    if (hasRaceLaps()) {
       return saveCurrentRace().then(() => {
         if (shouldOpenRaceNotes) {
           openRaceNotesModal();
@@ -3534,9 +3695,12 @@ function clearLaps() {
     heatTimeoutId = null;
   }
   // Auto-save race if there are laps before clearing (only if it wasn't already saved on stopRace)
-  if (lapTimes.length > 0 && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+  if (hasRaceLaps() && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+    // Builds the race from the current state before its fetch, so the C5
+    // race can be reset straight after.
     saveCurrentRace({ setAsCurrentSession: false });
   }
+  c5RaceReset(false);
 
   var tableHeaderRowCount = 1;
   var rowCount = lapTable.rows.length;
@@ -3566,7 +3730,8 @@ function clearLaps() {
   document.getElementById("statMedian").textContent = "--";
   document.getElementById("statBest3").textContent = "--";
   document.getElementById("statBest3Laps").textContent = "";
-  
+  renderUnifiedRaceView();
+
   // Broadcast clearLaps event to OSD and other clients
   fetch("/timer/clearLaps", {
     method: "POST",
@@ -4843,7 +5008,14 @@ function updateRaceAnalysisView() {
 
 function collectAllPilotsData() {
   const pilots = [];
-  
+
+  if (c5MultiRaceView()) {
+    for (const r of c5RaceRacers()) {
+      pilots.push({ name: r.label, color: r.color, lapTimes: (c5Race.laps[r.slot] || []).slice(), isLocal: false });
+    }
+    return pilots;
+  }
+
   // Add local pilot
   const localPilotInfo = getLocalPilotInfo();
   const localColorHex = document.getElementById("pilotColor")?.value || "#0080FF";
@@ -5152,12 +5324,17 @@ function escapeHtml(input) {
 
 function saveCurrentRace(options = {}) {
   const { setAsCurrentSession = true } = options;
-  if (lapTimes.length === 0) return Promise.resolve(null);
+  // A C5 multi-pilot race saves every racer in pilots[]; the legacy
+  // single-pilot fields hold the leader's laps.
+  const c5Multi = c5Race.active && c5HasRaceLaps();
+  const c5Leader = c5Multi ? c5RaceLeader() : null;
+  const baseLaps = c5Multi ? c5Leader.laps : lapTimes;
+  if (baseLaps.length === 0) return Promise.resolve(null);
   if (currentRaceSessionTimestamp && setAsCurrentSession) return Promise.resolve(currentRaceSessionTimestamp);
   if (pendingRaceSavePromise) return pendingRaceSavePromise;
 
   // Calculate stats (excluding Gate 1)
-  const validLaps = lapTimes.slice(1);
+  const validLaps = baseLaps.slice(1);
   const fastest = validLaps.length > 0 ? Math.min(...validLaps) : 0;
   const sorted = [...validLaps].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -5178,24 +5355,24 @@ function saveCurrentRace(options = {}) {
   // Calculate total race distance: track length per lap × number of laps
   let totalRaceDistance = 0;
   console.log(`DEBUG: trackLapLength=${trackLapLength}, currentTrackId=${currentTrackId}, currentTrackName='${currentTrackName}'`);
-  if (trackLapLength > 0 && lapTimes.length > 0) {
-    totalRaceDistance = trackLapLength * lapTimes.length;
-    console.log(`Saving race: trackLapLength=${trackLapLength}m, lapCount=${lapTimes.length}, totalDistance=${totalRaceDistance}m`);
+  if (trackLapLength > 0 && baseLaps.length > 0) {
+    totalRaceDistance = trackLapLength * baseLaps.length;
+    console.log(`Saving race: trackLapLength=${trackLapLength}m, lapCount=${baseLaps.length}, totalDistance=${totalRaceDistance}m`);
   } else {
-    console.warn(`WARNING: No track distance to save! trackLapLength=${trackLapLength}, lapCount=${lapTimes.length}`);
+    console.warn(`WARNING: No track distance to save! trackLapLength=${trackLapLength}, lapCount=${baseLaps.length}`);
     console.warn(`Did you select a track before starting the race? currentTrackId=${currentTrackId}`);
   }
 
   const raceTimestamp = Math.floor(Date.now() / 1000);
   const raceData = {
     timestamp: raceTimestamp,
-    lapTimes: lapTimes.map((t) => Math.round(t * 1000)), // Convert to milliseconds
+    lapTimes: baseLaps.map((t) => Math.round(t * 1000)), // Convert to milliseconds
     fastestLap: Math.round(fastest * 1000),
     medianLap: Math.round(median * 1000),
     best3LapsTotal: Math.round(best3Total * 1000),
-    pilotName: pilotNameInput.value || "",
-    pilotCallsign: pilotCallsign,
-    frequency: frequency,
+    pilotName: c5Multi ? c5Leader.racer.label : (pilotNameInput.value || ""),
+    pilotCallsign: c5Multi ? "" : pilotCallsign,
+    frequency: c5Multi ? c5Leader.racer.freq : frequency,
     band: bandValue,
     channel: channelValue,
     notes: notes,
@@ -5205,8 +5382,23 @@ function saveCurrentRace(options = {}) {
     syncMode: raceSyncMode,
   };
   
+  if (c5Multi) {
+    raceData.pilots = c5Race.racers.map((r) => {
+      const laps = c5Race.laps[r.slot] || [];
+      const valid = laps.slice(1);
+      return {
+        name: r.label,
+        callsign: r.spoken,
+        color: c5ColorInt(r.color),
+        lapTimes: laps.map((t) => Math.round(t * 1000)),
+        fastestLap: Math.round((valid.length ? Math.min(...valid) : 0) * 1000),
+        isLocal: false,
+      };
+    });
+    console.log(`[Race] Saving C5 multi-pilot race with ${raceData.pilots.length} pilots`);
+  }
   // Build pilots array for multi-pilot races (sync mode active)
-  if (raceSyncMode === 1 || raceSyncMode === 2) {
+  else if (raceSyncMode === 1 || raceSyncMode === 2) {
     const pilots = [];
     
     // Add local pilot
