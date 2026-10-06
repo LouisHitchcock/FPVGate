@@ -8,7 +8,7 @@
 //
 // C5 firmware 2 adds scan mode: the S3 sends P,<MHz>,... (one entry per slot,
 // 0 = off) and the C5 cycles through the slots itself, sending one binary
-// record per cycle (FPVGateC5RX multipilot/src/node_core.h):
+// record per cycle (FPVGateC5MK docs/LINK_PROTOCOL.md):
 //   0xA5, len, payload[len], crc8(len, payload)
 //   payload: 'M', seq u8, t0 u32, slot mask u8, then per slot in the mask:
 //   value u16 (bits 0-9 rssi, bit 15 failed), dt u16 (us after t0)

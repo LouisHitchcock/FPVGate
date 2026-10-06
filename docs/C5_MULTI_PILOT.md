@@ -1,8 +1,8 @@
-# ESP32-C5 multi-pilot receiver — user guide
+# ESP32-C5 multi-pilot receiver: user guide
 
 FPVGate can use an ESP32-C5 as its receiver instead of an RX5808. One C5
 watches up to **eight pilots at once**, reading each pilot's signal about
-**1000 times a second**, continuously — the same rate RotorHazard reads one
+**1000 times a second**, continuously: the same rate RotorHazard reads one
 pilot per receiver. FPVGate (the ESP32-S3) runs the lap timing, the web app,
 the announcer and race history as usual.
 
@@ -12,8 +12,10 @@ with up to eight pilots.
 ## What you need
 
 - An FPVGate on a Seeed XIAO ESP32-S3.
-- An ESP32-C5 board flashed with the FPVGate C5 receiver firmware (version 2
-  or later for the full 1 kHz-per-pilot mode).
+- An ESP32-C5 board flashed with the FPVGate C5 receiver firmware,
+  [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK) (version 2 or
+  later for the full 1 kHz-per-pilot mode). Its README covers building and
+  flashing it, and its docs explain how the receiver works.
 - Four wires between them:
 
 | XIAO S3 | ESP32-C5 | Purpose |
