@@ -22,11 +22,15 @@ with up to eight pilots.
 |---|---|---|
 | D3 / GPIO4 | GPIO4 | Link: S3 → C5 |
 | D4 / GPIO5 | GPIO5 | Link: C5 → S3 |
-| 3V3 | 3V3 | Power (fit 100 nF across 3V3/GND near the C5) |
+| 5V | 5V (VUSB) | Power |
 | GND | GND | Ground |
 
-These are the pins the RX5808 used, so a board built for an RX5808 can take a
-C5 in its place. Both chips run at 3.3 V; never connect 5 V to a C5 pin.
+The link uses the pins the RX5808 used. **Power the C5 from the 5V pin, not
+from the S3's 3V3 pin.** The C5's radio draws a burst of current as it
+starts, which the S3's 3.3 V supply can't provide alongside the S3's own
+Wi-Fi: wired 3V3 to 3V3, the C5 never finishes booting and FPVGate shows it
+offline. 5V goes only to the C5's 5V (VUSB) power pin; the link pins are
+3.3 V logic, so never connect 5 V to any other C5 pin.
 
 ## Setting it up
 
@@ -168,7 +172,7 @@ works with the RX5808 and stays blank with the C5; use the window.
 | What you see | What to check |
 |---|---|
 | "No live data from FPVGate yet" | Receiver Module is ESP32-C5 and the configuration was saved. |
-| "No reply from the C5" | Wiring (D3 → GPIO4, D4 ← GPIO5, GND) and C5 power. |
+| "No reply from the C5" | Wiring (D3 → GPIO4, D4 ← GPIO5, GND) and C5 power: the C5 must be powered from 5V, not the S3's 3V3 pin. |
 | Mode shows **Slots** | The C5 has older firmware: about 116 readings per pilot per second instead of 1000. Update the C5. |
 | Per pilot far below 1 kHz | Fewer pilots read faster; with eight it should be close to 1 kHz. Check the link figures for errors. |
 | Seq gaps rising | Occasional single gaps are harmless. Steady increases point to wiring or interference on the link. |
