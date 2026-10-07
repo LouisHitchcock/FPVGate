@@ -59,7 +59,7 @@ Notes
 -----
 * Upgrading from 1.7.x MUST be a full wired flash like the one above. An
   over-the-air update replaces the application only and leaves the old
-  partition table in place, which a 1.8.0 filesystem image will not fit.
+  partition table in place, which a 1.8 filesystem image will not fit.
 * The easier route is the web flasher at https://fpvgate.xyz, which does all
   of this from a browser.
 * After flashing, the gate is reachable over USB-C at http://192.168.7.1 as

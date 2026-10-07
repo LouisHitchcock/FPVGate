@@ -35,7 +35,7 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 
 **Dual Connectivity**
 - WiFi Access Point (works with any device)
-- USB Serial CDC (zero-latency local connection)
+- USB networking: plug in USB-C and open `http://192.168.7.1`, no WiFi needed (Windows and Linux)
 
 **Visual Feedback**
 - RGB LED indicators with 10 customizable presets (settings persist to EEPROM)
@@ -56,7 +56,7 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 - Fastest 3 consecutive laps (RaceGOW format)
 - Race history with export/import (cross-device SD card storage)
 - Race tagging and naming
-- Marshalling mode for post-race lap editing (add/remove/edit laps)
+- Visual Marshal: review and correct laps on the race's recorded RSSI graph
 - Detailed race analysis view
 
 **Track Management**
@@ -93,7 +93,7 @@ FPVGate measures lap times by detecting your drone's video transmitter signal st
 
 **Developer Friendly**
 - Comprehensive self-test diagnostics (19 tests)
-- OTA firmware updates
+- Over-the-air updates from the settings screen, local file or straight from fpvgate.xyz
 - Transport abstraction layer
 - Open source (CC BY-NC-SA 4.0)
 
@@ -162,10 +162,12 @@ The easiest way to install FPVGate is using our web-based flasher:
 5. Click "Flash" and wait for completion (~2-3 minutes)
 
 Supported boards:
+- FPVGate AIO V3 and FPVGate Solo
 - Seeed Studio XIAO ESP32S3 (8MB) - Recommended
 - ESP32-S3 DevKitC-1 (8MB Flash)
-- ESP32-S3 Super Mini (4MB Flash) - Not recommended
-- LilyGO T-Energy S3
+- XIAO ESP32S3 Plus (16MB Flash)
+
+> **Upgrading from 1.7.x?** Use the web flasher (or the full command below) once. 1.8 changes the partition table, so an over-the-air update from 1.7.x will not work. Later updates can be done over the air.
 
 **Option B: Command Line (Advanced)**
 ```bash
@@ -202,11 +204,12 @@ pio run -e ESP32S3SuperMini -t uploadfs
 4. Go to Calibration → Set RSSI thresholds
 5. Start racing!
 
-**USB (Electron App):**
-1. Download [Electron app from releases](https://github.com/LouisHitchcock/FPVGate/releases)
-2. Connect ESP32-S3 via USB
-3. Launch app and select COM port
-4. All features work identically to WiFi mode
+**USB networking:**
+1. Connect the gate to your computer with a USB-C data cable
+2. Open `http://192.168.7.1`
+3. All features work identically to WiFi mode
+
+Windows and Linux only; macOS does not support RNDIS. **[USB networking guide →](docs/USB_NETWORKING.md)**
 
 **[Complete user guide →](docs/USER_GUIDE.md)**
 
@@ -253,14 +256,21 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Version:** v1.7.3
+**Current Version:** v1.8.3
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Stable - actively maintained
 
 ### Recent Updates
 
-**v1.7.3 (Latest Release - June 13, 2026)**
+**v1.8.3 (Latest Release - October 7, 2026)**
+- **USB Networking** — Full web UI over USB-C at `http://192.168.7.1`, no WiFi needed (Windows and Linux)
+- **Over-the-Air Updates** — Install from a file or straight from fpvgate.xyz, from the settings screen
+- **Visual Marshal** — Review and correct laps on each race's recorded RSSI graph
+- **Faster Web UI** — Gzipped assets: page loads drop from about 7 seconds to 2
+- **Upgrading from 1.7.x needs one wired flash** (partition table change); see the [release notes](release/v1.8.3/RELEASE_NOTES.md)
+
+**v1.7.3 (June 13, 2026)**
 - **Race Notes** — Add/edit notes per race with auto-open-on-stop option
 - **Configurable Race Analytics** — Independent toggle for Fastest Lap, Fastest 3 Consecutive, Lap Times, and Consistency panels
 - **Multilingual Voice Packs** — German, Spanish, French ElevenLabs voices with canonical `voice_*` structure

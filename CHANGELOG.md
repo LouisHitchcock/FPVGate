@@ -3,43 +3,26 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
-## [1.8.0-rc-3] - 2026-09-28
+## [1.8.3] - 2026-10-07
 
-Release candidate for the FPVGate AIO and Seeed XIAO ESP32S3 only, published to
-the pre-release channel on https://fpvgate.xyz/flasher.html. Built but not yet
-run on hardware.
+USB networking, over-the-air updates, the Visual Marshal and a faster web UI.
+The first full release of the 1.8 line: the code of 1.8.0-rc-3, versioned
+1.8.3. The release candidates were 1.8.0-rc-2 (2026-09-18) and 1.8.0-rc-3
+(2026-09-28); there were no 1.8.0, 1.8.1 or 1.8.2 releases.
 
-### Fixed
-- **Battery monitoring on the Seeed XIAO ESP32S3.** It was enabled but read
-  GPIO0, which has no ADC channel on the S3, so the reported voltage was
-  meaningless and could raise false low battery alerts. It now reads D0 (GPIO1).
-  The XIAO has no onboard divider, so an external 100K/100K divider from the
-  battery to D0 is required
-
-### Removed
-- The legacy physical mode switch pin definitions. The switch code had been
-  disabled for some time, and on the AIO and XIAO its D0 assignment collided
-  with battery sense
-
-## [1.8.0-rc-2] - 2026-09-18
-
-Release candidate, published to the pre-release channel on
-https://fpvgate.xyz/flasher.html. Everything below is what 1.8.0 will carry;
-this section becomes `[1.8.0]` when the final release goes out.
-
-Verified on an FPVGate AIO flashed from the published release artifacts: 90 of
-90 assets across ten concurrent page loads with no failures, and 18 of 18 on the
-device self test. The ESP32-S3 DevKitC-1 and FPVGate Solo have both run this
-code; SeeedXIAOESP32S3 and XIAOS3Plus are built and published but have not been
-run on hardware.
+rc-2 was verified on an FPVGate AIO flashed from the published release
+artifacts: 90 of 90 assets across ten concurrent page loads with no failures,
+and 18 of 18 on the device self test. The ESP32-S3 DevKitC-1 and FPVGate Solo
+have both run this code.
 
 ### Upgrade note — read this first
 **Upgrading from 1.7.x requires a full wired flash. Over-the-air will not work.**
 The 8MB partition table changed, and an over-the-air update replaces the app
-only, leaving the old 1MB `spiffs` partition in place. A 1.8.0 filesystem image
+only, leaving the old 1MB `spiffs` partition in place. A 1.8 filesystem image
 does not fit it. Use the web flasher at https://fpvgate.xyz or flash bootloader,
-partitions, firmware and filesystem together over USB. Once on 1.8.0, later
-over-the-air updates work normally.
+partitions, firmware and filesystem together over USB. Once on 1.8.3, later
+over-the-air updates work normally; gates on a 1.8.0 release candidate already
+have the new partition table.
 
 ### Added
 - **USB networking.** The gate presents itself as a USB network adapter over
@@ -86,11 +69,19 @@ over-the-air updates work normally.
   which serves "Web UI not found" with no way to retry from the browser
 - USB networking no longer advertises the gate as the host's DNS server, which
   previously broke internet access on the machine it was plugged into
+- **Battery monitoring on the Seeed XIAO ESP32S3.** It was enabled but read
+  GPIO0, which has no ADC channel on the S3, so the reported voltage was
+  meaningless and could raise false low battery alerts. It now reads D0 (GPIO1).
+  The XIAO has no onboard divider, so an external 100K/100K divider from the
+  battery to D0 is required
 
 ### Removed
 - The old USB serial-CDC transport, superseded by USB networking
 - An unfinished I2S audio output that was built only for the DevKitC-1 and did
   nothing, saving 129KB of flash on that board
+- The legacy physical mode switch pin definitions. The switch code had been
+  disabled for some time, and on the AIO and XIAO its D0 assignment collided
+  with battery sense
 
 ## [1.7.3] - 2026-05-18
 
