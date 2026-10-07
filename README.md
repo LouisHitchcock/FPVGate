@@ -253,14 +253,25 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Version:** v1.7.3
+**Current Build:** v1.9.0-Multi-Alpha-1 (testing pre-release)
+
+The stable release is [v1.8.3](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.8.3).
+The Multi-Pilot alpha requires a separate ESP32-C5 receiver. See the
+[release notes](release/v1.9.0-Multi-Alpha-1/RELEASE_NOTES.md) and
+[setup guide](docs/C5_MULTI_PILOT.md) before installing it.
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
-**Status:** Stable - actively maintained
+**Status:** Multi-Pilot alpha testing
 
 ### Recent Updates
 
-**v1.7.3 (Latest Release - June 13, 2026)**
+**v1.9.0-Multi-Alpha-1 (October 7, 2026)**
+
+- ESP32-C5 receiver support for up to eight pilots.
+- Per-pilot calibration, standings, race history and RSSI editing.
+- Testing release; see the release notes for setup and known limits.
+
+**v1.7.3 (June 13, 2026)**
 - **Race Notes** — Add/edit notes per race with auto-open-on-stop option
 - **Configurable Race Analytics** — Independent toggle for Fastest Lap, Fastest 3 Consecutive, Lap Times, and Consistency panels
 - **Multilingual Voice Packs** — German, Spanish, French ElevenLabs voices with canonical `voice_*` structure

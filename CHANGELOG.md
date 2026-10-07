@@ -3,6 +3,25 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
+## [1.9.0-Multi-Alpha-1] - 2026-10-07
+
+First public alpha of the ESP32-C5 multi-pilot receiver support.
+
+### Added
+- Up to eight pilots, with individual channels, names, colours and calibration.
+- Multi-pilot standings, lap tables, browser announcements and race history.
+- Eight-channel RSSI recording on SD and per-pilot editing in the Visual Marshal.
+- Live receiver diagnostics and an RSSI debug window for all pilots.
+
+### Alpha limits
+- Requires a separate ESP32-C5 with FPVGate C5MK receiver firmware. Keep the
+  browser open for race completion, heat timeout and browser announcements.
+- Each pilot is limited to 64 crossings. Physical eight-pilot testing remains
+  outstanding; this release is for testing.
+- C5 mode does not support Master/Slave, daisy-chaining or RotorHazard roles.
+- See the [release notes](release/v1.9.0-Multi-Alpha-1/RELEASE_NOTES.md) and
+  [C5 setup guide](docs/C5_MULTI_PILOT.md) for wiring and other limitations.
+
 ## [1.8.0-rc-3] - 2026-09-28
 
 Release candidate for the FPVGate AIO and Seeed XIAO ESP32S3 only, published to
