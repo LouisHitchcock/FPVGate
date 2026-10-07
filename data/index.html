@@ -166,6 +166,7 @@
           <div id="personalModeRaceBanner" class="personal-mode-indicator" style="display: none;" data-i18n="race.personal_mode_short">PERSONAL</div>
           <div id="masterModeRaceBanner" class="master-mode-indicator" style="display: none;" data-i18n="race.master_mode_short">MASTER</div>
           <div id="slaveModeRaceBanner" class="slave-mode-indicator" style="display: none;" data-i18n="race.slave_mode_short">SLAVE</div>
+          <div id="multiModeRaceBanner" class="multi-mode-indicator" style="display: none;">MULTI</div>
           <div id="rotorhazardModeRaceBanner" class="rotorhazard-mode-indicator" style="display: none;">RotorHazard</div>
           <div id="batteryIndicator" class="battery-indicator" style="display: none;">
             <img id="batteryIcon" class="battery-icon" src="bat-full-svg.svg" width="20" height="20" alt="Battery" />
@@ -274,11 +275,15 @@
             </div>
           </div>
           <canvas id="debugRssiChart" style="width: 100%; height: 90px;"></canvas>
+          <!-- ESP32-C5: every pilot, drawn by c5-multipilot.js like the Calibration chart -->
+          <canvas id="debugC5Chart" style="display: none; width: 100%; height: 190px;"></canvas>
         </div>
 
         <!-- Sync Mode: Race Analysis (Multi-Pilot) -->
         <div id="raceAnalysis" class="lap-analysis" style="display: none;">
           <h3>Race Analysis</h3>
+          <!-- Standings, one row per pilot. Filled by renderUnifiedRaceView(). -->
+          <div id="multiPilotRaceSummary" class="multi-pilot-standings"></div>
           <div class="stats-boxes" style="margin-bottom: 12px;">
             <div class="stat-box">
               <div class="stat-label">Best 3 Laps</div>
@@ -417,10 +422,7 @@
         </div>
 
         <!-- ESP32-C5 multi-pilot calibration. Hidden for RX5808/Novacore. -->
-        <div id="c5CalibrationSection" class="calib-card c5-calibration-card" style="display:none">
-          <div class="calib-card-header">
-            <span>ESP32-C5 Multi-Pilot</span>
-          </div>
+        <div id="c5CalibrationSection" style="display:none">
           <!-- Filled by c5-multipilot.js -->
           <div id="c5Panel"></div>
         </div>
@@ -496,6 +498,34 @@
           </div>
         </div>
 
+        <!-- Multi-pilot races: one row per pilot, like the Calibration list.
+             Click a row to edit that pilot; the dot shows or hides its trace. -->
+        <div id="marshalPilotControls" class="marshal-pilots" style="display:none">
+          <div id="marshalPilotList" class="marshal-pilot-list"></div>
+          <span class="marshal-pilot-hint">Click a pilot to edit their laps; the dot shows or hides their trace. Save Changes saves every pilot.</span>
+        </div>
+        <!-- Collapsed by default (openRaceEditor) so the graph gets the width. -->
+        <details id="marshalDetails" class="marshal-details">
+          <summary><span class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</span><span id="marshalDetailsSummary" class="marshal-details-summary"></span></summary>
+          <div class="marshal-details-grid">
+            <div class="marshal-field">
+              <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
+              <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
+              <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
+              <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
+            </div>
+            <div class="marshal-field marshal-field-notes">
+              <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
+              <textarea id="raceEditNotes" maxlength="300" rows="3" placeholder="Optional notes about this race..." data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
+            </div>
+          </div>
+        </details>
         <div class="marshal-layout">
           <div class="marshal-graph-col">
             <div class="marshal-chart-wrap" id="marshalChartWrap">
@@ -528,7 +558,7 @@
                   <label for="marshalEnter" data-i18n="calib.enter_rssi">Enter RSSI</label>
                   <span id="marshalEnterSpan" class="calib-threshold-value">120</span>
                 </div>
-                <input type="range" min="50" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="50" aria-valuemax="255" />
+                <input type="range" min="1" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="1" aria-valuemax="255" />
                 <div class="calib-threshold-hint" data-i18n="history.marshal_enter_hint">Used only for Recalculate preview (does not change device config)</div>
               </div>
               <div class="calib-threshold-item">
@@ -536,7 +566,7 @@
                   <label for="marshalExit" data-i18n="calib.exit_rssi">Exit RSSI</label>
                   <span id="marshalExitSpan" class="calib-threshold-value">100</span>
                 </div>
-                <input type="range" min="50" max="255" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="50" aria-valuemax="255" />
+                <input type="range" min="0" max="254" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="0" aria-valuemax="254" />
                 <div class="calib-threshold-hint" data-i18n="history.marshal_exit_hint">Used only for Recalculate preview (does not change device config)</div>
               </div>
             </div>
@@ -560,25 +590,6 @@
             <button type="button" id="marshalAddLapBtn" class="marshal-btn" style="display: none; width: 100%; margin-top: 8px" onclick="addLapToEditor()" data-i18n="history.edit_add_lap">+ Add Lap</button>
           </aside>
 
-          <aside class="marshal-details-col" aria-label="Race details">
-            <h4 class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</h4>
-            <div class="marshal-field">
-              <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
-              <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
-              <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
-              <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
-              <textarea id="raceEditNotes" maxlength="300" rows="4" placeholder="Optional notes about this race..." data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
-            </div>
-          </aside>
         </div>
       </div>
     </div>
@@ -1850,6 +1861,7 @@
     </div>
 
     <script src="script.js" defer></script>
+    <script src="race-trace.js" defer></script>
     <script src="c5-multipilot.js" defer></script>
   </body>
 </html>

@@ -308,6 +308,23 @@ bool Storage::readBinaryFile(const String& path, std::vector<uint8_t>& out) {
     return true;
 }
 
+size_t Storage::readBinaryRange(const String& path, size_t offset, uint8_t* out, size_t len) {
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return 0;
+        File file = SD.open(path, FILE_READ);
+        size_t got = file && file.seek(offset) ? file.read(out, len) : 0;
+        if (file) file.close();
+        spiMutexGive();
+        return got;
+    }
+#endif
+    File file = LittleFS.open(path, "r");
+    size_t got = file && file.seek(offset) ? file.read(out, len) : 0;
+    if (file) file.close();
+    return got;
+}
+
 bool Storage::patchBinaryFile(const String& path, size_t offset, const uint8_t* data, size_t len) {
     if (!data || len == 0) {
         return true;

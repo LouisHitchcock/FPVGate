@@ -143,13 +143,15 @@ void LapTimer::start() {
     }
 
     if (rssiRecorder) {
-        rssiRecorder->beginRace();
+        rssiRecorder->beginRace(conf->getReceiverRadio() == 2 ? 8 : 1, getRaceStartMs());
     }
 }
 
 void LapTimer::stop() {
     DEBUG("LapTimer stopped\n");
-    // Finalize RSSI capture before clearing race state so save paths can attach sidecar
+    // Stop C5 detection before draining SD writes; storage may take seconds.
+    state = STOPPED;
+    // Finalize capture before returning to the save endpoint.
     if (rssiRecorder) {
         rssiRecorder->endRace();
     }

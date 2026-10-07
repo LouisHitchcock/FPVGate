@@ -373,7 +373,7 @@ typedef struct {
     uint8_t batteryAlarmEnabled;   // Battery alarm enabled (0=disabled, 1=enabled)
     float batteryVoltageDivider;   // Voltage divider ratio (e.g., 2.0 for 2:1, 5.5 for 11:2)
     uint8_t timerNumber;           // LEGACY: Timer number (no longer used for hostname, kept for config compatibility)
-    uint8_t raceSyncMode;          // Race sync mode: 0=disabled, 1=master, 2=slave
+    uint8_t raceSyncMode;          // Race sync mode: 0=personal, 1=master, 2=slave, 3=C5 multi
     char syncedTimers[5][32];      // Up to 5 synced timer hostnames (for master mode)
     uint8_t syncedTimerCount;      // Number of configured synced timers
     uint8_t beepVolume;            // Buzzer volume 0-100 (percentage)

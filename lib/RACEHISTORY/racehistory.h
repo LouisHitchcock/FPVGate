@@ -13,6 +13,10 @@
 
 // Pilot data for multi-pilot races
 struct PilotData {
+    int8_t slot = -1; // physical C5 slot; -1 for old/synchronized races
+    uint16_t frequency = 0;
+    uint8_t enter = 120;
+    uint8_t exit = 100;
     String name;
     String callsign;
     uint32_t color;  // RGB color as 0xRRGGBB
@@ -22,6 +26,7 @@ struct PilotData {
 };
 
 struct RaceSession {
+    uint32_t minLapMs = 2000;
     uint32_t timestamp;
     std::vector<uint32_t> lapTimes;  // Legacy: single pilot lap times
     uint32_t fastestLap;
@@ -40,7 +45,7 @@ struct RaceSession {
     float totalDistance;
     
     // Multi-pilot support
-    uint8_t syncMode;  // 0=personal, 1=master, 2=slave
+    uint8_t syncMode;  // 0=personal, 1=master, 2=slave, 3=C5 multi
     std::vector<PilotData> pilots;  // Empty for legacy single-pilot races
 
     // Marshal RSSI history metadata (samples live in sidecar .rssi file)
@@ -57,6 +62,7 @@ class RaceHistory {
     bool deleteRace(uint32_t timestamp);
     bool updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance = -1.0f, const String& notes = "");
     bool updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes);
+    bool updatePilotLaps(uint32_t timestamp, const std::vector<std::vector<uint32_t>>& laps);
     bool clearAll();
     String toJsonString();
     bool fromJsonString(const String& json);

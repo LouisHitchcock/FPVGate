@@ -126,7 +126,7 @@ var trackLapLength = 0.0; // Length of one lap (meters)
 
 // Race sync state
 var timerNumber = 0; // LEGACY: Timer number (no longer used for hostname)
-var raceSyncMode = 0; // 0=disabled, 1=master, 2=slave
+var raceSyncMode = 0; // 0=personal, 1=master, 2=slave, 3=C5 multi
 var rhEnabled = 0;   // 1=RotorHazard mode enabled
 var syncedTimers = []; // Array of synced timer hostnames (for master mode)
 var masterHostname = ""; // Master hostname for slave mode
@@ -552,7 +552,7 @@ function setupWiFiEvents() {
       window.c5PilotRssi = (data.rssi || []).map(v => Number(v) / 4);
       if (typeof C5UI !== "undefined") C5UI.onRssi(data);
       // A multi-pilot race already running when this page opened.
-      if (data.race && data.multi && !c5Race.active && c5RacePilotsNow().length >= 2) {
+      if (data.race && !c5Race.active && c5RacePilotsNow().length >= 1) {
         c5RaceReset(true);
         c5RaceResync();
       }
@@ -572,7 +572,7 @@ function setupWiFiEvents() {
         window.lastSSEEvent = Date.now();
         var lap = (parseFloat(e.data) / 1000).toFixed(2);
         console.log("[SSE] LAP EVENT RECEIVED - raw:", e.data, "formatted:", lap);
-        addLap(lap);
+        if (!c5ReceiverSelected()) addLap(lap);
       },
       false
     );
@@ -620,7 +620,7 @@ function handleRaceStateEvent(state) {
   if (state === "started") {
     // Race started (from master or local)
     if (!c5Race.active || c5HasRaceLaps()) {
-      c5RaceReset(c5RacePilotsNow().length >= 2);
+      c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
       renderUnifiedRaceView();
     }
     raceRunning = true;
@@ -806,10 +806,15 @@ function getLocalPilotInfo() {
 // laps[slot]: seconds, [0] = Gate 1. finished: slots past max laps.
 let c5Race = { active: false, racers: [], laps: {}, finished: {} };
 let c5RaceResyncing = false;
+let c5RaceRequest = null;
 
 function c5ReceiverSelected() {
   const sel = document.getElementById("receiverRadio");
   return !!sel && sel.value === "2" && typeof C5UI !== "undefined";
+}
+
+function c5MultiMode() {
+  return c5ReceiverSelected() || raceSyncMode === 3;
 }
 
 function c5RacePilotsNow() {
@@ -818,7 +823,7 @@ function c5RacePilotsNow() {
 
 // A multi-pilot C5 race is running, or would be if one started now.
 function c5MultiRaceView() {
-  return c5Race.active || (raceSyncMode === 0 && c5RacePilotsNow().length >= 2);
+  return c5Race.active || c5MultiMode();
 }
 
 function c5RaceRacers() {
@@ -859,11 +864,13 @@ function c5RaceLeader() {
 // Rebuild the laps from the device (page opened mid-race, or a lap event
 // arrived out of order).
 function c5RaceResync() {
-  if (c5RaceResyncing) return;
+  if (c5RaceResyncing) return c5RaceRequest;
   c5RaceResyncing = true;
-  fetch("/api/c5/race")
+  const targetRace = c5Race;
+  c5RaceRequest = fetch("/api/c5/race")
     .then((r) => r.json())
     .then((d) => {
+      if (c5Race !== targetRace) return;
       if (!c5Race.active) c5RaceReset(true);
       for (const p of d.pilots || []) {
         if (!((d.racers >> p.slot) & 1)) continue;
@@ -873,14 +880,15 @@ function c5RaceResync() {
       updateAnalysisSectionVisibility();
     })
     .catch((e) => console.warn("[C5] race resync failed", e))
-    .finally(() => { c5RaceResyncing = false; });
+    .finally(() => { c5RaceResyncing = false; c5RaceRequest = null; });
+  return c5RaceRequest;
 }
 
 function handleC5RaceLap(d) {
   if (!d.racer) return;
   if (!c5Race.active) {
     // A race we didn't see start (another client, the LCD, a reload).
-    if (!raceRunning || c5RacePilotsNow().length < 2) return;
+    if (!raceRunning || c5RacePilotsNow().length < (c5MultiMode() ? 1 : 2)) return;
     c5RaceReset(true);
     c5RaceResync();
     return;
@@ -930,12 +938,15 @@ function announceC5RaceLap(racer, idx, seconds) {
 
 // Render the race view - switches between personal (single) and multi-pilot view
 function renderUnifiedRaceView() {
+  const multi = c5MultiRaceView();
+  document.getElementById("lapCounter").style.display = multi ? "none" : "";
+  document.getElementById("addLapButton").style.display = c5ReceiverSelected() ? "none" : "";
   if (c5MultiRaceView()) {
     renderMultiPilotRaceView();
     return;
   }
   // Use personal (single-pilot) view when sync is disabled
-  if (raceSyncMode === 0) {
+  if (raceSyncMode === 0 && !c5MultiMode()) {
     renderPersonalRaceView();
     return;
   }
@@ -946,6 +957,8 @@ function renderUnifiedRaceView() {
 
 // Render classic single-pilot race view (Personal mode)
 function renderPersonalRaceView() {
+  const summary = document.getElementById("multiPilotRaceSummary");
+  if (summary) summary.innerHTML = "";
   const thead = document.getElementById("lapTableHead");
   const tbody = document.getElementById("lapTableBody");
   if (!thead || !tbody) return;
@@ -1057,6 +1070,43 @@ function renderMultiPilotRaceView() {
       maxLapCount = pilot.lapTimes.length;
     }
   }
+
+  const summaryHost = document.getElementById("multiPilotRaceSummary");
+  if (summaryHost) {
+    const ranked = pilots.slice().sort((a, b) => b.lapTimes.length - a.lapTimes.length ||
+      a.lapTimes.reduce((s, v) => s + v, 0) - b.lapTimes.reduce((s, v) => s + v, 0));
+    const rows = ranked.map(pilot => {
+      const valid = pilot.lapTimes.slice(1).filter(t => Number.isFinite(t) && t > 0);
+      return { pilot, valid, total: pilot.lapTimes.reduce((a, b) => a + b, 0), best: valid.length ? Math.min(...valid) : null };
+    });
+    const leader = rows.find(r => r.pilot.lapTimes.length);
+    const overallBest = Math.min(...rows.map(r => r.best ?? Infinity));
+    summaryHost.innerHTML = `<table class="multi-pilot-standings-table">
+      <thead><tr><th>Pos</th><th class="mps-pilot">Pilot</th><th>Laps</th><th>Last</th><th>Best</th><th>Total</th><th>Gap</th><th>Status</th></tr></thead>
+      <tbody>${rows.map((r, i) => {
+        const started = r.pilot.lapTimes.length > 0;
+        const colorHex = '#' + ((r.pilot.color || 0) >>> 0).toString(16).padStart(6, '0');
+        const last = r.valid.length ? r.valid[r.valid.length - 1].toFixed(3) + "s" : "--";
+        let gap = "--";
+        if (started && r === leader) gap = "Leader";
+        else if (started && leader) {
+          const lapsDown = leader.pilot.lapTimes.length - r.pilot.lapTimes.length;
+          gap = lapsDown > 0 ? `+${lapsDown} lap${lapsDown === 1 ? "" : "s"}` : `+${(r.total - leader.total).toFixed(3)}s`;
+        }
+        const [status, statusClass] = maxLaps > 0 && r.valid.length >= maxLaps ? ["Finished", "finished"]
+          : started ? (raceRunning ? ["Racing", "racing"] : ["Stopped", ""]) : ["Awaiting Gate 1", ""];
+        return `<tr>
+          <td class="mps-pos">${started ? i + 1 : "-"}</td>
+          <td class="mps-pilot"><span class="mps-name"><span class="multi-pilot-dot" style="--pilot-color:${colorHex}"></span>${escapeHtml(r.pilot.name || `Pilot ${i + 1}`)}</span></td>
+          <td>${r.valid.length}</td>
+          <td>${last}</td>
+          <td${r.best !== null && r.best === overallBest ? ' class="mps-fastest"' : ""}>${r.best !== null ? r.best.toFixed(3) + "s" : "--"}</td>
+          <td>${started ? r.total.toFixed(3) + "s" : "--"}</td>
+          <td class="mps-gap">${gap}</td>
+          <td><span class="multi-pilot-status ${statusClass}">${status}</span></td>
+        </tr>`;
+      }).join("")}</tbody></table>`;
+  }
   
   // Find fastest lap for each pilot (excluding gate 1 / lap 0)
   const fastestLaps = {};
@@ -1077,7 +1127,7 @@ function renderMultiPilotRaceView() {
   for (const pilot of pilots) {
     const colorHex = '#' + (pilot.color).toString(16).padStart(6, '0');
     const localBadge = pilot.isLocal ? ' ★' : '';
-    headerHtml += `<th class="pilot-header" style="background-color: ${colorHex}; color: white;">${pilot.name}${localBadge}</th>`;
+    headerHtml += `<th class="pilot-header" style="border-top: 4px solid ${colorHex};">${escapeHtml(pilot.name)}${localBadge}</th>`;
   }
   headerHtml += '</tr>';
   thead.innerHTML = headerHtml;
@@ -1098,7 +1148,7 @@ function renderMultiPilotRaceView() {
         
         // Calculate gap from previous lap
         let gapHtml = '';
-        if (lapIdx > 0 && lapIdx < pilot.lapTimes.length) {
+        if (lapIdx > 1 && lapIdx < pilot.lapTimes.length) {
           const prevTime = pilot.lapTimes[lapIdx - 1];
           const diff = (lapTime - prevTime).toFixed(2);
           const gapClass = diff > 0 ? 'positive' : (diff < 0 ? 'negative' : '');
@@ -1107,7 +1157,7 @@ function renderMultiPilotRaceView() {
         
         bodyHtml += `
           <td class="pilot-lap${isFastest ? ' fastest' : ''}" style="border-left: 3px solid ${colorHex};">
-            <div class="lap-time">${lapTime.toFixed(2)}s</div>
+            <div class="lap-time">${lapTime.toFixed(3)}s</div>
             ${gapHtml}
           </td>
         `;
@@ -1903,6 +1953,16 @@ function toggleNovaFilterSection() {
   if (c5) c5.style.display = sel.value === "2" ? "block" : "none";
   var c5Calib = document.getElementById("c5CalibrationSection");
   if (c5Calib) c5Calib.style.display = sel.value === "2" ? "block" : "none";
+  if (sel.value === "2") {
+    rhEnabled = 0;
+    updateRaceSyncMode(3, true);
+    if (typeof initSyncDevicesFromConfig === "function") initSyncDevicesFromConfig();
+    if (typeof renderSyncDevicesList === "function") renderSyncDevicesList();
+  } else if (raceSyncMode === 3) {
+    updateRaceSyncMode(0, true);
+    initSyncDevicesFromConfig();
+    renderSyncDevicesList();
+  }
   var legacyChannel = document.getElementById("legacyCalibrationChannelCard");
   if (legacyChannel) legacyChannel.style.display = sel.value === "2" ? "none" : "block";
   var legacyThresholds = document.getElementById("legacyCalibrationThresholdCard");
@@ -1910,6 +1970,7 @@ function toggleNovaFilterSection() {
   var legacyGraph = document.getElementById("legacyCalibrationGraphCard");
   if (legacyGraph) legacyGraph.style.display = sel.value === "2" ? "none" : "block";
   if (typeof C5UI !== "undefined") C5UI.setVisible(sel.value === "2");
+  updateDebugOverlay();   // the overlay's chart depends on the receiver
   // Sync slider visibility with toggle state
   toggleNovaFilterSlider("kalman");
   toggleNovaFilterSlider("ema");
@@ -1979,6 +2040,12 @@ function updateDebugOverlay() {
   var overlay = document.getElementById("debugRssiOverlay");
   if (!overlay) return;
   var raceVisible = race.style.display != "none";
+  // The C5 sends no single-channel RSSI; its overlay is the 8-pilot chart.
+  var c5 = c5ReceiverSelected();
+  document.getElementById("debugRssiChart").style.display = c5 ? "none" : "block";
+  document.getElementById("debugC5Chart").style.display = c5 ? "block" : "none";
+  overlay.style.width = c5 ? "460px" : "320px";
+  overlay.style.height = c5 ? "220px" : "120px";
   if (debugMode && raceVisible) {
     overlay.style.display = "block";
     // Restore saved position (only if it's a valid, in-viewport numeric pair)
@@ -2006,7 +2073,7 @@ function updateDebugOverlay() {
         localStorage.removeItem('debugRssiPos');
       }
     }
-    if (debugRssiChart) debugRssiChart.start();
+    if (debugRssiChart && !c5) debugRssiChart.start();
     // Ensure RSSI streaming is active
     if (!rssiSending) startRssiStreaming();
   } else {
@@ -2310,7 +2377,7 @@ function autoSaveConfig() {
   if (_refreshingFromDevice) return; // Suppress saves during device-initiated refresh
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    saveConfig();
+    saveConfig().catch(error => console.error("Configuration save failed:", error));
   }, 1000); // Wait 1 second after last change before saving
 }
 
@@ -2318,7 +2385,7 @@ async function saveConfig() {
   // Don't save until initial config has been loaded from device
   if (!configLoaded) {
     console.log("[Config] Skipping save - config not yet loaded from device");
-    return;
+    throw new Error("Configuration has not loaded yet");
   }
   
   // Get pilot settings
@@ -2373,7 +2440,7 @@ async function saveConfig() {
       if (devCfg.freq !== undefined) frequency = devCfg.freq;
     } catch (e) {
       console.error("[Config] Failed to fetch device config, skipping save");
-      return;
+      throw e;
     }
   }
   
@@ -2449,7 +2516,7 @@ async function saveConfig() {
     })(),
   };
 
-  fetch("/config", {
+  return fetch("/config", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -2457,8 +2524,11 @@ async function saveConfig() {
     },
     body: JSON.stringify(configData),
   })
-    .then((response) => response.json())
-    .then((response) => console.log("/config:" + JSON.stringify(response)));
+    .then(async response => {
+      const data = await response.json();
+      if (!response.ok || data.status === "ERROR") throw new Error(data.message || "Configuration save failed");
+      return data;
+    });
 }
 
 // Populate band selector based on selected system
@@ -2899,7 +2969,7 @@ function addLap(lapStr) {
   renderUnifiedRaceView();
 
   // Determine effective lap format - force "Pilot + Time" in sync modes
-  const effectiveLapFormat = (raceSyncMode === 1 || raceSyncMode === 2) ? 'full' : lapFormat;
+  const effectiveLapFormat = (raceSyncMode === 1 || raceSyncMode === 2 || raceSyncMode === 3) ? 'full' : lapFormat;
   
   switch (announcerSelect.options[announcerSelect.selectedIndex].value) {
     case "beep":
@@ -3482,6 +3552,10 @@ function openRssiDebugPopout(event) {
 }
 
 async function startRace() {
+  if (c5ReceiverSelected() && (!c5RacePilotsNow().length || /^(pending|saving|error)$/.test(C5UI.saveState()))) {
+    alert("Enable at least one pilot for Race and wait for the calibration settings to save.");
+    return;
+  }
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
@@ -3506,7 +3580,7 @@ async function startRace() {
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
   // C5 racers are fixed for the race at the start.
-  c5RaceReset(c5RacePilotsNow().length >= 2);
+  c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
   renderUnifiedRaceView();
 
   // Fire countdown immediately so device LCD + I2S start right away.
@@ -3638,7 +3712,8 @@ function stopRace() {
   stopDistancePolling();
 
   const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
-  const afterStop = () => {
+  const afterStop = async () => {
+    if (c5ReceiverSelected()) await c5RaceResync();
     // Auto-save after stop so the device can finalize its RSSI capture before
     // saveCurrentRace attaches the sidecar to the race.
     if (hasRaceLaps()) {
@@ -3800,6 +3875,8 @@ function updateTimerNumber() {
 
 // Update race sync mode
 function updateRaceSyncMode(mode, skipSave = false) {
+  if (c5ReceiverSelected()) mode = 3;
+  else if (mode === 3) mode = 0;
   raceSyncMode = mode;
   console.log("[Sync] Race sync mode set to:", mode);
   
@@ -3828,17 +3905,27 @@ function updateSlaveModelUI() {
   const personalBanner = document.getElementById("personalModeRaceBanner");
   const slaveBanner = document.getElementById("slaveModeRaceBanner");
   const masterBanner = document.getElementById("masterModeRaceBanner");
+  const multiBanner = document.getElementById("multiModeRaceBanner");
   const rotorhazardBanner = document.getElementById("rotorhazardModeRaceBanner");
   const startBtn = document.getElementById("startRaceButton");
   const stopBtn = document.getElementById("stopRaceButton");
   const clearBtn = document.getElementById("clearLapsButton");
   
-  if (raceSyncMode === 2) {
+  if (raceSyncMode === 3) {
+    if (personalBanner) personalBanner.style.display = "none";
+    if (slaveBanner) slaveBanner.style.display = "none";
+    if (masterBanner) masterBanner.style.display = "none";
+    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "block";
+    if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = "1"; }
+    if (clearBtn) { clearBtn.disabled = false; clearBtn.style.opacity = "1"; }
+  } else if (raceSyncMode === 2) {
     // Slave mode - disable buttons and show slave banner
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "block";
     if (masterBanner) masterBanner.style.display = "none";
     if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = true;
       startBtn.style.opacity = "0.5";
@@ -3853,6 +3940,7 @@ function updateSlaveModelUI() {
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "block";
     if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.style.opacity = "1";
@@ -3865,6 +3953,7 @@ function updateSlaveModelUI() {
     // Personal or RotorHazard mode - enable buttons
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "none";
     if (rhEnabled === 1) {
       // RotorHazard mode - show RH banner instead of personal
       if (personalBanner) personalBanner.style.display = "none";
@@ -4092,7 +4181,10 @@ function initSyncDevicesFromConfig() {
   
   // Add "This Device" first
   let thisDeviceRole = 'personal';
-  if (rhEnabled === 1) {
+  if (c5ReceiverSelected()) {
+    thisDeviceRole = 'multi';
+    raceSyncMode = 3;
+  } else if (rhEnabled === 1) {
     thisDeviceRole = 'rotorhazard';
   } else if (raceSyncMode === 1) {
     thisDeviceRole = 'master';
@@ -4107,7 +4199,7 @@ function initSyncDevicesFromConfig() {
   });
   
   // Add synced timers (from master config) as slaves
-  if (syncedTimers && syncedTimers.length > 0) {
+  if (!c5ReceiverSelected() && syncedTimers && syncedTimers.length > 0) {
     syncedTimers.forEach(timer => {
       syncDevices.push({
         address: timer,
@@ -4138,7 +4230,10 @@ function mapSyncDevicesToConfig() {
   // Find this device's role
   const thisDevice = syncDevices.find(d => d.isThisDevice);
   if (thisDevice) {
-    if (thisDevice.role === 'rotorhazard') {
+    if (thisDevice.role === 'multi') {
+      raceSyncMode = 3;
+      rhEnabled = 0;
+    } else if (thisDevice.role === 'rotorhazard') {
       raceSyncMode = 0;
       rhEnabled = 1;
     } else if (thisDevice.role === 'master') {
@@ -4190,6 +4285,7 @@ function renderSyncDevicesList() {
     
     // Check if there's already a master (other than this device if it's master)
     const hasMaster = syncDevices.some(d => d.role === 'master');
+    const c5Locked = c5ReceiverSelected() && isThisDevice;
     const canBeMaster = !hasMaster || device.role === 'master';
     
     html += `
@@ -4200,10 +4296,11 @@ function renderSyncDevicesList() {
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
           <select onchange="updateDeviceRole(${index}, this.value)" style="padding: 4px 8px; font-size: 13px; min-width: 110px;">
-            <option value="personal" ${device.role === 'personal' ? 'selected' : ''}>${i18n.t("settings.sync.role_personal") || "Personal"}</option>
-            <option value="master" ${device.role === 'master' ? 'selected' : ''} ${!canBeMaster ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
-            <option value="slave" ${device.role === 'slave' ? 'selected' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
-            ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''}>RotorHazard</option>` : ''}
+            <option value="personal" ${device.role === 'personal' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>${i18n.t("settings.sync.role_personal") || "Personal"}</option>
+            <option value="master" ${device.role === 'master' ? 'selected' : ''} ${(!canBeMaster || c5Locked) ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
+            <option value="slave" ${device.role === 'slave' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
+            ${isThisDevice ? `<option value="multi" ${device.role === 'multi' ? 'selected' : ''} ${c5Locked ? '' : 'disabled'}>Multi (C5)</option>` : ''}
+            ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>RotorHazard</option>` : ''}
           </select>
           ${!isThisDevice ? `
             <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="Test connection">
@@ -4224,7 +4321,7 @@ function renderSyncDevicesList() {
   const rhPanel = document.getElementById('rhConfigPanel');
   const addPanel = document.getElementById('syncAddDevicePanel');
   if (rhPanel) rhPanel.style.display = isRHMode ? 'block' : 'none';
-  if (addPanel) addPanel.style.display = isRHMode ? 'none' : 'block';
+  if (addPanel) addPanel.style.display = (isRHMode || c5ReceiverSelected()) ? 'none' : 'block';
 
   // Update slave mode indicator
   const slaveIndicator = document.getElementById('slaveModeIndicator');
@@ -4235,6 +4332,7 @@ function renderSyncDevicesList() {
 
 // Add a new sync device
 function addSyncDevice() {
+  if (c5ReceiverSelected()) return;
   const input = document.getElementById('addSyncDeviceInput');
   if (!input) return;
   
@@ -4291,6 +4389,7 @@ function updateDeviceRole(index, newRole) {
   if (index < 0 || index >= syncDevices.length) return;
   
   const device = syncDevices[index];
+  if (c5ReceiverSelected() && device.isThisDevice && newRole !== 'multi') newRole = 'multi';
   const oldRole = device.role;
   
   // If setting to master, clear any other master
@@ -5380,6 +5479,7 @@ function saveCurrentRace(options = {}) {
     trackName: currentTrackName || "",
     totalDistance: totalRaceDistance,
     syncMode: raceSyncMode,
+    minLapMs: Math.round(Number(minLapInput.value) * 1000),
   };
   
   if (c5Multi) {
@@ -5388,6 +5488,10 @@ function saveCurrentRace(options = {}) {
       const valid = laps.slice(1);
       return {
         name: r.label,
+        slot: r.slot,
+        frequency: r.freq,
+        enter: getC5ProfilesForSave()[r.slot].enterRssi,
+        exit: getC5ProfilesForSave()[r.slot].exitRssi,
         callsign: r.spoken,
         color: c5ColorInt(r.color),
         lapTimes: laps.map((t) => Math.round(t * 1000)),
@@ -5514,7 +5618,7 @@ function renderRaceHistory() {
     // Multi-pilot race detection
     const isMultiPilot = race.pilots && race.pilots.length > 1;
     const pilotCount = race.pilots ? race.pilots.length : 1;
-    const syncModeLabel = race.syncMode === 1 ? "MASTER" : race.syncMode === 2 ? "SLAVE" : "";
+    const syncModeLabel = race.syncMode === 3 ? "MULTI" : race.syncMode === 1 ? "MASTER" : race.syncMode === 2 ? "SLAVE" : "";
     
     // Build pilots display for multi-pilot races
     let pilotsDisplay = "";
@@ -6571,6 +6675,83 @@ function deleteRace(timestamp) {
 // ---- Visual Marshal (RH-style RSSI history) ----
 let marshalState = null;
 
+function marshalStorePilot() {
+  if (!marshalState || !marshalState.pilots.length) return true;
+  let laps;
+  if (marshalState.hasHistory) laps = absPassesToSegments(marshalState.absPasses);
+  else {
+    const rows = readLapEditInputs();
+    rows.forEach(row => row.input.classList.toggle("is-invalid", !row.valid));
+    if (rows.some(row => !row.valid)) return false;
+    laps = rows.map(row => row.ms);
+  }
+  const p = marshalState.pilots[marshalState.pilotIndex];
+  p.lapTimes = laps;
+  p.enter = marshalState.enter;
+  p.exit = marshalState.exit;
+  return true;
+}
+
+function marshalSwitchPilot(index, initial = false) {
+  const s = marshalState;
+  if (!s || !s.pilots[index]) return;
+  if (!initial && !marshalStorePilot()) return;
+  s.pilotIndex = index;
+  const p = s.pilots[index];
+  s.absPasses = segmentsToAbsPasses(p.lapTimes || []);
+  s.editLaps = (p.lapTimes || []).slice();
+  s.enter = p.enter ?? 120;
+  s.exit = p.exit ?? 100;
+  s.selected = [];
+  s.drag = null;
+  s.samples = s.channels ? (s.channels[p.slot] || []) : (p.isLocal ? s.legacySamples || [] : []);
+  s.hasHistory = s.samples.length > 0;
+  setMarshalGraphVisible(s.hasHistory);
+  for (const key of ["Enter", "Exit"]) {
+    document.getElementById("marshal" + key).value = s[key.toLowerCase()];
+    document.getElementById("marshal" + key + "Span").textContent = s[key.toLowerCase()];
+  }
+  renderMarshalLapsList();
+  if (!s.hasHistory) renderLapEditList();
+  else { s.viewSpanMs = marshalRaceDurationMs(); drawMarshalChart(); }
+}
+
+// The pilot rows above the graph. The selected pilot's laps come from the
+// live edit (absPasses), the others from what was stored when leaving them.
+function renderMarshalPilotList() {
+  const s = marshalState, host = document.getElementById("marshalPilotList");
+  if (!s || !host) return;
+  host.innerHTML = s.pilots.map((p, i) => {
+    const laps = i === s.pilotIndex && s.hasHistory ? absPassesToSegments(s.absPasses) : (p.lapTimes || []);
+    const valid = laps.slice(1).filter(t => t > 0);
+    const best = valid.length ? (Math.min(...valid) / 1000).toFixed(2) + "s" : "--";
+    const color = "#" + ((Number(p.color) || 0) >>> 0 & 0xffffff).toString(16).padStart(6, "0");
+    const channel = p.frequency && typeof C5UI !== "undefined" ? C5UI.channelName(p.frequency) : (p.slot >= 0 ? `S${p.slot + 1}` : "");
+    const hidden = s.hiddenSlots && s.hiddenSlots.has(p.slot);
+    return `<div class="marshal-pilot${i === s.pilotIndex ? " selected" : ""}${hidden ? " c5p-hidden" : ""}" style="--c:${color}"
+        onclick="marshalSwitchPilot(${i})" title="Edit ${escapeHtml(p.name || `Pilot ${i + 1}`)}'s laps">
+      <button type="button" class="c5p-eye" onclick="event.stopPropagation(); marshalToggleTrace(${p.slot})" title="Show or hide this trace"></button>
+      <b class="marshal-pilot-ch">${channel}</b>
+      <span class="marshal-pilot-name">${escapeHtml(p.name || `Pilot ${i + 1}`)}</span>
+      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} · ${best}</span>
+    </div>`;
+  }).join("");
+}
+
+function marshalToggleTrace(slot) {
+  const s = marshalState;
+  if (!s) return;
+  s.hiddenSlots = s.hiddenSlots || new Set();
+  if (s.hiddenSlots.has(slot)) s.hiddenSlots.delete(slot);
+  else s.hiddenSlots.add(slot);
+  renderMarshalPilotList();
+  drawMarshalChart();
+}
+
+function marshalTimeAt(index) {
+  return marshalState.times ? marshalState.times[index] : index * marshalState.intervalMs;
+}
+
 function segmentsToAbsPasses(lapTimes) {
   const abs = [];
   let t = 0;
@@ -6617,7 +6798,7 @@ function marshalPrimarySelected() {
 function marshalRaceDurationMs() {
   if (!marshalState) return 1;
   const n = marshalState.samples.length || 1;
-  return Math.max(1, (n - 1) * (marshalState.intervalMs || 20));
+  return Math.max(1, marshalTimeAt(n - 1) || 0, ...marshalState.absPasses);
 }
 
 function marshalClampView() {
@@ -6647,6 +6828,7 @@ function marshalXToMs(x, chart) {
 }
 
 function marshalSampleIndexAtMs(ms) {
+  if (marshalState.times) return nearestTraceSample(marshalState.times, ms);
   const n = marshalState.samples.length || 1;
   const idx = Math.round(ms / Math.max(1, marshalState.intervalMs || 20));
   return Math.max(0, Math.min(n - 1, idx));
@@ -6763,7 +6945,7 @@ function addLapToEditor() {
 
 function deleteLapFromEditor(index) {
   if (!marshalState) return;
-  if (marshalState.editLaps.length <= 1) {
+  if (marshalState.editLaps.length <= 1 && !marshalState.pilots.length) {
     alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
@@ -6771,6 +6953,15 @@ function deleteLapFromEditor(index) {
   syncLapEditState();
   marshalState.editLaps.splice(index, 1);
   renderLapEditList();
+}
+
+// One line on the collapsed Race Details bar: name · tag · distance.
+function updateMarshalDetailsSummary() {
+  const name = document.getElementById("raceName").value.trim();
+  const tag = document.getElementById("raceTag").value.trim();
+  const distance = parseFloat(document.getElementById("raceDistance").value);
+  document.getElementById("marshalDetailsSummary").textContent =
+    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" · ");
 }
 
 function openRaceEditor(index) {
@@ -6781,6 +6972,8 @@ function openRaceEditor(index) {
   marshalState = {
     index,
     race,
+    pilots: (race.pilots || []).map(p => ({ ...p, lapTimes: (p.lapTimes || []).slice() })),
+    pilotIndex: 0,
     hasHistory,
     // A copy, so closing without saving leaves raceHistoryData untouched.
     editLaps: (race.lapTimes || []).slice(),
@@ -6798,10 +6991,17 @@ function openRaceEditor(index) {
     suppressClick: false,
   };
 
+  const details = document.getElementById("marshalDetails");
+  details.open = false;
+  details.oninput = updateMarshalDetailsSummary;
   document.getElementById("raceName").value = race.name || "";
+  const pilotControls = document.getElementById("marshalPilotControls");
+  pilotControls.style.display = marshalState.pilots.length ? "flex" : "none";
+  marshalState.hiddenSlots = new Set();
   document.getElementById("raceTag").value = race.tag || "";
   document.getElementById("raceDistance").value = race.totalDistance || 0;
   document.getElementById("raceEditNotes").value = race.notes || "";
+  updateMarshalDetailsSummary();
 
   setMarshalGraphVisible(hasHistory);
   if (!hasHistory) renderLapEditList();
@@ -6817,28 +7017,41 @@ function openRaceEditor(index) {
   applyMarshalGuidePreference();
   renderMarshalLapsList();
   bindMarshalCanvasHandlers();
+  if (marshalState.pilots.length) marshalSwitchPilot(0, true);
 
   if (!hasHistory) {
     return;
   }
 
+  const loadingState = marshalState;
   fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
     .then((r) => {
       if (!r.ok) throw new Error("no history HTTP " + r.status);
-      return r.json();
+      return (r.headers.get("Content-Type") || "").includes("application/octet-stream")
+        ? r.arrayBuffer().then(decodeRaceTrace) : r.json();
     })
     .then((data) => {
-      if (!data || !Array.isArray(data.samples)) {
+      if (marshalState !== loadingState) return;
+      if (!data || (!Array.isArray(data.samples) && !data.channels)) {
         console.error("[Marshal] Unexpected RSSI payload:", data);
         throw new Error("invalid rssi payload");
       }
-      marshalState.samples = data.samples;
+      marshalState.channels = data.channels;
+      marshalState.times = data.times;
+      marshalState.legacySamples = data.samples;
+      marshalState.samples = data.samples || data.channels[0];
+      if (marshalState.pilots.length) {
+        marshalStorePilot();
+        marshalSwitchPilot(marshalState.pilotIndex, true);
+      }
+      marshalState.hasHistory = marshalState.samples.length > 0;
+      setMarshalGraphVisible(marshalState.hasHistory);
       marshalState.intervalMs = data.intervalMs || 20;
       marshalState.truncated = !!data.truncated;
       marshalState.viewStartMs = 0;
       marshalState.viewSpanMs = marshalRaceDurationMs();
       marshalClampView();
-      const dur = ((marshalState.samples.length * marshalState.intervalMs) / 1000).toFixed(1);
+      const dur = (marshalRaceDurationMs() / 1000).toFixed(1);
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_meta", {
         count: marshalState.samples.length,
         interval: marshalState.intervalMs,
@@ -6848,6 +7061,10 @@ function openRaceEditor(index) {
       drawMarshalChart();
     })
     .catch((err) => {
+      if (marshalState !== loadingState) return;
+      marshalState.hasHistory = false;
+      setMarshalGraphVisible(false);
+      renderLapEditList();
       console.error("[Marshal] failed to load RSSI:", err);
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_no_history");
       drawMarshalChart();
@@ -6868,7 +7085,7 @@ function updateMarshalThresholds() {
   marshalState.enter = parseInt(document.getElementById("marshalEnter").value, 10);
   marshalState.exit = parseInt(document.getElementById("marshalExit").value, 10);
   if (marshalState.exit >= marshalState.enter) {
-    marshalState.exit = Math.max(50, marshalState.enter - 1);
+    marshalState.exit = Math.max(0, marshalState.enter - 1);
     document.getElementById("marshalExit").value = marshalState.exit;
   }
   document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
@@ -6935,6 +7152,7 @@ function updateMarshalSelectionUI() {
 
 function renderMarshalLapsList() {
   if (!marshalState) return;
+  renderMarshalPilotList();   // its lap count and best follow every edit
   marshalNormalizeSelection();
   const segs = absPassesToSegments(marshalState.absPasses);
   const box = document.getElementById("marshalLapsList");
@@ -6982,7 +7200,7 @@ function marshalDeleteSelected() {
   if (!marshalState) return;
   marshalNormalizeSelection();
   if (!marshalState.selected.length) return;
-  if (marshalState.absPasses.length - marshalState.selected.length < 1) {
+  if (marshalState.absPasses.length - marshalState.selected.length < 1 && !marshalState.pilots.length) {
     alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
@@ -7106,7 +7324,7 @@ function onMarshalPointerMove(ev) {
         peakIdx = i;
       }
     }
-    marshalState.absPasses[marshalState.drag.markerIndex] = peakIdx * marshalState.intervalMs;
+    marshalState.absPasses[marshalState.drag.markerIndex] = Math.max(1, marshalTimeAt(peakIdx));
     // Keep order stable while dragging one marker: resort and remap selection/drag index
     const oldSelectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
     const dragTime = marshalState.absPasses[marshalState.drag.markerIndex];
@@ -7188,7 +7406,7 @@ function handleMarshalClickAtX(x, multi) {
         peakIdx = i;
       }
     }
-    const newMs = peakIdx * marshalState.intervalMs;
+    const newMs = Math.max(1, marshalTimeAt(peakIdx));
     marshalState.absPasses.push(newMs);
     marshalState.absPasses.sort((a, b) => a - b);
     marshalState.selected = [marshalState.absPasses.indexOf(newMs)];
@@ -7216,6 +7434,7 @@ function drawMarshalChart() {
   const samples = marshalState.samples;
   const n = samples.length;
   if (!n) {
+    marshalState._chart = null;
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 16px sans-serif";
     ctx.fillText(i18n.t("history.marshal_no_samples"), padL, h / 2);
@@ -7226,8 +7445,8 @@ function drawMarshalChart() {
   const viewStart = marshalState.viewStartMs || 0;
   const viewSpan = marshalState.viewSpanMs || marshalRaceDurationMs();
   const viewEnd = viewStart + viewSpan;
-  const i0 = Math.max(0, Math.floor(viewStart / marshalState.intervalMs) - 1);
-  const i1 = Math.min(n - 1, Math.ceil(viewEnd / marshalState.intervalMs) + 1);
+  const i0 = Math.max(0, marshalSampleIndexAtMs(viewStart) - 1);
+  const i1 = Math.min(n - 1, marshalSampleIndexAtMs(viewEnd) + 1);
 
   let minV = 255, maxV = 0;
   for (let i = i0; i <= i1; i++) {
@@ -7237,6 +7456,7 @@ function drawMarshalChart() {
   minV = Math.max(0, Math.min(minV, marshalState.exit - 10));
   maxV = Math.min(255, Math.max(maxV, marshalState.enter + 10));
   if (maxV <= minV) maxV = minV + 1;
+  if (marshalState.channels) { minV = 0; maxV = 255; }
 
   const chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV };
   const xAtMs = (ms) => marshalMsToX(ms, chart);
@@ -7276,13 +7496,33 @@ function drawMarshalChart() {
   ctx.fillStyle = "#ffd54f";
   ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
 
+  // Context traces are read-only; edits always belong to the selected pilot.
+  // Other pilots' traces show faintly unless their dot hides them.
+  if (marshalState.channels) {
+    marshalState.channels.forEach((values, slot) => {
+      const pilot = marshalState.pilots.find(p => p.slot === slot);
+      if (values === samples || !pilot || marshalState.hiddenSlots?.has(slot)) return;
+      const color = '#' + (Number(pilot.color) & 0xffffff).toString(16).padStart(6, '0');
+      ctx.beginPath();
+      for (let i = i0; i <= i1; i++) {
+        const x = xAtMs(marshalTimeAt(i)), y = yAt(values[i]);
+        if (i === i0 || marshalTimeAt(i) - marshalTimeAt(i - 1) > marshalState.intervalMs * 3) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+  }
   // RSSI line in view
   ctx.beginPath();
   let started = false;
   for (let i = i0; i <= i1; i++) {
-    const x = xAtMs(i * marshalState.intervalMs);
+    const x = xAtMs(marshalTimeAt(i));
     const y = yAt(samples[i]);
-    if (!started) {
+    if (!started || (marshalState.times && i > 0 && marshalTimeAt(i) - marshalTimeAt(i-1) > marshalState.intervalMs * 3)) {
       ctx.moveTo(x, y);
       started = true;
     } else {
@@ -7351,7 +7591,7 @@ function marshalRecalculate() {
   const enter = marshalState.enter;
   const exit = marshalState.exit;
   const interval = marshalState.intervalMs;
-  const minLapMs = 2000;
+  const minLapMs = Number(marshalState.race.minLapMs) || 2000;
   const abs = [];
   let crossing = false;
   let peak = 0;
@@ -7369,7 +7609,7 @@ function marshalRecalculate() {
         peakIdx = i;
       }
       if (v < exit) {
-        const t = peakIdx * interval;
+        const t = Math.max(1, marshalTimeAt(peakIdx));
         if (t - lastPass >= minLapMs) {
           abs.push(t);
           lastPass = t;
@@ -7410,6 +7650,8 @@ function assertSaved(data, what) {
 
 function saveRaceChanges() {
   if (!marshalState) return;
+  if (!marshalStorePilot()) return;
+  const pilotEdits = marshalState.pilots.map(p => ({ lapTimes: p.lapTimes.slice() }));
   const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
 
   const details = new URLSearchParams();
@@ -7433,12 +7675,12 @@ function saveRaceChanges() {
     }
     segs = rows.map((row) => row.ms);
   }
-  if (!segs.length) {
+  if (!segs.length && !pilotEdits.length) {
     alert(i18n.t("messages.race_edit_no_laps"));
     return;
   }
 
-  fetch("/races/update", {
+  return fetch("/races/update", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: details,
@@ -7449,7 +7691,7 @@ function saveRaceChanges() {
       return fetch("/races/updateLaps", {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
+        body: JSON.stringify(pilotEdits.length ? { timestamp: ts, pilots: pilotEdits } : { timestamp: ts, lapTimes: segs }),
       })
         .then((r) => r.json())
         .then((data) => assertSaved(data, "Lap times"));

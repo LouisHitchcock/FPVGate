@@ -126,91 +126,124 @@ const C5UI = (() => {
       const usable = b.freqs.filter(f => f && inRange(f)).length;
       return `<option value="${b.index}"${b.value === "R" ? " selected" : ""}>${b.label} · ${usable}/8 usable</option>`;
     }).join("");
+    // One card: receiver controls in the header, the chart with an editor
+    // for the selected pilot on the left, and a row per pilot on the right.
     host.innerHTML = `
-      <div class="c5p-status" id="c5pStatus"><span class="c5p-dot"></span><span id="c5pStatusText">Waiting for data from FPVGate…</span></div>
-      <div class="c5p-stats" id="c5pStats"></div>
-      <div class="c5p-toolbar">
-        <label class="c5p-lbl">Band <select id="c5pBand">${bandOpts}</select></label>
-        <button class="c5p-btn" id="c5pFill" title="Put the band's channels in pilots 1-8">Fill pilots from band</button>
-        <label class="c5p-lbl">Gain
-          <span class="c5p-step"><button class="c5p-btn c5p-sq" data-gain="-1">−</button><input type="number" id="c5pGain" min="0" max="89" value="${gain}"><button class="c5p-btn c5p-sq" data-gain="1">+</button></span>
-        </label>
-        <span class="c5p-spacer"></span>
-        <label class="c5p-lbl">Window <select id="c5pWindow"><option value="10">10 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">2 min</option></select></label>
-        <label class="c5p-lbl"><input type="checkbox" id="c5pAllTh"> all thresholds</label>
-        <button class="c5p-btn" id="c5pPause">Pause</button>
-        <span class="c5p-save" id="c5pSave"></span>
-      </div>
-      <div class="c5p-fillnote" id="c5pFillNote"></div>
-      <div class="c5p-chartwrap"><canvas id="c5pChart"></canvas><div class="c5p-tip" id="c5pTip"></div></div>
-      <div class="c5p-hint">Click a pilot's card to select it, then drag its <b>Enter</b> and <b>Exit</b> lines on the chart, or use the − / + buttons. Changes save automatically.</div>
-      <div class="c5p-cards" id="c5pCards"></div>
-      <div class="c5p-auto">
-        <div class="c5p-auto-head">
-          <b>Auto-calibrate</b>
-          <span class="c5p-phase" id="c5pPhase">Leave the gate clear, start, then fly every pilot through the gate a few times.</span>
+      <div class="calib-card c5p-panel">
+        <div class="calib-card-header c5p-head">
+          <span>Multi-Pilot Calibration</span>
+          <div class="c5p-headctl">
+            <select id="c5pBand" class="c5p-mini" title="Band">${bandOpts}</select>
+            <button class="c5p-btn c5p-small" id="c5pFill" title="Put the band's channels in pilots 1-8">Fill</button>
+            <span class="c5p-step" title="Receiver gain"><span class="c5p-ctl-l">Gain</span><button class="c5p-btn c5p-small c5p-sq" data-gain="-1">−</button><input type="number" id="c5pGain" class="c5p-mini" min="0" max="89" value="${gain}"><button class="c5p-btn c5p-small c5p-sq" data-gain="1">+</button></span>
+            <button class="calib-wizard-btn" id="c5pCalStart" title="Measure the empty gate, then each pilot's passes, and set every threshold">Auto-calibrate</button>
+          </div>
         </div>
-        <div class="c5p-auto-actions">
-          <button class="c5p-btn c5p-primary" id="c5pCalStart">Start (5 s ambient)</button>
-          <button class="c5p-btn" id="c5pCalStop" disabled>Calculate thresholds</button>
+        <div class="c5p-status" id="c5pStatus"><span class="c5p-dot"></span><span id="c5pStatusText">Waiting for data from FPVGate…</span><span class="c5p-save" id="c5pSave"></span></div>
+        <div class="c5p-fillnote" id="c5pFillNote"></div>
+        <div class="c5p-auto" id="c5pAuto">
+          <span class="c5p-phase" id="c5pPhase"></span>
           <span class="c5p-count" id="c5pCalCount"></span>
+          <button class="c5p-btn c5p-small" id="c5pCalStop" disabled>Calculate thresholds</button>
         </div>
+        <div class="c5p-main">
+          <div class="c5p-left">
+            <div class="calib-chart-wrapper c5p-chartwrap"><canvas id="c5pChart"></canvas><div class="c5p-tip" id="c5pTip"></div></div>
+            <div class="c5p-chartctl">
+              <select id="c5pWindow" class="c5p-mini" title="Chart window"><option value="10">10 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+              <label class="c5p-check"><input type="checkbox" id="c5pAllTh"> All thresholds</label>
+              <button class="c5p-btn c5p-small" id="c5pPause">Pause</button>
+              <span class="c5p-hint" id="c5pFocusHint"></span>
+            </div>
+            <div class="c5p-editor" id="c5pEditor">
+              <div class="c5p-ed-head">
+                <span class="c5p-eye" data-i="0"></span>
+                <span class="c5p-name" id="c5pEdName"></span>
+                <label class="c5p-racetg" title="Count this pilot's laps in races"><input type="checkbox" class="c5p-racechk" data-i="0"> Race</label>
+              </div>
+              <div class="c5p-ed-grid">
+                <div class="calib-input-group"><label>Channel</label><select class="calib-select c5p-freq" data-i="0"></select></div>
+                <div class="calib-input-group"><label>Name</label>
+                  <div class="c5p-id"><input type="text" class="calib-select c5p-pname" data-i="0" maxlength="20" placeholder="Pilot name">
+                  <input type="color" class="c5p-pcolor" data-i="0" title="Pilot colour (chart, race table, gate LEDs)"></div></div>
+                <div class="calib-input-group"><label>Spoken as</label><input type="text" class="calib-select c5p-pphon" data-i="0" maxlength="20" placeholder="Optional"></div>
+                <div class="calib-threshold-item">
+                  <div class="calib-threshold-header"><label>Enter RSSI</label><span class="calib-threshold-value c5p-thv" data-th="enter"></span></div>
+                  <input type="range" min="1" max="255" class="calib-slider enter-slider c5p-in" data-i="0" data-th="enter">
+                </div>
+                <div class="calib-threshold-item">
+                  <div class="calib-threshold-header"><label>Exit RSSI</label><span class="calib-threshold-value c5p-thv" data-th="exit"></span></div>
+                  <input type="range" min="0" max="254" class="calib-slider exit-slider c5p-in" data-i="0" data-th="exit">
+                </div>
+                <div class="c5p-ed-meta"><div class="c5p-meta" id="c5pMeta"></div><div class="c5p-calres" id="c5pCal"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="c5p-list" id="c5pCards"></div>
+        </div>
+        <details class="c5p-diagnostics"><summary>Receiver diagnostics</summary><div class="c5p-stats" id="c5pStats"></div></details>
       </div>`;
     buildCards();
     wire();
   }
 
+  // One compact row per pilot. The editor above shows the selected one.
   function buildCards() {
     const el = document.getElementById("c5pCards");
     if (!el) return;
-    el.innerHTML = pilots.map((p, i) => `
-      <div class="c5p-card" data-i="${i}" style="--c:${colorOf(i)}">
-        <div class="c5p-card-head">
-          <span class="c5p-name">P${i + 1}</span>
-          <select class="c5p-freq" data-i="${i}">${freqOptions(p.freq, p.bandIndex)}</select>
-          <button class="c5p-eye" data-i="${i}" title="Show or hide on the chart">${p.hidden ? "◌" : "●"}</button>
-        </div>
-        <div class="c5p-id">
-          <input type="text" class="c5p-pname" data-i="${i}" maxlength="20" placeholder="Pilot name" value="${esc(p.name)}">
-          <input type="color" class="c5p-pcolor" data-i="${i}" value="${p.color}" title="Pilot colour (chart, race table, gate LEDs)">
-          <label class="c5p-racetg" title="Count this pilot's laps in races"><input type="checkbox" class="c5p-racechk" data-i="${i}"${p.race ? " checked" : ""}> Race</label>
-        </div>
-        <input type="text" class="c5p-pphon" data-i="${i}" maxlength="20" placeholder="Spoken as (optional)" value="${esc(p.phonetic)}">
-        <div class="c5p-liverow"><span class="c5p-val" id="c5pVal${i}">–</span><span class="c5p-gate" id="c5pGate${i}"></span></div>
-        <div class="c5p-bar"><div class="c5p-fill" id="c5pFill${i}"></div><div class="c5p-mk c5p-mk-enter" id="c5pMkE${i}"></div><div class="c5p-mk c5p-mk-exit" id="c5pMkX${i}"></div></div>
-        <div class="c5p-th"><span>Enter</span><span class="c5p-step"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="enter" data-d="-1">−</button><input type="number" min="1" max="255" class="c5p-in" data-i="${i}" data-th="enter" value="${p.enter}"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="enter" data-d="1">+</button></span></div>
-        <div class="c5p-th"><span>Exit</span><span class="c5p-step"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="exit" data-d="-1">−</button><input type="number" min="0" max="254" class="c5p-in" data-i="${i}" data-th="exit" value="${p.exit}"><button class="c5p-btn c5p-sq" data-i="${i}" data-th="exit" data-d="1">+</button></span></div>
-        <div class="c5p-meta" id="c5pMeta${i}"></div>
-        <div class="c5p-calres" id="c5pCal${i}"></div>
+    el.innerHTML = `<div class="c5p-list-head"><span></span><span>Pilot</span><span>Signal</span><span>Enter/Exit</span><span>Race</span></div>` +
+      pilots.map((p, i) => `
+      <div class="c5p-row" data-i="${i}" style="--c:${colorOf(i)}">
+        <button class="c5p-eye" data-i="${i}" title="Show or hide on the chart"></button>
+        <span class="c5p-row-name"><b class="c5p-ch"></b><span class="c5p-nm"></span></span>
+        <span class="c5p-row-sig">
+          <span class="c5p-bar"><span class="c5p-fill" id="c5pFill${i}"></span><span class="c5p-mk c5p-mk-enter" id="c5pMkE${i}"></span><span class="c5p-mk c5p-mk-exit" id="c5pMkX${i}"></span></span>
+          <span class="c5p-val" id="c5pVal${i}">–</span>
+          <span class="c5p-gate" id="c5pGate${i}"></span>
+        </span>
+        <span class="c5p-row-th"></span>
+        <input type="checkbox" class="c5p-racechk" data-i="${i}" title="Count this pilot's laps in races">
       </div>`).join("");
+    editorKey = "";
     refreshCardStates();
   }
 
+  let editorKey = "";   // focus:freq:band the editor's channel list was built for
   function refreshCardStates() {
-    document.querySelectorAll(".c5p-card").forEach(card => {
-      const i = +card.dataset.i;
-      card.classList.toggle("c5p-off", !pilots[i].freq);
-      card.classList.toggle("c5p-focus", i === focus);
-      card.classList.toggle("c5p-hidden", pilots[i].hidden);
-      const name = card.querySelector(".c5p-name");
-      if (name) name.textContent = `P${i + 1}` + (pilots[i].freq ? " · " + channelName(pilots[i].freq, pilots[i].bandIndex) : "");
-      card.classList.toggle("c5p-race", isRacer(i));
-      card.style.setProperty("--c", colorOf(i));
-      for (const [cls, key] of [[".c5p-pname", "name"], [".c5p-pphon", "phonetic"]]) {
-        const inp = card.querySelector(cls);
-        if (inp && document.activeElement !== inp) inp.value = pilots[i][key];
-      }
-      const col = card.querySelector(".c5p-pcolor");
-      if (col && document.activeElement !== col) col.value = pilots[i].color;
-      const chk = card.querySelector(".c5p-racechk");
-      if (chk) chk.checked = pilots[i].race;
-      const eye = card.querySelector(".c5p-eye");
-      if (eye) eye.textContent = pilots[i].hidden ? "◌" : "●";
-      card.querySelectorAll(".c5p-in").forEach(inp => {
-        const v = pilots[i][inp.dataset.th];
-        if (document.activeElement !== inp) inp.value = v;
-      });
+    document.querySelectorAll(".c5p-row").forEach(row => {
+      const i = +row.dataset.i, p = pilots[i];
+      row.classList.toggle("c5p-off", !p.freq);
+      row.classList.toggle("c5p-focus", i === focus);
+      row.classList.toggle("c5p-hidden", p.hidden);
+      row.style.setProperty("--c", colorOf(i));
+      row.querySelector(".c5p-ch").textContent = p.freq ? channelName(p.freq, p.bandIndex) : "Off";
+      row.querySelector(".c5p-nm").textContent = p.name || `Pilot ${i + 1}`;
+      row.querySelector(".c5p-row-th").textContent = p.freq ? `${p.enter} / ${p.exit}` : "–";
+      row.querySelector(".c5p-racechk").checked = p.race;
     });
+    const ed = $("#c5pEditor");
+    if (ed) {
+      const p = pilots[focus];
+      ed.style.setProperty("--c", colorOf(focus));
+      ed.classList.toggle("c5p-race", isRacer(focus));
+      ed.classList.toggle("c5p-hidden", p.hidden);
+      ed.querySelectorAll("[data-i]").forEach(el => { el.dataset.i = focus; });
+      $("#c5pEdName").textContent = `Pilot ${focus + 1}` + (p.freq ? " · " + channelName(p.freq, p.bandIndex) + " · " + p.freq + " MHz" : " · Off");
+      const key = `${focus}:${p.freq}:${p.bandIndex}`;
+      const freq = ed.querySelector(".c5p-freq");
+      if (key !== editorKey && document.activeElement !== freq) {
+        freq.innerHTML = freqOptions(p.freq, p.bandIndex);
+        editorKey = key;
+      }
+      for (const [cls, k] of [[".c5p-pname", "name"], [".c5p-pphon", "phonetic"], [".c5p-pcolor", "color"]]) {
+        const inp = ed.querySelector(cls);
+        if (document.activeElement !== inp) inp.value = p[k];
+      }
+      ed.querySelector(".c5p-racechk").checked = p.race;
+      // Always set: a slider keeps focus after use, and Enter can push Exit.
+      ed.querySelectorAll(".c5p-in").forEach(inp => { inp.value = p[inp.dataset.th]; });
+      ed.querySelectorAll(".c5p-thv").forEach(el => { el.textContent = p[el.dataset.th]; });
+    }
   }
 
   // ---- interaction --------------------------------------------------------------------
@@ -229,22 +262,21 @@ const C5UI = (() => {
     $("#c5pCalStart").onclick = startCalibration;
     $("#c5pCalStop").onclick = stopCalibration;
 
-    const cards = document.getElementById("c5pCards");
+    // The pilot rows and the selected-pilot editor share these handlers;
+    // every pilot control carries its slot in data-i.
+    const cards = document.getElementById("c5Panel");
     cards.addEventListener("click", e => {
       const t = e.target;
-      const card = t.closest(".c5p-card");
-      if (!card) return;
-      const i = +card.dataset.i;
       if (t.classList.contains("c5p-eye")) {
+        const i = +t.dataset.i;
         pilots[i].hidden = !pilots[i].hidden;
         refreshCardStates();
         return;
       }
-      if (t.dataset.th && t.dataset.d) {
-        setThreshold(i, t.dataset.th, pilots[i][t.dataset.th] + +t.dataset.d);
-      }
-      if (focus !== i) {
-        focus = i;
+      // Not on the Race box: re-rendering would undo the tick before "change".
+      const row = t.closest(".c5p-row");
+      if (row && !t.matches("input") && focus !== +row.dataset.i) {
+        focus = +row.dataset.i;
         refreshCardStates();
       }
     });
@@ -270,14 +302,17 @@ const C5UI = (() => {
         scheduleSave();
       }
     });
-    // Colour previews live while the picker is open; saves on change.
+    // Sliders and colours preview live; sliders save on change.
     cards.addEventListener("input", e => {
       const t = e.target;
+      if (t.classList.contains("c5p-in")) {
+        setThreshold(+t.dataset.i, t.dataset.th, parseInt(t.value, 10), true);
+        return;
+      }
       if (!t.classList.contains("c5p-pcolor")) return;
-      const i = +t.dataset.i;
-      pilots[i].color = t.value;
-      t.closest(".c5p-card").style.setProperty("--c", t.value);
-      if (e.type === "input") scheduleSave();
+      pilots[+t.dataset.i].color = t.value;
+      refreshCardStates();
+      scheduleSave();
     });
 
     const cv = document.getElementById("c5pChart");
@@ -316,6 +351,7 @@ const C5UI = (() => {
   }
 
   function setGain(v) {
+    if (live.race) return;
     v = clamp(Math.round(v) || 0, 0, 89);
     gain = v;
     const inp = $("#c5pGain");
@@ -324,6 +360,7 @@ const C5UI = (() => {
   }
 
   function setFreq(i, f, bandIndex) {
+    if (live.race) return;
     pilots[i].freq = f && inRange(f) ? f : 0;
     if (Number.isInteger(bandIndex)) pilots[i].bandIndex = bandIndex;
     hist[i].t.length = hist[i].v.length = 0;
@@ -335,6 +372,7 @@ const C5UI = (() => {
 
   // Keeps exit below enter: moving one past the other pushes it along.
   function setThreshold(i, which, v, dragging) {
+    if (live.race) return;
     if (!Number.isFinite(v)) return;
     const p = pilots[i];
     if (which === "enter") {
@@ -349,6 +387,7 @@ const C5UI = (() => {
   }
 
   function fillFromBand() {
+    if (live.race) return;
     const idx = +$("#c5pBand").value;
     const b = bandTables().find(x => x.index === idx);
     if (!b) return;
@@ -420,6 +459,15 @@ const C5UI = (() => {
       }
     }
     recordCalibrationSample(rssi);
+    if (built) {
+      document.querySelectorAll("#c5pCards input, #c5pEditor input, #c5pEditor select, #c5pGain, [data-gain], #c5pFill, #c5pBand").forEach(el => { el.disabled = live.race; });
+      $("#c5pCalStart").disabled = live.race || calib.phase === "ambient" || calib.phase === "recording";
+      if (live.race && (calib.phase === "ambient" || calib.phase === "recording")) {
+        calib.phase = "idle";
+        $("#c5pCalStop").disabled = true;
+      }
+      $("#c5pFocusHint").textContent = live.race ? "Race running — stop the race to change calibration." : "Drag the selected pilot's Enter and Exit lines on the chart.";
+    }
   }
 
   function recordLink(t, d) {
@@ -510,7 +558,7 @@ const C5UI = (() => {
       if (racers.length === 1) {
         msg += ` · single-pilot race: ${pilotLabel(racers[0])}`;
       } else if (racers.length > 1) {
-        msg += ` · multi-pilot race: ${racers.map(pilotLabel).join(", ")}`;
+        msg += ` · ${racers.length} racing`;
       } else {
         msg += " · no pilot has Race on: races won't count laps";
         if (!err) cls = "c5p-warn";
@@ -565,17 +613,21 @@ const C5UI = (() => {
       $(`#c5pMkX${i}`).style.left = (p.exit / 255 * 100) + "%";
       const gate = $(`#c5pGate${i}`);
       const L = laps[i];
-      if (L.flashUntil > t) { gate.textContent = "LAP"; gate.className = "c5p-gate c5p-gate-lap"; }
-      else if (live.race && live.inside[i]) { gate.textContent = "IN GATE"; gate.className = "c5p-gate c5p-gate-in"; }
-      else if (v != null && v >= p.enter) { gate.textContent = "above enter"; gate.className = "c5p-gate c5p-gate-above"; }
-      else { gate.textContent = ""; gate.className = "c5p-gate"; }
+      if (L.flashUntil > t) { gate.textContent = "LAP"; gate.className = "c5p-gate c5p-gate-lap"; gate.title = "Lap counted"; }
+      else if (live.race && live.inside[i]) { gate.textContent = "IN"; gate.className = "c5p-gate c5p-gate-in"; gate.title = "In the gate"; }
+      else if (v != null && v >= p.enter) { gate.textContent = "HIGH"; gate.className = "c5p-gate c5p-gate-above"; gate.title = "Above Enter"; }
+      else { gate.textContent = ""; gate.className = "c5p-gate"; gate.title = ""; }
+      if (i !== focus) return;
+      // The editor's detail lines are for the selected pilot only.
       const lapTxt = L.count ? ` · laps ${L.count} · last ${(L.last / 1000).toFixed(2)} s · best ${(L.best / 1000).toFixed(2)} s` : "";
-      $(`#c5pMeta${i}`).textContent = s ? `10 s: peak ${s.max} · floor ${s.p10}${lapTxt}` : (p.freq ? "waiting for samples" : "");
+      $("#c5pMeta").textContent = s ? `Last 10 s: peak ${s.max} · floor ${s.p10}${lapTxt}` : (p.freq ? "Waiting for samples" : "Choose a channel to use this slot");
       const r = calib.results[i];
-      $(`#c5pCal${i}`).innerHTML = r && r.peak != null
-        ? `auto: floor ${r.floor}, noise ${r.noise}, peak ${r.peak} → <span class="${r.peak - r.noise >= 10 ? "c5p-good" : "c5p-badtxt"}">${r.peak - r.noise >= 10 ? "good margin" : "weak margin"}</span>`
+      $("#c5pCal").innerHTML = r && r.peak != null
+        ? `Auto: floor ${r.floor}, noise ${r.noise}, peak ${r.peak} → <span class="${r.peak - r.noise >= 10 ? "c5p-good" : "c5p-badtxt"}">${r.peak - r.noise >= 10 ? "good margin" : "weak margin"}</span>`
         : "";
     });
+    const auto = $("#c5pAuto");
+    if (auto) auto.classList.toggle("c5p-active", calib.phase !== "idle");
   }
 
   // ---- chart ----------------------------------------------------------------------------
@@ -589,8 +641,9 @@ const C5UI = (() => {
     return { ctx, W: r.width, H: r.height };
   }
 
-  let yLo = 0, yHi = 120;
-  function yRange(t0, tEnd) {
+  // Each chart keeps its own y-axis so the two never fight over the scale.
+  const mainScale = { lo: 0, hi: 120 }, overlayScale = { lo: 0, hi: 120 };
+  function yRange(t0, tEnd, scale, allThresholds) {
     let lo = Infinity, hi = -Infinity;
     pilots.forEach((p, i) => {
       if (!p.freq || p.hidden) return;
@@ -599,30 +652,39 @@ const C5UI = (() => {
         lo = Math.min(lo, h.v[j]);
         hi = Math.max(hi, h.v[j]);
       }
-      if (i === focus || showAllThresholds) { lo = Math.min(lo, p.exit); hi = Math.max(hi, p.enter); }
+      if (i === focus || allThresholds) { lo = Math.min(lo, p.exit); hi = Math.max(hi, p.enter); }
     });
     if (!isFinite(lo)) { lo = 0; hi = 120; }
     // Round outwards to tens and only move when needed, so the axis is calm.
     const wantLo = clamp(Math.floor((lo - 8) / 10) * 10, 0, 245), wantHi = clamp(Math.ceil((hi + 8) / 10) * 10, 10, 260);
-    if (drag) return;   // keep the scale still while dragging
-    if (wantLo < yLo || wantLo > yLo + 30) yLo = wantLo;
-    if (wantHi > yHi || wantHi < yHi - 30) yHi = Math.max(wantHi, yLo + 30);
+    if (drag && scale === mainScale) return;   // keep the scale still while dragging
+    if (wantLo < scale.lo || wantLo > scale.lo + 30) scale.lo = wantLo;
+    if (wantHi > scale.hi || wantHi < scale.hi - 30) scale.hi = Math.max(wantHi, scale.lo + 30);
   }
 
   function draw() {
     const cv = document.getElementById("c5pChart");
     if (!cv || !visible || cv.offsetParent === null) return;
+    drawChart(cv, false);
+  }
+
+  // The Calibration chart, or (overlay) a compact copy for the Race tab's
+  // debug overlay: fixed 20 s window, every pilot's Enter line, no editing.
+  function drawChart(cv, overlay) {
     const { ctx, W, H } = fitCanvas(cv);
     ctx.clearRect(0, 0, W, H);
-    const tEnd = frozenAt ?? now(), t0 = tEnd - windowS;
-    yRange(t0, tEnd);
-    const box = { l: 36, r: W - 92, t: 10, b: H - 22 };
-    const X = t => box.l + (t - t0) / windowS * (box.r - box.l);
+    const span = overlay ? 20 : windowS;
+    const tEnd = overlay ? now() : (frozenAt ?? now()), t0 = tEnd - span;
+    const scale = overlay ? overlayScale : mainScale;
+    yRange(t0, tEnd, scale, overlay || showAllThresholds);
+    const yLo = scale.lo, yHi = scale.hi;
+    const box = overlay ? { l: 24, r: W - 58, t: 6, b: H - 14 } : { l: 36, r: W - 92, t: 10, b: H - 22 };
+    const X = t => box.l + (t - t0) / span * (box.r - box.l);
     const Y = v => box.b - (v - yLo) / (yHi - yLo) * (box.b - box.t);
-    geom = { Y, invY: y => yLo + (box.b - y) / (box.b - box.t) * (yHi - yLo), box };
+    if (!overlay) geom = { Y, invY: y => yLo + (box.b - y) / (box.b - box.t) * (yHi - yLo), box };
     const text = css("--text-color") || "#999", grid = css("--border-color") || "#444";
 
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = overlay ? "9px system-ui, sans-serif" : "11px system-ui, sans-serif";
     ctx.lineWidth = 1;
     ctx.strokeStyle = grid;
     ctx.fillStyle = text;
@@ -631,20 +693,30 @@ const C5UI = (() => {
       ctx.globalAlpha = 0.6;
       ctx.beginPath(); ctx.moveTo(box.l, Y(v)); ctx.lineTo(box.r, Y(v)); ctx.stroke();
       ctx.globalAlpha = 1;
-      ctx.fillText(v, 4, Y(v) + 4);
+      ctx.fillText(v, 2, Y(v) + 3);
     }
-    const xs = windowS <= 10 ? 2 : windowS <= 30 ? 5 : windowS <= 60 ? 10 : 20;
-    for (let s = 0; s <= windowS; s += xs) {
+    const xs = span <= 10 ? 2 : span <= 30 ? 5 : span <= 60 ? 10 : 20;
+    for (let s = 0; s <= span; s += xs) {
       const x = X(tEnd - s);
       ctx.globalAlpha = 0.35;
       ctx.beginPath(); ctx.moveTo(x, box.t); ctx.lineTo(x, box.b); ctx.stroke();
       ctx.globalAlpha = 1;
-      ctx.fillText(s ? `-${s}s` : "now", x - 12, H - 6);
+      ctx.fillText(s ? `-${s}s` : "now", x - (overlay ? 8 : 12), H - (overlay ? 3 : 6));
     }
 
-    // Thresholds: the selected pilot (draggable), or all of them.
+    // Thresholds. Main: the selected pilot (draggable), or all of them.
+    // Overlay: each pilot's Enter line, faint.
     pilots.forEach((p, i) => {
-      if (!p.freq || p.hidden || (i !== focus && !showAllThresholds)) return;
+      if (!p.freq || p.hidden) return;
+      if (overlay) {
+        ctx.strokeStyle = colorOf(i);
+        ctx.globalAlpha = 0.45;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(box.l, Y(p.enter)); ctx.lineTo(box.r, Y(p.enter)); ctx.stroke();
+        ctx.setLineDash([]);
+        return;
+      }
+      if (i !== focus && !showAllThresholds) return;
       const sel = i === focus;
       ctx.strokeStyle = colorOf(i);
       ctx.globalAlpha = sel ? 0.95 : 0.4;
@@ -677,7 +749,7 @@ const C5UI = (() => {
       const h = hist[i];
       const j0 = Math.max(0, lowerBound(h.t, t0) - 1);
       ctx.strokeStyle = colorOf(i);
-      ctx.lineWidth = i === focus ? 2.4 : 1.6;
+      ctx.lineWidth = overlay ? 1.4 : i === focus ? 2.4 : 1.6;
       ctx.beginPath();
       let last = null;
       for (let j = j0; j < h.t.length && h.t[j] <= tEnd; j++) {
@@ -689,20 +761,20 @@ const C5UI = (() => {
       if (last !== null && h.t[last] >= t0) labels.push({ i, v: h.v[last], x: X(h.t[last]), y: Y(h.v[last]) });
     });
     ctx.restore();
-    drawLabels(ctx, box, labels);
-    drawHover(ctx, box, t0, X);
+    drawLabels(ctx, box, labels, overlay);
+    if (!overlay) drawHover(ctx, box, t0, X);
   }
 
   // Name and value at the end of each line, pushed apart so they never overlap.
-  function drawLabels(ctx, box, labels) {
-    const gap = 15;
+  function drawLabels(ctx, box, labels, small) {
+    const gap = small ? 11 : 15;
     labels.forEach(l => { l.ly = clamp(l.y, box.t + 6, box.b - 6); });
     labels.sort((a, b) => a.ly - b.ly);
     for (let k = 1; k < labels.length; k++) labels[k].ly = Math.max(labels[k].ly, labels[k - 1].ly + gap);
     const over = labels.length ? labels[labels.length - 1].ly - (box.b - 6) : 0;
     if (over > 0) labels.forEach(l => { l.ly -= over; });
     for (let k = labels.length - 2; k >= 0; k--) labels[k].ly = Math.min(labels[k].ly, labels[k + 1].ly - gap);
-    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.font = small ? "600 10px system-ui, sans-serif" : "600 12px system-ui, sans-serif";
     ctx.textBaseline = "middle";
     labels.forEach(l => {
       const c = colorOf(l.i);
@@ -712,7 +784,7 @@ const C5UI = (() => {
       ctx.globalAlpha = 1;
       ctx.fillStyle = c;
       ctx.beginPath(); ctx.arc(l.x, clamp(l.y, box.t, box.b), 2.5, 0, 2 * Math.PI); ctx.fill();
-      ctx.fillText(`${channelName(pilots[l.i].freq, pilots[l.i].bandIndex)} ${l.v}`, box.r + 7, l.ly);
+      ctx.fillText(`${channelName(pilots[l.i].freq, pilots[l.i].bandIndex)} ${small ? Math.round(l.v) : l.v}`, box.r + 7, l.ly);
     });
     ctx.textBaseline = "alphabetic";
   }
@@ -738,8 +810,10 @@ const C5UI = (() => {
     });
     tip.innerHTML = html;
     tip.style.display = "block";
-    tip.style.left = (hoverX + 14 + tip.offsetWidth > box.r ? hoverX - 14 - tip.offsetWidth : hoverX + 14) + "px";
-    tip.style.top = "8px";
+    // The tip sits in the chart wrapper, which pads the canvas.
+    const cv = document.getElementById("c5pChart");
+    tip.style.left = cv.offsetLeft + (hoverX + 14 + tip.offsetWidth > box.r ? hoverX - 14 - tip.offsetWidth : hoverX + 14) + "px";
+    tip.style.top = cv.offsetTop + 8 + "px";
   }
 
   // ---- auto-calibration (ambient, then passes) ---------------------------------------------------
@@ -752,6 +826,11 @@ const C5UI = (() => {
   }
 
   function startCalibration() {
+    if (live.race || !live.on || now() - live.at > 3 || !pilots.some(p => p.freq)) {
+      calib.phase = "blocked";
+      $("#c5pPhase").textContent = "Stop the race, connect the receiver and assign a channel before calibrating.";
+      return;
+    }
     calib = { phase: "ambient", ambient: [], samples: [], results: [] };
     $("#c5pCalStart").disabled = true;
     $("#c5pCalStop").disabled = true;
@@ -767,7 +846,8 @@ const C5UI = (() => {
   function recordCalibrationSample(rssi) {
     if (calib.phase !== "ambient" && calib.phase !== "recording") return;
     const s = Array.from({ length: SLOTS }, (_, i) => Number(rssi[i]));
-    (calib.phase === "ambient" ? calib.ambient : calib.samples).push(s);
+    const captured = calib.phase === "ambient" ? calib.ambient : calib.samples;
+    if (captured.length < 6000) captured.push(s);
     const c = $("#c5pCalCount");
     if (c) c.textContent = `${calib.ambient.length} ambient · ${calib.samples.length} flight samples`;
   }
@@ -781,6 +861,7 @@ const C5UI = (() => {
       if (!p.freq || amb.length < 3 || fly.length < 3) return undefined;
       const floor = percentile(amb, 0.5), noise = percentile(amb, 0.95), peak = percentile(fly, 0.95);
       const range = Math.max(0, peak - floor);
+      if (peak <= noise + 12) return undefined; // no clear gate pass: retain known thresholds
       // A noise margin, then hysteresis so Exit sits below Enter.
       const enter = clamp(Math.round(Math.max(noise + 8, floor + range * 0.55)), 1, 255);
       const exit = clamp(Math.round(Math.max(noise + 3, floor + range * 0.25)), 0, enter - 1);
@@ -791,11 +872,10 @@ const C5UI = (() => {
     });
     calib.phase = "done";
     $("#c5pCalStart").disabled = false;
-    $("#c5pCalStart").textContent = "Start again";
     $("#c5pCalStop").disabled = true;
     $("#c5pPhase").textContent = applied
-      ? `Thresholds set for ${applied} pilot${applied === 1 ? "" : "s"} and saved. Check them against the chart.`
-      : "Not enough samples. Try again with longer passes.";
+      ? `Updated ${applied} pilot${applied === 1 ? "" : "s"}. Pilots without a clear pass keep their thresholds. Check the chart and wait for Saved.`
+      : "No clear passes above background noise. Thresholds unchanged. Try again with each quad passing the gate.";
     refreshCardStates();
     if (applied) scheduleSave();
   }
@@ -861,6 +941,13 @@ const C5UI = (() => {
   function frame(ts) {
     if (visible) {
       draw();
+      // Race tab debug overlay (script.js updateDebugOverlay shows the canvas).
+      const dbg = document.getElementById("debugC5Chart");
+      if (dbg && dbg.offsetParent !== null) {
+        drawChart(dbg, true);
+        const readout = document.getElementById("debugRssiValue");
+        if (readout) readout.textContent = live.at && now() - live.at < 3 ? `${pilots.filter(p => p.freq).length} pilots` : "no data";
+      }
       if (ts - lastCards > 200) {
         renderCards();
         renderStatus();
@@ -871,6 +958,6 @@ const C5UI = (() => {
   }
   requestAnimationFrame(frame);
 
-  return { load, getProfilesForSave, getGain: () => gain, onRssi, onLap, setVisible, saveState: () => saveState,
+  return { load, getProfilesForSave, getGain: () => gain, onRssi, onLap, setVisible, saveState: () => saveState, channelName,
            getRacePilots };
 })();

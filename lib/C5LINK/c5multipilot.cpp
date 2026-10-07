@@ -7,6 +7,11 @@ void C5MultiPilot::begin(Config *config, C5Link *link) {
 }
 
 void C5MultiPilot::start(uint32_t raceStartMs) {
+    uint8_t mask = 0;
+    for (uint8_t i = 0; i < 8; ++i)
+        if (config_->getC5Frequency(i) && ((config_->getC5RaceMask() >> i) & 1)) mask |= 1u << i;
+    racerMask_ = mask;
+    racerCount_ = __builtin_popcount(mask);
     // The race clock is millis(); samples are stamped in micros().
     raceStartUs_ = micros() - (millis() - raceStartMs) * 1000u;
     portENTER_CRITICAL(&lapMux_);
@@ -14,6 +19,7 @@ void C5MultiPilot::start(uint32_t raceStartMs) {
         inside_[i] = false;
         peak_[i] = 0;
         lapCount_[i] = 0;
+        capturePeak_[i] = 0;
     }
     crossingCount_ = 0;
     pendingCount_ = 0;
@@ -30,11 +36,7 @@ void C5MultiPilot::stop() { running_ = false; }
 void C5MultiPilot::update(uint32_t nowMs) {
     (void)nowMs;
     if (!config_ || !link_) return;
-    uint8_t mask = 0;
-    for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
-        if (config_->getC5Frequency(i) && (config_->getC5RaceMask() >> i) & 1) mask |= (uint8_t)(1u << i);
-    racerMask_ = mask;
-    racerCount_ = (uint8_t)__builtin_popcount(mask);
+    // The race roster is frozen by start(), including after stop for history.
 
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         if (!config_->getC5Frequency(i)) {   // slot switched off
@@ -49,6 +51,9 @@ void C5MultiPilot::update(uint32_t nowMs) {
         while (link_->takeSample(i, value, sampleUs)) {
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
             if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
+            portENTER_CRITICAL(&lapMux_);
+            if (filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
+            portEXIT_CRITICAL(&lapMux_);
             if (!running_) continue;
             const uint16_t f = filtered_[i];
             if (!inside_[i]) {
@@ -133,6 +138,15 @@ bool C5MultiPilot::takeRaceCrossing(uint32_t &crossingUs) {
     }
     portEXIT_CRITICAL(&lapMux_);
     return got;
+}
+
+void C5MultiPilot::takeCaptureFrame(uint8_t* values) {
+    portENTER_CRITICAL(&lapMux_);
+    for (uint8_t i = 0; i < 8; ++i) {
+        values[i] = capturePeak_[i] / 4;
+        capturePeak_[i] = 0;
+    }
+    portEXIT_CRITICAL(&lapMux_);
 }
 
 uint8_t C5MultiPilot::copyLaps(uint8_t pilot, uint32_t *out, uint8_t max) {

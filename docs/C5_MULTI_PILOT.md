@@ -109,17 +109,31 @@ times while a race runs.
 
 ## Racing
 
+With C5 selected, the device uses **Multi** mode exclusively. Personal,
+Master, Slave and RotorHazard roles are unavailable; C5 devices cannot be
+daisy-chained. This applies even when only one pilot races.
+
+New C5 races record all eight RSSI channels when SD storage is available.
+In **Race History → Edit**, select a pilot before changing crossings.
+**Show all channel traces** overlays other slots for reference; edits always
+apply to the selected pilot. Switch pilots freely, then **Save Changes** saves
+every pilot's edits. Missing traces use typed times. Old recordings are not
+retroactively expanded.
+
+Stop the race before changing channels, gain or thresholds. Calibration keeps
+existing thresholds when it sees no clear pass. Wait for **Saved** before racing.
+
 The number of pilots with **Race** ticked decides the kind of race:
 
 | Pilots with Race on | Race |
 |---|---|
 | 0 | No laps are counted. The status line turns amber. |
-| 1 | A normal single-pilot race, exactly as with an RX5808: lap table, announcer, LCD, RotorHazard. |
+| 1 | One pilot in the Multi race view. |
 | 2 to 8 | A **multi-pilot race**. |
 
 Start, stop and clear races from the Race tab as usual. The pilots in a race
-are fixed when it starts; changing a Race switch mid-race takes effect next
-race.
+are fixed when it starts. Stop the race before changing pilot participation,
+receiver tuning, or calibration.
 
 ### Timing rules (every pilot)
 

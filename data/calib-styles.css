@@ -201,17 +201,55 @@
 }
 
 /* ESP32-C5 multi-pilot panel (c5-multipilot.js) */
-.c5-calibration-card { margin-top: 14px; }
-.c5p-status { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px;
-              background: var(--bg-primary); border: 1px solid var(--border-color); margin-bottom: 10px; color: var(--text-color); }
+.c5p-diagnostics { margin-top: 12px; font-size: 12px; color: var(--secondary-color); }
+.c5p-diagnostics summary { cursor: pointer; padding: 6px 0; }
+
+/* Multi-pilot standings, at the top of Race Analysis */
+.multi-pilot-standings { margin: 0 0 16px; overflow-x: auto; }
+.multi-pilot-standings:empty { display: none; }
+.multi-pilot-standings-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums;
+                               color: var(--text-color); }
+.multi-pilot-standings-table th { padding: 8px 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+                                  text-align: right; color: var(--secondary-color); border-bottom: 2px solid var(--border-color);
+                                  border-top: none; border-left: none; border-right: none; background: none; white-space: nowrap; }
+.multi-pilot-standings-table td { padding: 8px 10px; text-align: right; border: none; border-bottom: 1px solid var(--border-color);
+                                  white-space: nowrap; }
+.multi-pilot-standings-table tbody tr:nth-child(even) { background: none; }
+.multi-pilot-standings-table tbody tr:hover { background: var(--background-color); }
+.multi-pilot-standings-table .mps-pos { width: 1%; text-align: center; font-weight: bold; color: var(--primary-color); }
+.multi-pilot-standings-table th:first-child { text-align: center; }
+.multi-pilot-standings-table .mps-pilot { text-align: left; font-weight: bold; }
+.multi-pilot-standings-table .mps-name { display: inline-flex; align-items: center; gap: 8px; }
+.multi-pilot-standings-table .mps-fastest { color: #4CAF50; font-weight: bold; }
+.multi-pilot-standings-table .mps-gap { color: var(--secondary-color); }
+.multi-pilot-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pilot-color); flex: none; }
+.multi-pilot-status { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: bold;
+                      background: var(--background-color); color: var(--secondary-color); }
+.multi-pilot-status.racing { background: var(--primary-color); color: var(--background-color); }
+.multi-pilot-status.finished { background: #4CAF50; color: white; }
+.multi-mode-indicator { display: flex; align-items: center; padding: 6px 12px; background-color: rgba(255, 255, 255, 0.15);
+                        border-radius: 4px; font-size: 11px; font-weight: bold; color: white; letter-spacing: 0.5px; }
+#unifiedRaceView { overflow-x: auto; }
+/* Race editor pilot list: the Calibration pilot rows, laid out as a grid */
+.marshal-pilots { flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.marshal-pilot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.marshal-pilot { display: grid; grid-template-columns: 12px auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+                 padding: 7px 10px; border: 2px solid transparent; border-radius: 6px; background: var(--background-color);
+                 color: var(--text-color); font-size: 13px; cursor: pointer; transition: border-color 0.2s ease; }
+.marshal-pilot:hover { border-color: var(--border-color); }
+.marshal-pilot.selected { border-color: var(--primary-color); }
+.marshal-pilot-ch { font-family: 'Courier New', monospace; color: var(--primary-color); }
+.marshal-pilot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.marshal-pilot-stats { font-size: 12px; color: var(--secondary-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.marshal-pilot-hint { font-size: 12px; color: var(--secondary-color); }
+.c5p-status { display: flex; align-items: center; gap: 8px; margin: -6px 0 12px; font-size: 13px; color: var(--secondary-color); }
+.c5p-status #c5pStatusText { flex: 1; min-width: 0; }
 .c5p-dot { width: 10px; height: 10px; border-radius: 50%; background: #888; flex: none; }
 .c5p-status.c5p-ok .c5p-dot { background: #3ccf6e; }
 .c5p-status.c5p-warn .c5p-dot { background: #f0b429; }
 .c5p-status.c5p-bad .c5p-dot { background: #ef5350; }
-.c5p-status.c5p-bad { border-color: #ef5350; }
-.c5p-card.c5p-race .c5p-name::after { content: "RACE"; margin-left: 6px; padding: 1px 5px; border-radius: 4px; font-size: 10px;
-                                       font-weight: 700; background: var(--c); color: #111; vertical-align: middle; }
-.c5p-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
+.c5p-status.c5p-bad { color: #ef5350; }
+.c5p-stats { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
 .c5p-stats:empty { display: none; }
 .c5p-chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 9px; border-radius: 12px; font-size: 12px;
             font-variant-numeric: tabular-nums; background: var(--bg-primary); border: 1px solid var(--border-color);
@@ -223,71 +261,126 @@
 .c5p-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; font-size: 13px; color: var(--text-color); }
 .c5p-toolbar select, .c5p-toolbar input[type=number] { padding: 4px 6px; border-radius: 5px; border: 1px solid var(--border-color);
                                                        background: var(--bg-primary); color: var(--text-color); font: inherit; }
-.c5p-lbl { display: inline-flex; align-items: center; gap: 6px; color: var(--text-color); }
-.c5p-spacer { flex: 1; }
-.c5p-btn { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 5px; cursor: pointer; border: 1px solid var(--border-color);
-           background: var(--bg-primary); color: var(--text-color); }
+/* Small controls for the card header and chart toolbar */
+.c5p-headctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; font-size: 13px; font-weight: normal; }
+.c5p-mini { height: 32px; box-sizing: border-box; margin: 0; padding: 0 8px; border: 2px solid var(--border-color); border-radius: 6px;
+            background-color: var(--background-color); color: var(--text-color); font-size: 13px; }
+.c5p-mini:focus { outline: none; border-color: var(--primary-color); }
+#c5pBand { max-width: 220px; }
+.c5p-ctl-l { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-color); }
+.c5p-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-color); cursor: pointer; }
+.c5p-check input { margin: 0; }
+/* Secondary button: same shape as .calib-wizard-btn, outlined */
+.c5p-btn { margin: 0; padding: 8px 16px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--background-color);
+           color: var(--text-color); font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
 .c5p-btn:hover:not(:disabled) { border-color: var(--primary-color); }
 .c5p-btn:disabled { opacity: .45; cursor: default; }
-.c5p-btn.c5p-on { background: var(--primary-color); color: var(--background-color); }
-.c5p-primary { background: var(--primary-color); border-color: var(--primary-color); color: var(--background-color); font-weight: 600; }
-.c5p-step { display: inline-flex; align-items: center; }
-.c5p-step input[type=number] { width: 54px; text-align: center; margin: 0 3px; padding: 3px 4px; border-radius: 5px;
-                               border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-color); font: inherit; }
-.c5p-sq { width: 28px; padding: 3px 0; text-align: center; font-weight: 700; }
-.c5p-save { font-size: 12px; color: var(--secondary-color); min-width: 100px; text-align: right; }
-.c5p-save-saved { color: #3ccf6e; } .c5p-save-error { color: #ef5350; } .c5p-save-pending { color: #f0b429; }
-.c5p-fillnote { font-size: 12px; color: var(--secondary-color); min-height: 16px; margin-bottom: 4px; }
-.c5p-chartwrap { position: relative; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; }
-#c5pChart { width: 100%; height: 340px; display: block; touch-action: none; }
+.c5p-btn.c5p-on { background: var(--primary-color); border-color: var(--primary-color); color: var(--background-color); }
+.c5p-small { height: 32px; box-sizing: border-box; padding: 0 12px; font-size: 13px; }
+.c5p-head .calib-wizard-btn { height: 32px; margin: 0; padding: 0 14px; font-size: 13px; }
+.calib-wizard-btn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: none; }
+.c5p-step { display: inline-flex; align-items: center; gap: 4px; }
+.c5p-step input[type=number] { width: 52px; text-align: center; -moz-appearance: textfield; }
+.c5p-step input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+.c5p-sq { width: 32px; padding: 0; text-align: center; }
+.c5p-save { flex: none; font-size: 12px; font-weight: 600; color: var(--secondary-color); }
+.c5p-save-saved { color: #4CAF50; } .c5p-save-error { color: #ef5350; } .c5p-save-pending { color: #f0b429; }
+.c5p-fillnote { margin: -6px 0 12px; font-size: 12px; color: var(--secondary-color); }
+.c5p-fillnote:empty { display: none; }
+/* Chart and editor on the left, pilot list on the right */
+.c5p-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px; align-items: start; }
+.c5p-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.c5p-chartwrap { position: relative; padding: 8px; }
+#c5pChart { width: 100%; height: 280px; display: block; touch-action: none; }
+.c5p-chartctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.c5p-chartctl .c5p-hint { flex: 1; min-width: 160px; text-align: right; }
 .c5p-tip { position: absolute; display: none; pointer-events: none; background: var(--bg-primary); border: 1px solid var(--border-color);
            border-radius: 5px; padding: 6px 8px; font-size: 12px; white-space: nowrap; color: var(--text-color);
            box-shadow: 0 2px 8px rgba(0, 0, 0, .3); font-variant-numeric: tabular-nums; }
 .c5p-tip-t, .c5p-dim { color: var(--secondary-color); }
 .c5p-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
-.c5p-hint { font-size: 12px; color: var(--secondary-color); margin: 8px 0 12px; }
-.c5p-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.c5p-card { border: 1px solid var(--border-color); border-left: 5px solid var(--c); border-radius: 7px; padding: 8px 10px;
-            background: var(--bg-primary); color: var(--text-color); cursor: pointer; font-size: 13px; }
-.c5p-card.c5p-focus { box-shadow: 0 0 0 2px var(--c); }
-.c5p-card.c5p-off { opacity: .5; }
-.c5p-card.c5p-hidden .c5p-val { opacity: .5; }
-.c5p-card-head { display: flex; align-items: center; gap: 6px; }
-.c5p-name { font-weight: 700; white-space: nowrap; color: var(--c); }
-.c5p-freq { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 4px;
-            border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-color); }
-.c5p-id { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-.c5p-pname, .c5p-pphon { min-width: 0; font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 4px;
-                         border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-color); }
-.c5p-pname { flex: 1; font-weight: 600; }
-.c5p-pphon { width: 100%; box-sizing: border-box; margin-top: 4px; font-size: 11px; }
-.c5p-pcolor { width: 26px; height: 24px; padding: 0; border: 1px solid var(--border-color); border-radius: 4px;
-              background: none; cursor: pointer; flex: none; }
-.c5p-racetg { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-.c5p-eye { border: none; background: none; color: var(--c); cursor: pointer; font-size: 14px; padding: 0 2px; }
-.c5p-liverow { display: flex; align-items: baseline; justify-content: space-between; margin: 4px 0 2px; }
-.c5p-val { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.c5p-gate { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
-.c5p-gate-in { background: var(--c); color: #111; }
-.c5p-gate-lap { background: #3ccf6e; color: #111; }
-.c5p-gate-above { color: var(--c); border: 1px solid var(--c); }
-.c5p-bar { position: relative; height: 7px; border-radius: 4px; background: var(--bg-secondary); margin: 4px 0 8px; overflow: visible; }
-.c5p-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); border-radius: 4px; opacity: .8; }
-.c5p-mk { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text-color); }
-.c5p-mk-exit { opacity: .5; }
-.c5p-th { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
-.c5p-meta { font-size: 11px; color: var(--secondary-color); margin-top: 6px; min-height: 14px; font-variant-numeric: tabular-nums; }
-.c5p-calres { font-size: 11px; color: var(--secondary-color); }
-.c5p-good { color: #3ccf6e; } .c5p-badtxt { color: #ef5350; }
-.c5p-auto { margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-color);
-            color: var(--text-color); font-size: 13px; }
-.c5p-auto-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin-bottom: 8px; }
-.c5p-phase { color: var(--secondary-color); font-size: 12px; }
-.c5p-auto-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.c5p-count { font-size: 12px; color: var(--secondary-color); }
+.c5p-hint { font-size: 12px; color: var(--secondary-color); }
+/* Pilot colour dot; hollow when the pilot is hidden on the chart */
+.c5p-eye { flex: none; width: 12px; height: 12px; margin: 0; padding: 0; border-radius: 50%; border: 2px solid var(--c);
+           background: var(--c); cursor: pointer; }
+.c5p-hidden .c5p-eye, .c5p-hidden > .c5p-eye { background: transparent; }
+/* Pilot list: one row each, the selected row outlined in the theme colour */
+.c5p-list { display: flex; flex-direction: column; gap: 4px; }
+.c5p-list-head, .c5p-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) 110px 76px 34px; align-items: center; gap: 10px; }
+.c5p-list-head { padding: 0 12px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+                 color: var(--secondary-color); white-space: nowrap; }
+.c5p-list-head span:last-child { text-align: center; }
+.c5p-list-head span:nth-child(4) { text-align: right; }
+.c5p-row { padding: 7px 10px; border: 2px solid transparent; border-radius: 6px; background: var(--background-color);
+           color: var(--text-color); font-size: 13px; cursor: pointer; transition: border-color 0.2s ease; }
+.c5p-row:hover { border-color: var(--border-color); }
+.c5p-row.c5p-focus { border-color: var(--primary-color); }
+.c5p-row.c5p-off { opacity: .5; }
+.c5p-row-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; white-space: nowrap; }
+.c5p-ch { flex: none; min-width: 26px; font-family: 'Courier New', monospace; color: var(--primary-color); }
+.c5p-nm { overflow: hidden; text-overflow: ellipsis; }
+.c5p-row-sig { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 6px; position: relative; }
+.c5p-row-th { text-align: right; font-family: 'Courier New', monospace; font-size: 12px; color: var(--secondary-color); }
+.c5p-row .c5p-racechk { margin: 0; justify-self: center; cursor: pointer; }
+.c5p-val { font-family: 'Courier New', monospace; font-size: 12px; font-weight: bold; text-align: right; }
+.c5p-hidden .c5p-val { opacity: .5; }
+.c5p-gate { position: absolute; left: 0; top: -9px; padding: 0 5px; border-radius: 8px; font-size: 9px; font-weight: bold;
+            line-height: 13px; letter-spacing: 0.5px; }
+.c5p-gate:empty { display: none; }
+.c5p-gate-in { background: var(--primary-color); color: var(--background-color); }
+.c5p-gate-lap { background: #4CAF50; color: white; }
+.c5p-gate-above { background: var(--bg-secondary); color: var(--primary-color); }
+.c5p-bar { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--bg-secondary); }
+.c5p-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c); border-radius: 3px; }
+.c5p-mk { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; }
+.c5p-mk-enter { background: #4CAF50; }
+.c5p-mk-exit { background: #E53935; }
+/* Selected-pilot editor under the chart */
+.c5p-editor { padding: 12px 14px; border-radius: 6px; background: var(--background-color); }
+.c5p-ed-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.c5p-name { flex: 1; min-width: 0; font-size: 15px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c5p-ed-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; align-items: end; }
+.c5p-editor .calib-input-group { gap: 4px; margin: 0; }
+.c5p-editor .calib-input-group label { font-size: 11px; }
+.c5p-editor .calib-select { width: 100%; height: 34px; box-sizing: border-box; padding: 0 8px; font-size: 13px; }
+.c5p-editor .calib-threshold-item { gap: 6px; }
+.c5p-editor .calib-threshold-header label { font-size: 13px; }
+.c5p-editor .calib-threshold-value { font-size: 16px; }
+.c5p-ed-meta { align-self: center; }
+.c5p-id { display: flex; gap: 6px; }
+.c5p-id .c5p-pname { flex: 1; min-width: 0; }
+.c5p-pcolor { flex: none; width: 34px; height: 34px; box-sizing: border-box; margin: 0; padding: 2px; border: 2px solid var(--border-color);
+              border-radius: 6px; background: var(--background-color); cursor: pointer; }
+/* Race toggle: a pill like .calib-freq-badge when on */
+.c5p-racetg { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px; border-radius: 20px;
+              border: 1px solid var(--border-color); font-size: 12px; font-weight: bold; color: var(--secondary-color); cursor: pointer; }
+.c5p-racetg input { margin: 0; }
+.c5p-race .c5p-racetg { background: var(--primary-color); border-color: var(--primary-color); color: var(--background-color); }
+.c5p-meta, .c5p-calres { font-size: 12px; color: var(--secondary-color); font-variant-numeric: tabular-nums; }
+.c5p-calres:empty { display: none; }
+.c5p-good { color: #4CAF50; } .c5p-badtxt { color: #ef5350; }
+/* Auto-calibrate progress: shown only while a capture is running or done */
+.c5p-auto { display: none; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; padding: 8px 12px;
+            border-radius: 6px; background: var(--background-color); font-size: 13px; }
+.c5p-auto.c5p-active { display: flex; }
+.c5p-phase { flex: 1; min-width: 200px; color: var(--text-color); }
+.c5p-count { font-size: 12px; color: var(--secondary-color); font-variant-numeric: tabular-nums; }
+.c5p-count:empty { display: none; }
+@media (max-width: 900px) {
+  .c5p-main { grid-template-columns: 1fr; }
+  .c5p-list { order: -1; }
+}
 @media (max-width: 600px) {
-  #c5pChart { height: 260px; }
-  .c5p-cards { grid-template-columns: 1fr 1fr; }
+  .c5p-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .c5p-headctl { justify-content: flex-start; }
+  #c5pChart { height: 220px; }
+  .c5p-list-head, .c5p-row { grid-template-columns: 12px minmax(0, 1fr) 66px 66px 32px; gap: 6px; }
+  .c5p-list-head { letter-spacing: 0; }
+  .c5p-row { padding: 7px 8px; }
+  .c5p-row-sig { grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
+  .c5p-row-th { font-size: 11px; }
+  .c5p-ed-grid { grid-template-columns: 1fr 1fr; }
+  .c5p-ed-grid > .calib-input-group:first-child { grid-column: 1 / -1; }
 }
 
 /* Mobile responsive for calibration */
@@ -404,16 +497,67 @@
 
 .marshal-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px 240px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   gap: 16px;
 }
 
-/* Race details sit beside the pass list, sharing its card styling. */
-.marshal-details-col {
+/* Race details: a bar above the graph, collapsed by default. */
+.marshal-details {
+  margin-bottom: 12px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 12px;
   background: var(--background-color);
+}
+
+.marshal-details summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.marshal-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.marshal-details summary::before {
+  content: "▸";
+  color: var(--secondary-color);
+  transition: transform 0.2s ease;
+}
+
+.marshal-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.marshal-details summary .marshal-list-title {
+  margin: 0;
+}
+
+.marshal-details-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--secondary-color);
+}
+
+.marshal-details[open] .marshal-details-summary {
+  display: none;
+}
+
+.marshal-details-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 16px;
+  padding: 0 12px 2px;
+}
+
+.marshal-field-notes {
+  grid-column: 1 / -1;
 }
 
 .marshal-field {
@@ -706,22 +850,12 @@
   color: var(--secondary-color);
 }
 
-@media (max-width: 1180px) {
-  /* Not enough width for three columns: the rail stacks under the graph. */
-  .marshal-layout {
-    grid-template-columns: minmax(0, 1fr) 260px;
-  }
-  .marshal-details-col {
-    grid-column: 2;
-  }
-}
-
 @media (max-width: 860px) {
   .marshal-layout {
     grid-template-columns: 1fr;
   }
-  .marshal-details-col {
-    grid-column: auto;
+  .marshal-details-grid {
+    grid-template-columns: 1fr;
   }
   .marshal-laps-list {
     max-height: 240px;

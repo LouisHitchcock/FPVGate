@@ -29,6 +29,7 @@ public:
     // debug popout: at 25 frames a second a pass's peak would otherwise fall
     // between frames.
     uint16_t takePeakHold(uint8_t pilot);
+    void takeCaptureFrame(uint8_t* values);
 
     // Slots that have a frequency and race (Calibration tab "Race" switch).
     uint8_t racerMask() const { return racerMask_; }
@@ -52,6 +53,7 @@ private:
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
     volatile uint16_t peakHold_[C5Link::C5_MAX_PILOTS] = {};
+    uint16_t capturePeak_[C5Link::C5_MAX_PILOTS] = {};
     // Highest filtered value inside the gate and when it was first reached.
     uint16_t peak_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t peakUs_[C5Link::C5_MAX_PILOTS] = {};

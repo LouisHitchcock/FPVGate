@@ -543,7 +543,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     // Race sync settings
     DEBUG("toJson: sending timerNumber=%d\n", conf.timerNumber);
     config["timerNumber"] = conf.timerNumber;
-    config["raceSyncMode"] = conf.raceSyncMode;
+    config["raceSyncMode"] = getRaceSyncMode();
     config["syncedTimerCount"] = conf.syncedTimerCount;
     JsonArray syncTimers = config["syncedTimers"].to<JsonArray>();
     for (uint8_t i = 0; i < conf.syncedTimerCount; i++) {
@@ -591,7 +591,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
 #endif
     
     // RotorHazard integration
-    config["rhEnabled"] = conf.rhEnabled;
+    config["rhEnabled"] = getRhEnabled();
     config["rhHostIP"] = conf.rhHostIP;
     config["rhNodeIndex"] = conf.rhNodeIndex;
 
@@ -913,7 +913,7 @@ void Config::fromJson(JsonObject source) {
     }
     if (!source["raceSyncMode"].isNull() && source["raceSyncMode"] != conf.raceSyncMode) {
         uint8_t mode = source["raceSyncMode"].as<uint8_t>();
-        if (mode <= 2) {
+        if (mode <= 3) {
             conf.raceSyncMode = mode;
             modified = true;
         }
@@ -1505,11 +1505,11 @@ void Config::setTimerNumber(uint8_t number) {
 }
 
 uint8_t Config::getRaceSyncMode() {
-    return conf.raceSyncMode;
+    return conf.receiverRadio == 2 ? 3 : (conf.raceSyncMode == 3 ? 0 : conf.raceSyncMode);
 }
 
 void Config::setRaceSyncMode(uint8_t mode) {
-    if (mode <= 2 && conf.raceSyncMode != mode) {
+    if (mode <= 3 && conf.raceSyncMode != mode) {
         conf.raceSyncMode = mode;
         modified = true;
     }
@@ -1707,7 +1707,7 @@ void Config::setSpeakerEnabled(uint8_t enabled) {
 }
 
 // RotorHazard integration
-uint8_t Config::getRhEnabled() { return conf.rhEnabled; }
+uint8_t Config::getRhEnabled() { return conf.receiverRadio == 2 ? 0 : conf.rhEnabled; }
 void Config::setRhEnabled(uint8_t enabled) {
     if (enabled <= 1 && conf.rhEnabled != enabled) {
         conf.rhEnabled = enabled;

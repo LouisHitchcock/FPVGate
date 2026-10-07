@@ -1056,6 +1056,10 @@ EEPROM:\n\
     });
     
     AsyncCallbackJsonWebHandler *remoteLapHandler = new AsyncCallbackJsonWebHandler("/timer/remoteLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"status\":\"ERROR\",\"message\":\"C5 Multi does not accept chained timers\"}");
+            return;
+        }
         JsonObject jsonObj = json.as<JsonObject>();
         
         uint32_t lapTimeMs = jsonObj["lapTimeMs"] | 0;
@@ -1198,6 +1202,31 @@ EEPROM:\n\
 
     AsyncCallbackJsonWebHandler *configJsonHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
+        if (timer->isRaceRunning() && conf->getReceiverRadio() == 2) {
+            // Full settings forms include these fields even for unrelated edits.
+            // Refuse receiver changes during a C5 race; never retune a live heat.
+            bool changed = (!jsonObj["receiverRadio"].isNull() && jsonObj["receiverRadio"].as<int>() != 2) ||
+                           (!jsonObj["c5Gain"].isNull() && jsonObj["c5Gain"].as<int>() != conf->getC5Gain());
+            uint8_t seen = 0;
+            if (jsonObj["c5Pilots"].is<JsonArray>()) {
+                uint8_t index = 0;
+                for (JsonObject p : jsonObj["c5Pilots"].as<JsonArray>()) {
+                    uint8_t slot = p["id"] | index++;
+                    if (slot >= 8) { changed = true; continue; }
+                    seen |= 1u << slot;
+                    changed |= (p["frequency"] | 0) != conf->getC5Frequency(slot) ||
+                        (p["enterRssi"] | 72) != conf->getC5EnterRssi(slot) ||
+                        (p["exitRssi"] | 68) != conf->getC5ExitRssi(slot) ||
+                        (!p["race"].isNull() && (p["race"].as<int>() != 0) != bool((conf->getC5RaceMask() >> slot) & 1));
+                }
+                for (uint8_t slot = 0; slot < 8; ++slot)
+                    if (!(seen & (1u << slot)) && conf->getC5Frequency(slot)) changed = true;
+            }
+            if (changed) {
+                request->send(409, "application/json", "{\"status\":\"ERROR\",\"message\":\"Stop the race before changing C5 channels or calibration\"}");
+                return;
+            }
+        }
 #ifdef DEBUG_OUT
         serializeJsonPretty(jsonObj, DEBUG_OUT);
         DEBUG("\n");
@@ -1374,6 +1403,24 @@ EEPROM:\n\
         RaceRssiMeta meta;
         std::vector<uint8_t> samples;
         String file = race.rssiMeta.file;
+        String tracePath = file.startsWith("/") ? file : String("/races/") + file;
+        if (!RaceRssiRecorder::readMetaFromFile(storage, tracePath, meta)) {
+            tracePath = RaceRssiRecorder::sidecarPathForTimestamp(timestamp);
+            RaceRssiRecorder::readMetaFromFile(storage, tracePath, meta);
+        }
+        if (meta.version == 2) {
+            size_t bytes = 0;
+            if (!storage->fileSize(tracePath, bytes) || bytes < 12) {
+                request->send(404, "application/json", "{\"error\":\"RSSI file missing\"}");
+                return;
+            }
+            // Bounded reads: a full eight-channel race never occupies device heap.
+            request->send(request->beginResponse("application/octet-stream", bytes,
+                [this, tracePath](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+                    return storage->readBinaryRange(tracePath, index, buffer, maxLen);
+                }));
+            return;
+        }
         if (!RaceRssiRecorder::loadSamples(storage, file, meta, samples)) {
             String fallback = RaceRssiRecorder::sidecarBasenameForTimestamp(timestamp);
             DEBUG("[Marshal] loadSamples failed for '%s', trying '%s'\n", file.c_str(), fallback.c_str());
@@ -1443,6 +1490,7 @@ EEPROM:\n\
         
         // Sync mode
         race.syncMode = jsonObj["syncMode"] | 0;
+        race.minLapMs = conf->getMinLapMs();
         
         JsonArray lapsArray = jsonObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -1453,12 +1501,17 @@ EEPROM:\n\
         if (!jsonObj["pilots"].isNull()) {
             JsonArray pilotsArray = jsonObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
+                if (race.pilots.size() >= MAX_PILOTS) break;
                 PilotData pilot;
                 pilot.name = pilotObj["name"] | "";
                 pilot.callsign = pilotObj["callsign"] | "";
                 pilot.color = pilotObj["color"] | 0x0080FF;
                 pilot.fastestLap = pilotObj["fastestLap"] | 0;
                 pilot.isLocal = pilotObj["isLocal"] | false;
+                pilot.slot = pilotObj["slot"] | -1;
+                pilot.frequency = pilotObj["frequency"] | 0;
+                pilot.enter = pilotObj["enter"] | 120;
+                pilot.exit = pilotObj["exit"] | 100;
                 JsonArray pilotLaps = pilotObj["lapTimes"];
                 for (uint32_t lap : pilotLaps) {
                     pilot.lapTimes.push_back(lap);
@@ -1522,6 +1575,24 @@ EEPROM:\n\
         JsonObject jsonObj = json.as<JsonObject>();
         
         if (!!jsonObj["timestamp"].isNull() || !!jsonObj["lapTimes"].isNull()) {
+            if (jsonObj["timestamp"].is<uint32_t>() && jsonObj["pilots"].is<JsonArray>()) {
+                JsonArray entries = jsonObj["pilots"];
+                std::vector<std::vector<uint32_t>> edited;
+                bool valid = entries.size() > 0 && entries.size() <= MAX_PILOTS;
+                for (JsonObject p : entries) {
+                    if (!p["lapTimes"].is<JsonArray>()) { valid = false; break; }
+                    JsonArray times = p["lapTimes"];
+                    if (times.size() > 255) { valid = false; break; }
+                    edited.emplace_back();
+                    for (JsonVariant t : times) {
+                        if (!t.is<uint32_t>() || t.as<uint32_t>() == 0) { valid = false; break; }
+                        edited.back().push_back(t.as<uint32_t>());
+                    }
+                }
+                bool ok = valid && history->updatePilotLaps(jsonObj["timestamp"], edited);
+                request->send(ok ? 200 : 400, "application/json", ok ? "{\"status\":\"OK\"}" : "{\"status\":\"ERROR\"}");
+                return;
+            }
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
             return;
         }
@@ -1564,6 +1635,7 @@ EEPROM:\n\
                     raceObj["channel"] = race.channel;
                     raceObj["notes"] = race.notes;
                     raceObj["syncMode"] = race.syncMode;
+                    raceObj["minLapMs"] = race.minLapMs;
                     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {
                         lapsArray.add(lap);
@@ -1579,6 +1651,10 @@ EEPROM:\n\
                             pilotObj["color"] = pilot.color;
                             pilotObj["fastestLap"] = pilot.fastestLap;
                             pilotObj["isLocal"] = pilot.isLocal;
+                            pilotObj["slot"] = pilot.slot;
+                            pilotObj["frequency"] = pilot.frequency;
+                            pilotObj["enter"] = pilot.enter;
+                            pilotObj["exit"] = pilot.exit;
                             JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
                             for (uint32_t lap : pilot.lapTimes) {
                                 pilotLaps.add(lap);

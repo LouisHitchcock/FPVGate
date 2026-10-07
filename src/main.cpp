@@ -635,6 +635,15 @@ void loop() {
     // Timing always runs
     if (config.getReceiverRadio() != 2) timer.handleLapTimerUpdate(currentTimeMs);
     // The C5 receiver (receiverRadio 2) is serviced by c5Task.
+    if (config.getReceiverRadio() == 2 && timer.isRaceRunning()) {
+        static uint32_t lastCaptureMs = 0;
+        if (currentTimeMs - lastCaptureMs >= RACE_RSSI_INTERVAL_MS) {
+            lastCaptureMs = currentTimeMs;
+            uint8_t frame[8];
+            c5MultiPilot.takeCaptureFrame(frame);
+            raceRssiRecorder.addFrame(frame, currentTimeMs);
+        }
+    }
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Feed live RSSI and timing data to LCD UI
