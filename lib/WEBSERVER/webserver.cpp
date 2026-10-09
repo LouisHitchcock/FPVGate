@@ -76,7 +76,7 @@ void Webserver::requestWifiStackReinit() {
     DEBUG("WiFi stack reinit requested\n");
 }
 
-void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr) {
+void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr) {
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -97,7 +97,6 @@ void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMoni
     rx = rx5808;
     trackManager = trackMgr;
     webhooks = webhookMgr;
-    rhManager = rhMgr;
     transportMgr = nullptr;
 
     wifi_ap_ssid = String(wifi_ap_ssid_prefix) + "_" + WiFi.macAddress().substring(WiFi.macAddress().length() - 6);
@@ -343,15 +342,18 @@ void Webserver::queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak) {
     portEXIT_CRITICAL(&rhPassMux_);
 }
 
-void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak) {
-    char body[64];
-    snprintf(body, sizeof(body), "{\"node\":%u,\"us\":%lld,\"peak\":%u}", slot, (long long)us, peak);
+void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak) {
+    char body[96];
+    int n = snprintf(body, sizeof(body), "{\"node\":%u,\"us\":%lld,\"peak\":%u", slot, (long long)us, peak);
+    if (rawPeak >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"rawPeak\":%d", rawPeak);
+    snprintf(body + n, sizeof(body) - n, "}");
     rhEvents.send(body, "rhPass");
 }
 
 // Passes as they happen and every node's RSSI ten times a second, while the
-// RotorHazard plugin is linked. C5 RSSI is 0..1023; the plugin gets 0..255,
-// the scale of the enter and exit levels.
+// RotorHazard plugin is linked. C5 RSSI is 0..1023; "rssi" and "peak" are
+// 0..255, the scale of the enter and exit levels, and "raw" and "rawPeak"
+// carry the full 0..1023 for plugins that show it (rawMax in /api/rh/info).
 void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     const bool linked = servicesStarted && rhLinked(currentTimeMs);
     const bool c5 = c5MultiPilot && conf->getReceiverRadio() == 2;
@@ -366,7 +368,7 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
         C5Pass pass;
         while (c5MultiPilot->takePass(pass)) {
             const int64_t now = esp_timer_get_time();
-            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4);
+            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4, pass.peak);
         }
     }
     RhPass pass;
@@ -384,14 +386,19 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     }
     if ((currentTimeMs - rhRssiSentMs_) < WEB_RH_RSSI_SEND_MS) return;
     rhRssiSentMs_ = currentTimeMs;
-    char body[80];
+    char body[160];
     int n = snprintf(body, sizeof(body), "{\"rssi\":[");
     uint8_t inside = 0;
     if (c5) {
+        uint16_t raw[C5Link::C5_MAX_PILOTS];
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
-            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", c5MultiPilot->rssi(i) / 4);
+            raw[i] = c5MultiPilot->rssi(i);
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i] / 4);
             if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
         }
+        n += snprintf(body + n, sizeof(body) - n, "],\"raw\":[");
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i]);
     } else if (timer) {
         n += snprintf(body + n, sizeof(body) - n, "%u", timer->getRssi());
     }
@@ -915,11 +922,6 @@ EEPROM:\n\
         sendSyncCommand(conf, "/timer/start");
         // Start local timer
         timer->start();
-        // Notify RotorHazard (queued, sent on next process() tick)
-        // Pass the race start timestamp so RH can sync to the same reference.
-        if (rhManager && rhManager->isEnabled()) {
-            rhManager->startRace(timer->getRaceStartMs());
-        }
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("started");
         }
@@ -944,10 +946,6 @@ EEPROM:\n\
         sendSyncCommand(conf, "/timer/stop");
         // Stop local timer
         timer->stop();
-        // Notify RotorHazard (queued, sent on next process() tick)
-        if (rhManager && rhManager->isEnabled()) {
-            rhManager->stopRace();
-        }
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("stopped");
         }
@@ -998,11 +996,6 @@ EEPROM:\n\
             if (conf->getRaceSyncMode() == 2) {
                 DEBUG("[Slave] Manual lap - sending to master: %u ms\n", lapTimeMs);
                 sendLapToMaster(lapTimeMs);
-            }
-            // Report lap to RotorHazard with raw millis() timestamps for clock
-            // sync. Plugin 2 has its own manual lap button instead.
-            if (rhManager && timer && !rhLinked(millis())) {
-                rhManager->triggerLap(millis(), timer->getRaceStartMs());
             }
         }
         request->send(200, "application/json", "{\"status\": \"OK\"}");
@@ -1386,32 +1379,6 @@ EEPROM:\n\
         server.on(route, HTTP_GET, handleAudioFileRequest);
     }
     
-    // RotorHazard integration status endpoint
-    server.on("/api/rh/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
-        bool en = rhManager && rhManager->isEnabled();
-        bool conn = rhManager && rhManager->isConnected();
-        bool synced = rhManager && rhManager->isClockSynced();
-        uint32_t rttMs = rhManager ? rhManager->getLastSyncRttMs() : 0;
-        doc["enabled"]     = en;
-        doc["connected"]   = conn;
-        doc["clockSynced"] = synced;
-        doc["rttMs"]       = rttMs;
-        doc["host"]        = conf->getRhHostIP();
-        doc["node"]        = conf->getRhNodeIndex();
-        String output;
-        serializeJson(doc, output);
-        request->send(200, "application/json", output);
-    });
-
-    // RotorHazard clock sync trigger endpoint
-    server.on("/api/rh/syncClock", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
-        if (rhManager) {
-            rhManager->requestSync();
-        }
-        sendCorsResponse(request, "{\"status\":\"queued\"}");
-    });
-
     // RotorHazard plugin 2. The plugin reads the slots here, keeps its clock
     // in step through /api/rh/clock (which also keeps the link alive), tunes
     // slots through /api/rh/node and listens for "rhPass" and "rhRssi" on
@@ -1424,6 +1391,7 @@ EEPROM:\n\
         doc["board"] = FPVGATE_BOARD_ID;
         doc["radio"] = conf->getReceiverRadio();
         doc["rssiMax"] = 255;
+        if (c5) doc["rawMax"] = 1023;   // rhRssi "raw" and rhPass "rawPeak"; levels are raw / 4
         doc["minMhz"] = c5 ? C5_MIN_MHZ : 5645;
         doc["maxMhz"] = c5 ? C5_MAX_MHZ : 5945;
         JsonArray nodes = doc["nodes"].to<JsonArray>();

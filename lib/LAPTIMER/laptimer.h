@@ -73,8 +73,8 @@ class LapTimer {
     // Use this to pass an accurate timestamp to RotorHazard.
     uint32_t getLastCrossingRaceTimeMs();
 
-    // Returns the raw millis() value at the moment of the last gate crossing.
-    // Use getLastCrossingAbsoluteMs() + RHManager::clockOffsetMs for an RH-synced timestamp.
+    // Returns the raw millis() value at the moment of the last gate crossing
+    // (Webserver::queueRhPass turns it into the RotorHazard plugin's time).
     uint32_t getLastCrossingAbsoluteMs();
 
     // Returns the raw millis() value when the current race was started (0 if not running).

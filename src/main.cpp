@@ -23,7 +23,6 @@
 #endif
 #include "trackmanager.h"
 #include "webhook.h"
-#include "rotorhazard.h"
 // DISABLED FOR NOW: #include "nodemode.h"
 #include <ElegantOTA.h>
 #include "esp_log.h"
@@ -87,7 +86,6 @@ static RaceHistory raceHistory;
 static RaceRssiRecorder raceRssiRecorder;
 static TrackManager trackManager;
 static WebhookManager webhookManager;
-static RHManager rhManager;
 #ifdef HAS_RGB_LED
 static RgbLed rgbLed;
 RgbLed* g_rgbLed = &rgbLed;
@@ -467,13 +465,10 @@ void setup() {
         }
     }
     
-    // Initialize RotorHazard integration
-    rhManager.init(&config);
-    
 #ifdef HAS_BATTERY_MONITOR
-    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager);
 #else
-    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager);
 #endif
     
     // Register transports with TransportManager
@@ -895,14 +890,10 @@ void loop() {
         }
 #endif
 
-        // Report crossing to RotorHazard. Plugin 2 (linked) gets every pass
-        // as an event, the C5's straight from C5MultiPilot; plugin 1 gets a
-        // POST with raw millis() timestamps for its clock sync.
-        if (ws.rhLinked(millis())) {
-            if (config.getReceiverRadio() != 2) ws.queueRhPass(0, timer.getLastCrossingAbsoluteMs(), 0);
-        } else {
-            rhManager.triggerLap(timer.getLastCrossingAbsoluteMs(), timer.getRaceStartMs());
-        }
+        // Report the crossing to a linked RotorHazard plugin as an event (the
+        // C5's passes go straight from C5MultiPilot).
+        if (ws.rhLinked(millis()) && config.getReceiverRadio() != 2)
+            ws.queueRhPass(0, timer.getLastCrossingAbsoluteMs(), 0);
         
 #ifdef HAS_I2S_AUDIO
         // Announce lap on speaker
@@ -920,9 +911,6 @@ void loop() {
     
     // Process queued webhooks (non-blocking)
     webhookManager.process();
-    
-    // Process RotorHazard connection and queued lap events
-    rhManager.process();
 
 #ifdef FPVGATE_ETH_W5500
     ethnet_update(currentTimeMs);

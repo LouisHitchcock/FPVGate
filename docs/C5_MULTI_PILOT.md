@@ -110,8 +110,9 @@ times while a race runs.
 ## Racing
 
 With C5 selected, the device uses **Multi** mode exclusively. Personal,
-Master, Slave and RotorHazard roles are unavailable; C5 devices cannot be
-daisy-chained. This applies even when only one pilot races.
+Master and Slave roles are unavailable; C5 devices cannot be daisy-chained.
+This applies even when only one pilot races. To race in RotorHazard, use the
+[RotorHazard plugin](ROTORHAZARD_INTEGRATION.md), which gives each pilot a node.
 
 New C5 races record all eight RSSI channels when SD storage is available.
 In **Race History → Edit**, select a pilot before changing crossings.

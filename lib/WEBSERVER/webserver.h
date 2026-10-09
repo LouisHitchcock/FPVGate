@@ -9,7 +9,6 @@
 #include "transport.h"
 #include "trackmanager.h"
 #include "webhook.h"
-#include "rotorhazard.h"
 #include "c5link.h"
 #include "c5multipilot.h"
 
@@ -24,7 +23,7 @@
 
 class Webserver : public TransportInterface {
    public:
-    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr = nullptr);
+    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr);
     void setTransportManager(TransportManager *tm);
     void setC5Receiver(C5Link *link, C5MultiPilot *multiPilot);
     void recheckWifiMode();  // Re-evaluate WiFi mode after config changes
@@ -87,7 +86,6 @@ class Webserver : public TransportInterface {
     RX5808 *rx;
     TrackManager *trackManager;
     WebhookManager *webhooks;
-    RHManager *rhManager;
     TransportManager *transportMgr;
     C5Link *c5Link = nullptr;
     C5MultiPilot *c5MultiPilot = nullptr;
@@ -133,6 +131,7 @@ class Webserver : public TransportInterface {
     RhPass rhPasses_[RH_PASS_QUEUE] = {};
     uint8_t rhPassCount_ = 0;
     portMUX_TYPE rhPassMux_ = portMUX_INITIALIZER_UNLOCKED;
-    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak);
+    // rawPeak: the C5's 0..1023 peak, or -1 for RX5808 passes (no raw scale).
+    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1);
     void sendRhUpdates(uint32_t currentTimeMs);
 };

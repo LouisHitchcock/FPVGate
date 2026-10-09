@@ -426,10 +426,11 @@ typedef struct {
     uint8_t novaEmaAlpha;           // EMA alpha * 100 (5-80, lower = more smoothing)
     uint8_t novaStepMax;            // Step limiter max per sample (5-50)
     uint8_t speakerEnabled;         // I2S speaker output enabled (0=disabled, 1=enabled)
-    // RotorHazard integration
-    uint8_t rhEnabled;               // RH integration enabled (0=disabled, 1=enabled)
-    char rhHostIP[32];               // RH server IP or hostname
-    uint8_t rhNodeIndex;             // Node/seat index on RH (0-7)
+    // Version 1 RotorHazard mode (removed in 1.9; the plugin now connects to
+    // the gate). Unused, kept so the EEPROM layout doesn't change.
+    uint8_t rhEnabled;
+    char rhHostIP[32];
+    uint8_t rhNodeIndex;
     // Pre-race countdown style: 0="Less than 5" (classic TTS + random 1-5s delay),
     // 1="10 Second Countdown" (visible 10s countdown overlay matching LCD).
     uint8_t raceCountdownMode;
@@ -587,14 +588,6 @@ class Config {
     // Speaker output
     uint8_t getSpeakerEnabled();
     void setSpeakerEnabled(uint8_t enabled);
-    
-    // RotorHazard integration
-    uint8_t getRhEnabled();
-    void setRhEnabled(uint8_t enabled);
-    char* getRhHostIP();
-    void setRhHostIP(const char* ip);
-    uint8_t getRhNodeIndex();
-    void setRhNodeIndex(uint8_t index);
 
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     uint8_t getRaceCountdownMode();

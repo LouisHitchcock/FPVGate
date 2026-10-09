@@ -3,6 +3,19 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
+### Added
+- Full-resolution RSSI for the RotorHazard plugin: C5 gates also send RSSI and
+  pass peaks as 0-1023 (`raw`, `rawPeak`, `rawMax` in `/api/rh/info`), shown in
+  RotorHazard when the plugin's **Full-resolution RSSI** option is on.
+
+### Removed
+- The version 1 **RotorHazard** role in Settings > Sync, where the gate posted
+  laps to a RotorHazard server (RH Host IP, node seat, connection status and
+  clock sync), and its `/api/rh/status` and `/api/rh/syncClock` endpoints. The
+  RotorHazard plugin 2 connects to the gate instead and needs no setting on the
+  gate; plugin 2 also accepts laps from gates on older firmware. See
+  [RotorHazard Integration](docs/ROTORHAZARD_INTEGRATION.md).
+
 ## [1.9.0-Multi-Alpha-2] - 2026-10-09
 
 Second Multi-Pilot alpha: USB networking stability, RotorHazard plugin 2

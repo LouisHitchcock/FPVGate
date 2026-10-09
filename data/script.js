@@ -127,7 +127,6 @@ var trackLapLength = 0.0; // Length of one lap (meters)
 // Race sync state
 var timerNumber = 0; // LEGACY: Timer number (no longer used for hostname)
 var raceSyncMode = 0; // 0=personal, 1=master, 2=slave, 3=C5 multi
-var rhEnabled = 0;   // 1=RotorHazard mode enabled
 var syncedTimers = []; // Array of synced timer hostnames (for master mode)
 var masterHostname = ""; // Master hostname for slave mode
 var configLoaded = false; // Flag to prevent saving before initial config load
@@ -280,9 +279,6 @@ async function loadInitialSyncState() {
       // Set sync mode from config
       if (config.raceSyncMode !== undefined) {
         raceSyncMode = config.raceSyncMode;
-      }
-      if (config.rhEnabled !== undefined) {
-        rhEnabled = config.rhEnabled;
       }
       if (config.syncedTimers && Array.isArray(config.syncedTimers)) {
         syncedTimers = config.syncedTimers.slice();
@@ -1621,20 +1617,6 @@ onload = async function (e) {
     });
     toggleNovaFilterSection();
 
-    // Load RotorHazard integration settings
-    if (configData.rhEnabled !== undefined) {
-      rhEnabled = configData.rhEnabled;
-    }
-    const rhHostIPInput = document.getElementById("rhHostIP");
-    const rhNodeIndexSelect = document.getElementById("rhNodeIndex");
-    if (rhHostIPInput && configData.rhHostIP !== undefined) {
-      rhHostIPInput.value = configData.rhHostIP;
-    }
-    if (rhNodeIndexSelect && configData.rhNodeIndex !== undefined) {
-      rhNodeIndexSelect.value = configData.rhNodeIndex;
-    }
-
-    // Update banner now that rhEnabled is known
     updateSlaveModelUI();
 
     // Mark config as loaded so saves from calibration tab work
@@ -1954,7 +1936,6 @@ function toggleNovaFilterSection() {
   var c5Calib = document.getElementById("c5CalibrationSection");
   if (c5Calib) c5Calib.style.display = sel.value === "2" ? "block" : "none";
   if (sel.value === "2") {
-    rhEnabled = 0;
     updateRaceSyncMode(3, true);
     if (typeof initSyncDevicesFromConfig === "function") initSyncDevicesFromConfig();
     if (typeof renderSyncDevicesList === "function") renderSyncDevicesList();
@@ -2505,9 +2486,6 @@ async function saveConfig() {
     syncedTimers: syncedTimers,
     masterHostname: masterHostname,
     speakerEnabled: document.getElementById("speakerEnabled") ? (document.getElementById("speakerEnabled").checked ? 1 : 0) : 1,
-    rhEnabled: (syncDevices.find(d => d.isThisDevice) || {}).role === 'rotorhazard' ? 1 : 0,
-    rhHostIP: document.getElementById("rhHostIP") ? document.getElementById("rhHostIP").value : "",
-    rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
     raceCountdownMode: (function() {
       var el = document.getElementById("raceCountdownMode");
       if (!el) return raceCountdownMode;
@@ -3900,13 +3878,12 @@ function updateRaceSyncMode(mode, skipSave = false) {
   }
 }
 
-// Update race buttons and banner for slave/master/personal/rotorhazard mode
+// Update race buttons and banner for slave/master/personal mode
 function updateSlaveModelUI() {
   const personalBanner = document.getElementById("personalModeRaceBanner");
   const slaveBanner = document.getElementById("slaveModeRaceBanner");
   const masterBanner = document.getElementById("masterModeRaceBanner");
   const multiBanner = document.getElementById("multiModeRaceBanner");
-  const rotorhazardBanner = document.getElementById("rotorhazardModeRaceBanner");
   const startBtn = document.getElementById("startRaceButton");
   const stopBtn = document.getElementById("stopRaceButton");
   const clearBtn = document.getElementById("clearLapsButton");
@@ -3915,7 +3892,6 @@ function updateSlaveModelUI() {
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "none";
-    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
     if (multiBanner) multiBanner.style.display = "block";
     if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = "1"; }
     if (clearBtn) { clearBtn.disabled = false; clearBtn.style.opacity = "1"; }
@@ -3924,7 +3900,6 @@ function updateSlaveModelUI() {
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "block";
     if (masterBanner) masterBanner.style.display = "none";
-    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
     if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = true;
@@ -3939,7 +3914,6 @@ function updateSlaveModelUI() {
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "block";
-    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
     if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = false;
@@ -3950,19 +3924,11 @@ function updateSlaveModelUI() {
       clearBtn.style.opacity = "1";
     }
   } else {
-    // Personal or RotorHazard mode - enable buttons
+    // Personal mode - enable buttons
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "none";
     if (multiBanner) multiBanner.style.display = "none";
-    if (rhEnabled === 1) {
-      // RotorHazard mode - show RH banner instead of personal
-      if (personalBanner) personalBanner.style.display = "none";
-      if (rotorhazardBanner) rotorhazardBanner.style.display = "block";
-    } else {
-      // Personal mode
-      if (personalBanner) personalBanner.style.display = "block";
-      if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
-    }
+    if (personalBanner) personalBanner.style.display = "block";
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.style.opacity = "1";
@@ -4184,8 +4150,6 @@ function initSyncDevicesFromConfig() {
   if (c5ReceiverSelected()) {
     thisDeviceRole = 'multi';
     raceSyncMode = 3;
-  } else if (rhEnabled === 1) {
-    thisDeviceRole = 'rotorhazard';
   } else if (raceSyncMode === 1) {
     thisDeviceRole = 'master';
   } else if (raceSyncMode === 2) {
@@ -4232,19 +4196,12 @@ function mapSyncDevicesToConfig() {
   if (thisDevice) {
     if (thisDevice.role === 'multi') {
       raceSyncMode = 3;
-      rhEnabled = 0;
-    } else if (thisDevice.role === 'rotorhazard') {
-      raceSyncMode = 0;
-      rhEnabled = 1;
     } else if (thisDevice.role === 'master') {
       raceSyncMode = 1;
-      rhEnabled = 0;
     } else if (thisDevice.role === 'slave') {
       raceSyncMode = 2;
-      rhEnabled = 0;
     } else {
       raceSyncMode = 0;
-      rhEnabled = 0;
     }
   }
   
@@ -4300,7 +4257,6 @@ function renderSyncDevicesList() {
             <option value="master" ${device.role === 'master' ? 'selected' : ''} ${(!canBeMaster || c5Locked) ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
             <option value="slave" ${device.role === 'slave' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
             ${isThisDevice ? `<option value="multi" ${device.role === 'multi' ? 'selected' : ''} ${c5Locked ? '' : 'disabled'}>Multi (C5)</option>` : ''}
-            ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>RotorHazard</option>` : ''}
           </select>
           ${!isThisDevice ? `
             <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="Test connection">
@@ -4315,13 +4271,9 @@ function renderSyncDevicesList() {
   
   container.innerHTML = html;
   
-  // Show/hide RH config panel vs add-device panel based on role
   const thisDeviceNode = syncDevices.find(d => d.isThisDevice);
-  const isRHMode = thisDeviceNode && thisDeviceNode.role === 'rotorhazard';
-  const rhPanel = document.getElementById('rhConfigPanel');
   const addPanel = document.getElementById('syncAddDevicePanel');
-  if (rhPanel) rhPanel.style.display = isRHMode ? 'block' : 'none';
-  if (addPanel) addPanel.style.display = (isRHMode || c5ReceiverSelected()) ? 'none' : 'block';
+  if (addPanel) addPanel.style.display = c5ReceiverSelected() ? 'none' : 'block';
 
   // Update slave mode indicator
   const slaveIndicator = document.getElementById('slaveModeIndicator');
@@ -9155,94 +9107,6 @@ function closeCalibrationWizard() {
   });
 }
 
-// RotorHazard Integration Functions
-function toggleRHEnabled(enabled) {
-  const rhContentDiv = document.getElementById("rhContent");
-  if (rhContentDiv) rhContentDiv.style.display = enabled ? "block" : "none";
-
-  fetch("/config", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ rhEnabled: enabled ? 1 : 0 }),
-  })
-    .then((response) => response.json())
-    .then((data) => console.log("RH enabled:", enabled, data))
-    .catch((err) => console.error("Failed to toggle RH enabled:", err));
-}
-
-function refreshRHStatus() {
-  const badge = document.getElementById("rhStatusBadge");
-  const syncStatus = document.getElementById("rhSyncStatus");
-  if (!badge) return;
-  badge.textContent = "Checking...";
-  badge.style.backgroundColor = "var(--bg-secondary)";
-  badge.style.color = "var(--secondary-color)";
-
-  fetch("/api/rh/status")
-    .then((response) => response.json())
-    .then((data) => {
-      if (!data.enabled) {
-        badge.textContent = "Disabled";
-        badge.style.backgroundColor = "rgba(100,100,100,0.2)";
-        badge.style.color = "var(--secondary-color)";
-      } else if (data.connected) {
-        badge.textContent = "Connected";
-        badge.style.backgroundColor = "rgba(74, 222, 128, 0.2)";
-        badge.style.color = "#4ade80";
-      } else {
-        badge.textContent = "Disconnected";
-        badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
-        badge.style.color = "#ff5555";
-      }
-      // Update clock sync status
-      if (syncStatus) {
-        if (data.clockSynced) {
-          syncStatus.textContent = "Synced (RTT: " + data.rttMs + "ms)";
-          syncStatus.style.color = "#4ade80";
-        } else {
-          syncStatus.textContent = "Not synced";
-          syncStatus.style.color = "var(--secondary-color)";
-        }
-      }
-    })
-    .catch((err) => {
-      console.error("Failed to fetch RH status:", err);
-      badge.textContent = "Error";
-      badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
-      badge.style.color = "#ff5555";
-    });
-}
-
-async function syncRHClock() {
-  const btn = document.getElementById("rhSyncBtn");
-  const status = document.getElementById("rhSyncStatus");
-  if (!btn || !status) return;
-
-  btn.disabled = true;
-  status.textContent = "Syncing...";
-  status.style.color = "var(--secondary-color)";
-
-  try {
-    await fetch("/api/rh/syncClock", { method: "POST" });
-    // Give the main loop ~2 s to perform the sync
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const resp = await fetch("/api/rh/status");
-    const data = await resp.json();
-    if (data.clockSynced) {
-      status.textContent = "Synced (RTT: " + data.rttMs + "ms)";
-      status.style.color = "#4ade80";
-    } else {
-      status.textContent = "Sync failed - check RH Host IP";
-      status.style.color = "#ff5555";
-    }
-  } catch (e) {
-    status.textContent = "Error: " + e.message;
-    status.style.color = "#ff5555";
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 // WiFi Settings Functions
 function applyWiFiSettings() {
   const ssid = document.getElementById("ssid")?.value;
@@ -10635,17 +10499,6 @@ function openSettingsModal() {
         if (config.raceSyncMode !== undefined) {
           raceSyncMode = config.raceSyncMode;
           updateRaceSyncMode(config.raceSyncMode, true);  // skipSave=true when loading
-        }
-        if (config.rhEnabled !== undefined) {
-          rhEnabled = config.rhEnabled;
-        }
-        if (config.rhHostIP !== undefined) {
-          const rhHostIPEl = document.getElementById('rhHostIP');
-          if (rhHostIPEl) rhHostIPEl.value = config.rhHostIP;
-        }
-        if (config.rhNodeIndex !== undefined) {
-          const rhNodeIndexEl = document.getElementById('rhNodeIndex');
-          if (rhNodeIndexEl) rhNodeIndexEl.value = config.rhNodeIndex;
         }
         
         if (config.syncedTimers && Array.isArray(config.syncedTimers)) {

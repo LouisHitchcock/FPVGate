@@ -589,11 +589,6 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
 #else
     config["hasI2SAudio"] = 0;
 #endif
-    
-    // RotorHazard integration
-    config["rhEnabled"] = getRhEnabled();
-    config["rhHostIP"] = conf.rhHostIP;
-    config["rhNodeIndex"] = conf.rhNodeIndex;
 
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     config["raceCountdownMode"] = conf.raceCountdownMode;
@@ -1052,28 +1047,6 @@ void Config::fromJson(JsonObject source) {
         uint8_t val = source["speakerEnabled"].as<uint8_t>();
         if (val <= 1) {
             conf.speakerEnabled = val;
-            modified = true;
-        }
-    }
-    // RotorHazard integration
-    if (!source["rhEnabled"].isNull() && source["rhEnabled"] != conf.rhEnabled) {
-        uint8_t val = source["rhEnabled"].as<uint8_t>();
-        if (val <= 1) {
-            conf.rhEnabled = val;
-            modified = true;
-        }
-    }
-    if (!source["rhHostIP"].isNull()) {
-        const char* v = source["rhHostIP"] | "";
-        if (strcmp(v, conf.rhHostIP) != 0) {
-            strlcpy(conf.rhHostIP, v, sizeof(conf.rhHostIP));
-            modified = true;
-        }
-    }
-    if (!source["rhNodeIndex"].isNull() && source["rhNodeIndex"] != conf.rhNodeIndex) {
-        uint8_t val = source["rhNodeIndex"].as<uint8_t>();
-        if (val <= 7) {
-            conf.rhNodeIndex = val;
             modified = true;
         }
     }
@@ -1706,29 +1679,6 @@ void Config::setSpeakerEnabled(uint8_t enabled) {
     }
 }
 
-// RotorHazard integration
-uint8_t Config::getRhEnabled() { return conf.receiverRadio == 2 ? 0 : conf.rhEnabled; }
-void Config::setRhEnabled(uint8_t enabled) {
-    if (enabled <= 1 && conf.rhEnabled != enabled) {
-        conf.rhEnabled = enabled;
-        modified = true;
-    }
-}
-char* Config::getRhHostIP() { return conf.rhHostIP; }
-void Config::setRhHostIP(const char* ip) {
-    if (strcmp(ip, conf.rhHostIP) != 0) {
-        strlcpy(conf.rhHostIP, ip, sizeof(conf.rhHostIP));
-        modified = true;
-    }
-}
-uint8_t Config::getRhNodeIndex() { return conf.rhNodeIndex; }
-void Config::setRhNodeIndex(uint8_t index) {
-    if (index <= 7 && conf.rhNodeIndex != index) {
-        conf.rhNodeIndex = index;
-        modified = true;
-    }
-}
-
 uint8_t Config::getRaceCountdownMode() { return conf.raceCountdownMode <= 1 ? conf.raceCountdownMode : 1; }
 void Config::setRaceCountdownMode(uint8_t mode) {
     if (mode <= 1 && conf.raceCountdownMode != mode) {
@@ -1817,10 +1767,10 @@ void Config::setDefaults(void) {
     conf.novaEmaAlpha = 15;          // alpha=0.15
     conf.novaStepMax = 20;           // max step per sample
     conf.speakerEnabled = 1;         // Speaker enabled by default
-    // RotorHazard integration defaults
-    conf.rhEnabled = 0;              // Disabled by default
-    memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
-    conf.rhNodeIndex = 0;            // Seat 0 by default
+    // Unused version 1 RotorHazard settings, kept zeroed
+    conf.rhEnabled = 0;
+    memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
+    conf.rhNodeIndex = 0;
     // Pre-race countdown defaults: keep the post-merge 10-second visible countdown
     conf.raceCountdownMode = 1;
     // Maximum heat time: 0 = unlimited (no auto-stop), else N * 30 seconds
