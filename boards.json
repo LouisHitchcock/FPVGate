@@ -41,6 +41,11 @@
       "expert_mode": 1
     },
     {
+      "value": "waveshares3eth",
+      "label": "Waveshare ESP32-S3-ETH (16MB, Ethernet)",
+      "expert_mode": 1
+    },
+    {
       "value": "novablade",
       "label": "NovaBlade (16MB Flash)",
       "expert_mode": 1

@@ -36,6 +36,7 @@ BOARDS = [
     ("FPVGateSolo", "8MB", "FPVGate Solo (XIAO ESP32S3, 8MB)"),
     ("SeeedXIAOESP32S3", "8MB", "Seeed Studio XIAO ESP32S3 (8MB)"),
     ("XIAOS3Plus", "16MB", "XIAO ESP32S3 Plus (16MB Flash)"),
+    ("WaveshareS3ETH", "16MB", "Waveshare ESP32-S3-ETH (16MB, Ethernet)"),
 ]
 
 PARTS = ["bootloader", "partitions", "firmware", "littlefs"]

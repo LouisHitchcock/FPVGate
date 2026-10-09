@@ -23,6 +23,7 @@ jobs:
           - FPVGateSolo        # XIAO ESP32S3, 8MB
           - SeeedXIAOESP32S3   # 8MB
           - XIAOS3Plus         # 16MB
+          - WaveshareS3ETH     # 16MB, W5500 Ethernet
     
     steps:
       - name: Checkout code

@@ -235,6 +235,39 @@
 // #define PIN_I2S_LRC  17
 // #define PIN_I2S_DOUT 18
 
+// Waveshare ESP32-S3-ETH (targets/WaveshareS3ETH.ini). The board uses GPIO9-14
+// (W5500), GPIO4-7 (microSD), GPIO33-37 (octal PSRAM) and GPIO19/20 (USB);
+// GPIO0/3/45/46 are strapping pins. Everything below is on the left header.
+#elif defined(WAVESHARE_S3_ETH)
+
+#define PIN_LED -1             // No plain user LED
+#define PIN_RGB_LED 21         // Onboard WS2812 (also header pin 35)
+#define NUM_LEDS 1
+#define PIN_VBAT 2             // Header pin 26 (ADC1_CH1); needs an external divider
+#define VBAT_SCALE 2
+#define VBAT_ADD 2
+#define PIN_RX5808_RSSI 1      // Header pin 25 (ADC1_CH0)
+#define PIN_RX5808_DATA 15     // Header pin 29 (CH1)
+#define PIN_RX5808_SELECT 16   // Header pin 32 (CH2, LE)
+#define PIN_RX5808_CLOCK 17    // Header pin 34 (CH3)
+#define PIN_BUZZER 18          // Header pin 31
+#define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 43      // Header pin 21: S3 TX -> C5 RX (UART0; console is on USB)
+#define C5_UART_RX_PIN 44      // Header pin 22: S3 RX <- C5 TX
+// Onboard microSD (SPI)
+#define PIN_SD_CS 4
+#define PIN_SD_SCK 7
+#define PIN_SD_MOSI 6
+#define PIN_SD_MISO 5
+// Onboard W5500 Ethernet (lib/ETHNET), on its own SPI controller (SPI2/FSPI;
+// the SD card uses HSPI).
+#define PIN_ETH_MOSI 11
+#define PIN_ETH_MISO 12
+#define PIN_ETH_SCLK 13
+#define PIN_ETH_CS 14
+#define PIN_ETH_INT 10
+#define PIN_ETH_RST 9
+
 #endif
 
 // Frequencies the ESP32-C5 RF node accepts (docs/C5_RF_NODE_AGENT_SPEC.md);
@@ -279,6 +312,8 @@
     #define FPVGATE_BOARD_ID "SeeedXIAOESP32S3"
 #elif defined(ESP32S3)
     #define FPVGATE_BOARD_ID "ESP32S3"
+#elif defined(WAVESHARE_S3_ETH)
+    #define FPVGATE_BOARD_ID "WaveshareS3ETH"
 #else
     // An unrecognised board must not silently claim to be something else. An
     // updater seeing this should refuse to offer an image rather than guess.
@@ -291,7 +326,7 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS) || defined(WAVESHARE_S3_ETH)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
