@@ -3,6 +3,28 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
+## [1.9.0-Multi-Alpha-2] - 2026-10-09
+
+Second Multi-Pilot alpha: USB networking stability, RotorHazard plugin 2
+support and the Waveshare ESP32-S3-ETH.
+
+### Fixed
+- USB networking no longer stops under sustained load. Two bugs in the USB
+  controller driver Arduino ships were to blame: a race that stalled the
+  network send pipe, and a local reset on an undocumented status bit that made
+  the gate drop its USB address. The driver is now built from a fixed copy.
+  Tested for 30 minutes at full load with no failure.
+- The web server could hang and the gate reboot when a page load and the LED
+  animation drew the RGB LEDs at the same moment.
+
+### Added
+- RotorHazard plugin 2 support: every pilot's passes, live RSSI, and
+  frequencies and Enter/Exit levels set from RotorHazard (`/api/rh/*`).
+- Waveshare ESP32-S3-ETH board with wired Ethernet (DHCP, or 192.168.8.1
+  without a DHCP server). Not yet tested on hardware.
+- Crash core dumps readable over Wi-Fi (`/api/coredump/summary`), and USB
+  link diagnostics (`/api/usbnet/status`).
+
 ## [1.9.0-Multi-Alpha-1] - 2026-10-07
 
 First public alpha of the ESP32-C5 multi-pilot receiver support.

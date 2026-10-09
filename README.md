@@ -253,17 +253,23 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Build:** v1.9.0-Multi-Alpha-1 (testing pre-release)
+**Current Build:** v1.9.0-Multi-Alpha-2 (testing pre-release)
 
 The stable release is [v1.8.3](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.8.3).
 The Multi-Pilot alpha requires a separate ESP32-C5 receiver. See the
-[release notes](release/v1.9.0-Multi-Alpha-1/RELEASE_NOTES.md) and
+[release notes](release/v1.9.0-Multi-Alpha-2/RELEASE_NOTES.md) and
 [setup guide](docs/C5_MULTI_PILOT.md) before installing it.
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Multi-Pilot alpha testing
 
 ### Recent Updates
+
+**v1.9.0-Multi-Alpha-2 (October 9, 2026)**
+
+- USB networking stays up under load: two USB driver bugs fixed.
+- RotorHazard plugin 2 support: every pilot, live RSSI, frequencies set from RotorHazard.
+- Waveshare ESP32-S3-ETH board with wired Ethernet (untested on hardware).
 
 **v1.9.0-Multi-Alpha-1 (October 7, 2026)**
 

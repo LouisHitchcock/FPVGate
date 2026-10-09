@@ -3,7 +3,7 @@
 
 // FPVGate Firmware Version
 #define FPVGATE_VERSION "1.9.0"
-#define FPVGATE_VERSION_STAGE "Multi-Alpha-1"
+#define FPVGATE_VERSION_STAGE "Multi-Alpha-2"
 
 // Build version string helper
 #define FPVGATE_VERSION_STRING() \

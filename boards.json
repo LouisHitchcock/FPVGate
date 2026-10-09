@@ -42,7 +42,7 @@
     },
     {
       "value": "waveshares3eth",
-      "label": "Waveshare ESP32-S3-ETH (16MB, Ethernet)",
+      "label": "Waveshare ESP32-S3-ETH (16MB, Ethernet) - UNTESTED",
       "expert_mode": 1
     },
     {

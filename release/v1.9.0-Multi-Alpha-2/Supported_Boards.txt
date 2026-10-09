@@ -1,0 +1,15 @@
+FPVGate v1.9.0-Multi-Alpha-2 - Supported Boards
+
+  - ESP32-S3 DevKitC-1 (8MB Flash)
+  - FPVGate AIO V3 (XIAO ESP32S3, 8MB)
+  - FPVGate Solo (XIAO ESP32S3, 8MB)
+  - Seeed Studio XIAO ESP32S3 (8MB)
+  - XIAO ESP32S3 Plus (16MB Flash)
+  - Waveshare ESP32-S3-ETH (16MB, Ethernet) - UNTESTED: never run on the
+    hardware; it may not boot or connect.
+
+Tested for this release: Seeed XIAO ESP32S3 with an ESP32-C5 receiver. The
+other boards share the same code but were not run on hardware.
+
+USB networking (http://192.168.7.1 over USB-C) is available on all of
+these. Windows and Linux only; macOS does not support RNDIS.

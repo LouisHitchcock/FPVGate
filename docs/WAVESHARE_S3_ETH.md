@@ -1,5 +1,9 @@
 # Waveshare ESP32-S3-ETH
 
+> **UNTESTED.** This build compiles but has never been run on the board. It may
+> not boot, Ethernet may not work, and the pin choices below may change. Keep a
+> USB cable handy to reflash, and please report what you find.
+
 The [Waveshare ESP32-S3-ETH](https://www.waveshare.com/wiki/ESP32-S3-ETH) runs
 FPVGate with wired Ethernet as well as Wi-Fi and USB. It has an ESP32-S3R8
 (8MB PSRAM), 16MB flash, a W5500 10/100 Ethernet port, a microSD slot and an
