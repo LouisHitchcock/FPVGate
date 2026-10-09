@@ -19,6 +19,8 @@
 #define WEB_RSSI_SEND_TIMEOUT_MS 200
 #define WEB_C5_FAST_SEND_MS 40       // C5 RSSI debug popout, 25 frames a second
 #define WEB_SSE_KEEPALIVE_MS 15000
+#define RH_LINK_TIMEOUT_MS 15000     // RotorHazard plugin polls the clock every 5 s
+#define WEB_RH_RSSI_SEND_MS 100      // RSSI to the RotorHazard plugin, 10 per second
 
 class Webserver : public TransportInterface {
    public:
@@ -55,6 +57,13 @@ class Webserver : public TransportInterface {
     enum class PendingLcdEvent { None, Countdown, ShowFinish };
     void setPendingLcdEvent(PendingLcdEvent ev);
     PendingLcdEvent consumePendingLcdEvent();
+
+    // RotorHazard plugin 2: the plugin polls /api/rh/clock. While it has done
+    // so recently it owns lap timing, and every pass streams to it as an
+    // "rhPass" event (time in esp_timer microseconds).
+    bool rhLinked(uint32_t nowMs) const { return rhLinkMs_ && (nowMs - rhLinkMs_) < RH_LINK_TIMEOUT_MS; }
+    // RX5808 passes from LapTimer (millis()); C5 passes come from C5MultiPilot.
+    void queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak);
 
     /** True once WiFi (AP or STA) and web/DNS services are up. Used for boot overlay. */
     bool isServicesStarted() const { return servicesStarted; }
@@ -111,4 +120,19 @@ class Webserver : public TransportInterface {
 
     // Pending LCD overlay event (set by HTTP timer handlers, consumed by main loop)
     volatile PendingLcdEvent _pendingLcdEvent = PendingLcdEvent::None;
+
+    // RotorHazard plugin 2 link (see rhLinked()).
+    volatile uint32_t rhLinkMs_ = 0;
+    uint32_t rhRssiSentMs_ = 0;
+    struct RhPass {
+        uint8_t slot;
+        int64_t us;
+        uint8_t peak;
+    };
+    static constexpr uint8_t RH_PASS_QUEUE = 8;
+    RhPass rhPasses_[RH_PASS_QUEUE] = {};
+    uint8_t rhPassCount_ = 0;
+    portMUX_TYPE rhPassMux_ = portMUX_INITIALIZER_UNLOCKED;
+    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak);
+    void sendRhUpdates(uint32_t currentTimeMs);
 };

@@ -11,6 +11,14 @@ struct C5LapEvent {
     bool racer;   // the slot races (its laps count in the race result)
 };
 
+// One pass of one slot through the gate, unfiltered (no Gate 1 or minimum
+// lap rules), for the RotorHazard plugin: RotorHazard applies its own.
+struct C5Pass {
+    uint8_t pilot;
+    uint32_t crossingUs;   // micros() at the pass's RSSI peak
+    uint16_t peak;         // filtered peak, 0..1023
+};
+
 class C5MultiPilot {
 public:
     static constexpr uint8_t MAX_RACE_LAPS = 64;
@@ -25,6 +33,10 @@ public:
     // Above the enter threshold and not yet below exit (only while a race runs).
     bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
     bool takeLap(C5LapEvent &event);
+    // Detect passes outside races too (RotorHazard owns the race and wants
+    // every pass), and queue each one for takePass().
+    void setPassStream(bool on) { passStream_ = on; }
+    bool takePass(C5Pass &pass);
     // Highest filtered value since the last call (0..1023), for the RSSI
     // debug popout: at 25 frames a second a pass's peak would otherwise fall
     // between frames.
@@ -72,6 +84,10 @@ private:
     C5LapEvent pending_[LAP_QUEUE] = {};
     uint8_t pendingCount_ = 0;
     portMUX_TYPE lapMux_ = portMUX_INITIALIZER_UNLOCKED;
+    volatile bool passStream_ = false;
+    static constexpr uint8_t PASS_QUEUE = 16;
+    C5Pass passes_[PASS_QUEUE] = {};
+    uint8_t passCount_ = 0;
 
     void crossing(uint8_t pilot, uint32_t crossingUs);
 };

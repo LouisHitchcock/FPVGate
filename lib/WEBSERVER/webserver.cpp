@@ -1,6 +1,14 @@
 #include "webserver.h"
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <esp_timer.h>
+#include <esp_core_dump.h>
+#ifdef FPVGATE_ETH_W5500
+#include "ethnet.h"
+#endif
+#ifdef FPVGATE_USB_NET
+#include "usbnet.h"
+#endif
 #include "version.h"
 #include "race_rssi_recorder.h"
 #include <ElegantOTA.h>
@@ -39,6 +47,10 @@ static DNSServer dnsServer;
 static IPAddress ipAddress;
 static AsyncWebServer server(80);
 static AsyncEventSource events("/events");
+// The RotorHazard plugin's own stream: passes and RSSI only. On /events it
+// also got the browser's C5 diagnostics, several times its own traffic, which
+// on USB networking (full speed, a few hundred KB/s) crowded out the rest.
+static AsyncEventSource rhEvents("/api/rh/events");
 
 // Hostname is always fpvgate.local (timerNumber-based hostnames removed for iOS compatibility)
 static char wifi_hostname[16] = "fpvgate";
@@ -321,7 +333,74 @@ void Webserver::update(uint32_t currentTimeMs) {
     handleWebUpdate(currentTimeMs);
 }
 
+// Called from loop(): LapTimer's crossings are in millis(), which is
+// esp_timer's microseconds / 1000 cut to 32 bits.
+void Webserver::queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak) {
+    const int64_t now = esp_timer_get_time();
+    const int64_t us = now - (int64_t)(uint32_t)((uint32_t)(now / 1000) - crossingMs) * 1000;
+    portENTER_CRITICAL(&rhPassMux_);
+    if (rhPassCount_ < RH_PASS_QUEUE) rhPasses_[rhPassCount_++] = {slot, us, peak};
+    portEXIT_CRITICAL(&rhPassMux_);
+}
+
+void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"node\":%u,\"us\":%lld,\"peak\":%u}", slot, (long long)us, peak);
+    rhEvents.send(body, "rhPass");
+}
+
+// Passes as they happen and every node's RSSI ten times a second, while the
+// RotorHazard plugin is linked. C5 RSSI is 0..1023; the plugin gets 0..255,
+// the scale of the enter and exit levels.
+void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
+    const bool linked = servicesStarted && rhLinked(currentTimeMs);
+    const bool c5 = c5MultiPilot && conf->getReceiverRadio() == 2;
+    if (c5MultiPilot) c5MultiPilot->setPassStream(linked && c5);
+    if (!linked) {
+        portENTER_CRITICAL(&rhPassMux_);
+        rhPassCount_ = 0;
+        portEXIT_CRITICAL(&rhPassMux_);
+        return;
+    }
+    if (c5) {
+        C5Pass pass;
+        while (c5MultiPilot->takePass(pass)) {
+            const int64_t now = esp_timer_get_time();
+            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4);
+        }
+    }
+    RhPass pass;
+    for (;;) {
+        portENTER_CRITICAL(&rhPassMux_);
+        const bool got = rhPassCount_ > 0;
+        if (got) {
+            pass = rhPasses_[0];
+            for (uint8_t i = 1; i < rhPassCount_; ++i) rhPasses_[i - 1] = rhPasses_[i];
+            --rhPassCount_;
+        }
+        portEXIT_CRITICAL(&rhPassMux_);
+        if (!got) break;
+        sendRhPass(pass.slot, pass.us, pass.peak);
+    }
+    if ((currentTimeMs - rhRssiSentMs_) < WEB_RH_RSSI_SEND_MS) return;
+    rhRssiSentMs_ = currentTimeMs;
+    char body[80];
+    int n = snprintf(body, sizeof(body), "{\"rssi\":[");
+    uint8_t inside = 0;
+    if (c5) {
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", c5MultiPilot->rssi(i) / 4);
+            if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
+        }
+    } else if (timer) {
+        n += snprintf(body + n, sizeof(body) - n, "%u", timer->getRssi());
+    }
+    snprintf(body + n, sizeof(body) - n, "],\"in\":%u}", inside);
+    rhEvents.send(body, "rhRssi");
+}
+
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
+    sendRhUpdates(currentTimeMs);
     static uint32_t lastC5EventMs = 0;
     if (c5Link && c5MultiPilot && servicesStarted && conf->getReceiverRadio() == 2 &&
         (currentTimeMs - lastC5EventMs) >= WEB_C5_SEND_TIMEOUT_MS) {
@@ -920,8 +999,9 @@ EEPROM:\n\
                 DEBUG("[Slave] Manual lap - sending to master: %u ms\n", lapTimeMs);
                 sendLapToMaster(lapTimeMs);
             }
-            // Report lap to RotorHazard with raw millis() timestamps for clock sync
-            if (rhManager && timer) {
+            // Report lap to RotorHazard with raw millis() timestamps for clock
+            // sync. Plugin 2 has its own manual lap button instead.
+            if (rhManager && timer && !rhLinked(millis())) {
                 rhManager->triggerLap(millis(), timer->getRaceStartMs());
             }
         }
@@ -1149,6 +1229,14 @@ EEPROM:\n\
         doc["chipRevision"] = ESP.getChipRevision();
         doc["flashSize"] = ESP.getFlashChipSize();
         doc["sdkVersion"] = ESP.getSdkVersion();
+#ifdef FPVGATE_ETH_W5500
+        JsonObject ethernet = doc["ethernet"].to<JsonObject>();
+        char ethIp[16];
+        ethnet_ip_string(ethIp, sizeof(ethIp));
+        ethernet["link"] = ethnet_link_up();
+        ethernet["ip"] = ethIp;
+        ethernet["fixed"] = ethnet_is_static();
+#endif
 
         // Which application slot is running, and how much room the other one
         // has. An over-the-air application update is written to the inactive
@@ -1324,6 +1412,267 @@ EEPROM:\n\
         sendCorsResponse(request, "{\"status\":\"queued\"}");
     });
 
+    // RotorHazard plugin 2. The plugin reads the slots here, keeps its clock
+    // in step through /api/rh/clock (which also keeps the link alive), tunes
+    // slots through /api/rh/node and listens for "rhPass" and "rhRssi" on
+    // /events. Times are esp_timer microseconds since boot.
+    server.on("/api/rh/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        const bool c5 = conf->getReceiverRadio() == 2;
+        doc["api"] = 2;   // 2: passes and RSSI on /api/rh/events
+        doc["version"] = FPVGATE_VERSION_STRING();
+        doc["board"] = FPVGATE_BOARD_ID;
+        doc["radio"] = conf->getReceiverRadio();
+        doc["rssiMax"] = 255;
+        doc["minMhz"] = c5 ? C5_MIN_MHZ : 5645;
+        doc["maxMhz"] = c5 ? C5_MAX_MHZ : 5945;
+        JsonArray nodes = doc["nodes"].to<JsonArray>();
+        for (uint8_t i = 0; i < (c5 ? C5Link::C5_MAX_PILOTS : 1); ++i) {
+            JsonObject node = nodes.add<JsonObject>();
+            node["frequency"] = c5 ? conf->getC5Frequency(i) : conf->getFrequency();
+            node["enter"] = c5 ? conf->getC5EnterRssi(i) : conf->getEnterRssi();
+            node["exit"] = c5 ? conf->getC5ExitRssi(i) : conf->getExitRssi();
+            node["name"] = c5 ? conf->getC5PilotName(i) : conf->getPilotName();
+        }
+        doc["us"] = esp_timer_get_time();
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+
+#ifdef FPVGATE_USB_NET
+    // USB networking health, readable over Wi-Fi when USB itself has stalled.
+    // Counters only: no lwIP or USB calls, so it can't block on either.
+    // ?repair=0 / ?repair=1 switches the TX-FIFO-empty repair for bench A/B
+    // tests (not saved; it is on after every boot).
+    server.on("/api/usbnet/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("repair")) usbnet_txfe_set_enabled(request->getParam("repair")->value() != "0");
+        usbnet_counters_t c = {};
+        usbnet_counters(&c);
+        usbnet_txfe_status_t t = {};
+        usbnet_txfe_status(&t);
+        JsonDocument doc;
+        doc["uptimeS"] = millis() / 1000;
+        doc["resetReason"] = (int)esp_reset_reason();
+        doc["heap"] = ESP.getFreeHeap();
+        doc["heapMin"] = ESP.getMinFreeHeap();
+        doc["rx"] = c.rx;
+        doc["queued"] = c.queued;
+        doc["sent"] = c.sent;
+        doc["dropped"] = c.dropped;
+        doc["deferLost"] = c.defer_lost;
+        doc["poolFree"] = c.pool_free;
+        doc["poolLow"] = c.pool_low;
+        JsonObject txfe = doc["txfe"].to<JsonObject>();
+        txfe["running"] = t.running;
+        txfe["enabled"] = t.enabled;
+        txfe["detections"] = t.detections;
+        txfe["passes"] = t.passes;
+        txfe["repairs"] = t.total;
+        JsonArray perEp = txfe["perEp"].to<JsonArray>();
+        for (uint8_t i = 0; i < 7; ++i) perEp.add(t.repairs[i]);
+        txfe["lastRepairMs"] = t.last_repair_ms;
+        txfe["emptyMask"] = t.empty_mask;
+        txfe["stuckNow"] = t.stuck_now;
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+
+    // Controller events and registers (hex), for a stalled USB link.
+    server.on("/api/usbnet/regs", HTTP_GET, [](AsyncWebServerRequest *request) {
+        usbnet_usb_snapshot_t s = {};
+        usbnet_usb_snapshot(&s);
+        JsonDocument doc;
+        char hex[12];
+        auto put = [&](JsonVariant v, uint32_t value) {
+            snprintf(hex, sizeof(hex), "%08lx", (unsigned long)value);
+            v.set(hex);
+        };
+        doc["uptimeMs"] = millis();
+        doc["lastEventMs"] = s.last_event_ms;
+        JsonObject isr = doc["isr"].to<JsonObject>();
+        isr["entries"] = s.isr_entries;
+        isr["usbrst"] = s.isr_rst;
+        isr["resetdet"] = s.isr_rstdet;
+        isr["enumdone"] = s.isr_enum;
+        isr["suspend"] = s.isr_susp;
+        isr["earlySuspend"] = s.isr_esusp;
+        isr["wakeup"] = s.isr_wkup;
+        isr["disconnect"] = s.isr_disc;
+        isr["lastUsbrstMs"] = s.last_rst_ms;
+        isr["lastResetdetMs"] = s.last_rstdet_ms;
+        isr["lastEnumdoneMs"] = s.last_enum_ms;
+        isr["unknown15"] = s.unknown15_total;
+        JsonArray u15 = isr["unknown15PerEp"].to<JsonArray>();
+        for (uint8_t i = 0; i < 7; ++i) u15.add(s.unknown15[i]);
+        isr["lastUnknown15Ms"] = s.last_unknown15_ms;
+        JsonObject half = doc["halfReset"].to<JsonObject>();
+        half["collapses"] = s.collapses;
+        half["restores"] = s.restores;
+        half["lastMs"] = s.last_collapse_ms;
+        JsonArray events = doc["events"].to<JsonArray>();
+        for (uint8_t i = 0; i < 10; ++i) events.add(s.events[i]);
+        JsonArray xin = doc["xferIn"].to<JsonArray>();
+        JsonArray xout = doc["xferOut"].to<JsonArray>();
+        for (uint8_t i = 0; i < 8; ++i) {
+            xin.add(s.xfer_in[i]);
+            xout.add(s.xfer_out[i]);
+        }
+        // A missing key isn't created by converting doc["key"] to a
+        // JsonVariant, so assign these by name.
+        auto putKey = [&](const char *key, uint32_t value) {
+            snprintf(hex, sizeof(hex), "%08lx", (unsigned long)value);
+            doc[key] = hex;   // char[]: copied
+        };
+        putKey("dcfg", s.dcfg);
+        putKey("collapseDcfg", s.collapse_dcfg);
+        putKey("collapseGintsts", s.collapse_gintsts);
+        putKey("gintsts", s.gintsts);
+        putKey("gintmsk", s.gintmsk);
+        putKey("gotgctl", s.gotgctl);
+        putKey("gahbcfg", s.gahbcfg);
+        putKey("dctl", s.dctl);
+        putKey("dsts", s.dsts);
+        putKey("daint", s.daint);
+        putKey("daintmsk", s.daintmsk);
+        putKey("emptyMask", s.empty_mask);
+        putKey("pcgctrl", s.pcgctrl);
+        JsonArray in = doc["in"].to<JsonArray>();
+        JsonArray out = doc["out"].to<JsonArray>();
+        for (uint8_t n = 0; n < 7; ++n) {
+            JsonArray e = in.add<JsonArray>();
+            put(e.add<JsonVariant>(), s.in_ctl[n]);
+            put(e.add<JsonVariant>(), s.in_int[n]);
+            put(e.add<JsonVariant>(), s.in_siz[n]);
+            put(e.add<JsonVariant>(), s.in_fifo[n]);
+            JsonArray o = out.add<JsonArray>();
+            put(o.add<JsonVariant>(), s.out_ctl[n]);
+            put(o.add<JsonVariant>(), s.out_int[n]);
+            put(o.add<JsonVariant>(), s.out_siz[n]);
+        }
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+#endif
+
+    // The core dump left in flash by the last crash or watchdog reset, so a
+    // crash can be diagnosed over Wi-Fi without a serial bootloader session.
+    // Decode backtrace addresses with addr2line against the ELF of the
+    // build that crashed (app_elf_sha256 says which).
+    server.on("/api/coredump/summary", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        size_t addr = 0, size = 0;
+        esp_err_t found = esp_core_dump_image_get(&addr, &size);
+        doc["present"] = found == ESP_OK;
+        doc["resetReason"] = (int)esp_reset_reason();
+        if (found == ESP_OK) {
+            doc["size"] = size;
+            esp_core_dump_summary_t *s = (esp_core_dump_summary_t *)calloc(1, sizeof(esp_core_dump_summary_t));
+            esp_err_t err = s ? esp_core_dump_get_summary(s) : ESP_ERR_NO_MEM;
+            doc["summary"] = esp_err_to_name(err);
+            if (err == ESP_OK) {
+                char hex[12];
+                doc["task"] = s->exc_task;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_pc);
+                doc["pc"] = hex;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->ex_info.exc_cause);
+                doc["cause"] = hex;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->ex_info.exc_vaddr);
+                doc["vaddr"] = hex;
+                doc["btCorrupted"] = s->exc_bt_info.corrupted;
+                JsonArray bt = doc["backtrace"].to<JsonArray>();
+                for (uint32_t i = 0; i < s->exc_bt_info.depth && i < 16; ++i) {
+                    snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_bt_info.bt[i]);
+                    bt.add(hex);
+                }
+                char sha[APP_ELF_SHA256_SZ + 1] = {};
+                memcpy(sha, s->app_elf_sha256, APP_ELF_SHA256_SZ);
+                doc["elfSha256"] = sha;
+            }
+            free(s);
+        }
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+
+    server.on("/api/coredump", HTTP_GET, [](AsyncWebServerRequest *request) {
+        size_t addr = 0, size = 0;
+        if (esp_core_dump_image_get(&addr, &size) != ESP_OK) {
+            request->send(404, "application/json", "{\"error\":\"no core dump\"}");
+            return;
+        }
+        const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+        if (!part || addr < part->address) {
+            request->send(500, "application/json", "{\"error\":\"no core dump partition\"}");
+            return;
+        }
+        const size_t offset = addr - part->address;
+        AsyncWebServerResponse *response = request->beginResponse("application/octet-stream", size,
+            [part, offset, size](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                size_t n = size - index < maxLen ? size - index : maxLen;
+                if (n && esp_partition_read(part, offset + index, buffer, n) != ESP_OK) return 0;
+                return n;
+            });
+        response->addHeader("Content-Disposition", "attachment; filename=coredump.elf");
+        request->send(response);
+    });
+
+    server.on("/api/coredump/erase", HTTP_POST, [](AsyncWebServerRequest *request) {
+        esp_err_t err = esp_core_dump_image_erase();
+        char body[64];
+        snprintf(body, sizeof(body), "{\"erased\":\"%s\"}", esp_err_to_name(err));
+        request->send(200, "application/json", body);
+    });
+
+    server.on("/api/rh/clock", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        rhLinkMs_ = millis() | 1;   // 0 means never linked
+        char body[48];
+        snprintf(body, sizeof(body), "{\"us\":%lld}", (long long)esp_timer_get_time());
+        request->send(200, "application/json", body);
+    });
+
+    // {"node": n, "frequency": MHz (0 = off), "enter": 0..255, "exit": 0..255};
+    // any field may be left out. Replies with the slot as stored, so the
+    // plugin sees a frequency the receiver can't tune come back as 0.
+    AsyncCallbackJsonWebHandler *rhNodeHandler = new AsyncCallbackJsonWebHandler("/api/rh/node", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject obj = json.as<JsonObject>();
+        const bool c5 = conf->getReceiverRadio() == 2;
+        const uint8_t node = obj["node"] | 0;
+        if (node >= (c5 ? C5Link::C5_MAX_PILOTS : 1)) {
+            request->send(400, "application/json", "{\"error\":\"no such node\"}");
+            return;
+        }
+        uint16_t frequency;
+        uint8_t enter, exit;
+        if (c5) {
+            frequency = obj["frequency"] | conf->getC5Frequency(node);
+            enter = obj["enter"] | conf->getC5EnterRssi(node);
+            exit = obj["exit"] | conf->getC5ExitRssi(node);
+            conf->setC5Profile(node, frequency, enter, exit);
+            uint8_t count = 0;
+            for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+                if (conf->getC5Frequency(i)) count = i + 1;
+            conf->setC5PilotCount(count);
+            frequency = conf->getC5Frequency(node);
+            enter = conf->getC5EnterRssi(node);
+            exit = conf->getC5ExitRssi(node);
+        } else {
+            if (!obj["frequency"].isNull() && obj["frequency"].as<uint16_t>()) conf->setFrequency(obj["frequency"].as<uint16_t>());
+            if (!obj["enter"].isNull()) conf->setEnterRssi(obj["enter"].as<uint8_t>());
+            if (!obj["exit"].isNull()) conf->setExitRssi(obj["exit"].as<uint8_t>());
+            frequency = conf->getFrequency();
+            enter = conf->getEnterRssi();
+            exit = conf->getExitRssi();
+        }
+        char body[96];
+        snprintf(body, sizeof(body), "{\"node\":%u,\"frequency\":%u,\"enter\":%u,\"exit\":%u}", node, frequency, enter, exit);
+        request->send(200, "application/json", body);
+    });
+    server.addHandler(rhNodeHandler);
+
     // WiFi status endpoint (register before serveStatic to prevent VFS errors)
     server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
@@ -1383,6 +1732,7 @@ EEPROM:\n\
     server.onNotFound(handleNotFound);
 
     server.addHandler(&events);
+    server.addHandler(&rhEvents);
     server.addHandler(configJsonHandler);
 
     // Race history endpoints

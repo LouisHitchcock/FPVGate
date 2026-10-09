@@ -54,7 +54,7 @@ void C5MultiPilot::update(uint32_t nowMs) {
             portENTER_CRITICAL(&lapMux_);
             if (filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
             portEXIT_CRITICAL(&lapMux_);
-            if (!running_) continue;
+            if (!running_ && !passStream_) continue;
             const uint16_t f = filtered_[i];
             if (!inside_[i]) {
                 if (f >= enterHi) {
@@ -70,7 +70,12 @@ void C5MultiPilot::update(uint32_t nowMs) {
             }
             if (f > exitHi) continue;
             inside_[i] = false;
-            crossing(i, peakUs_[i]);
+            if (passStream_) {
+                portENTER_CRITICAL(&lapMux_);
+                if (passCount_ < PASS_QUEUE) passes_[passCount_++] = {i, peakUs_[i], peak_[i]};
+                portEXIT_CRITICAL(&lapMux_);
+            }
+            if (running_) crossing(i, peakUs_[i]);
         }
     }
 }
@@ -112,6 +117,19 @@ bool C5MultiPilot::takeLap(C5LapEvent &event) {
         event = pending_[0];
         for (uint8_t i = 1; i < pendingCount_; ++i) pending_[i - 1] = pending_[i];
         --pendingCount_;
+        got = true;
+    }
+    portEXIT_CRITICAL(&lapMux_);
+    return got;
+}
+
+bool C5MultiPilot::takePass(C5Pass &pass) {
+    bool got = false;
+    portENTER_CRITICAL(&lapMux_);
+    if (passCount_) {
+        pass = passes_[0];
+        for (uint8_t i = 1; i < passCount_; ++i) passes_[i - 1] = passes_[i];
+        --passCount_;
         got = true;
     }
     portEXIT_CRITICAL(&lapMux_);

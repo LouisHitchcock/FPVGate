@@ -18,6 +18,9 @@
 #include "usbnet.h"
 #include "usbnet_boot.h"
 #endif
+#ifdef FPVGATE_ETH_W5500
+#include "ethnet.h"
+#endif
 #include "trackmanager.h"
 #include "webhook.h"
 #include "rotorhazard.h"
@@ -487,6 +490,9 @@ void setup() {
     usbnet_boot_mark(USBNET_BOOT_USBNET_RETURNED);
     DEBUG("USB networking: %s (http://192.168.7.1/)\n", esp_err_to_name(usbNetResult));
 #endif
+#ifdef FPVGATE_ETH_W5500
+    DEBUG("Ethernet: %s (DHCP, else http://192.168.8.1/)\n", esp_err_to_name(ethnet_begin()));
+#endif
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Initialize LCD band/channel display from config
@@ -889,8 +895,14 @@ void loop() {
         }
 #endif
 
-        // Report crossing to RotorHazard with raw millis() timestamps for clock sync
-        rhManager.triggerLap(timer.getLastCrossingAbsoluteMs(), timer.getRaceStartMs());
+        // Report crossing to RotorHazard. Plugin 2 (linked) gets every pass
+        // as an event, the C5's straight from C5MultiPilot; plugin 1 gets a
+        // POST with raw millis() timestamps for its clock sync.
+        if (ws.rhLinked(millis())) {
+            if (config.getReceiverRadio() != 2) ws.queueRhPass(0, timer.getLastCrossingAbsoluteMs(), 0);
+        } else {
+            rhManager.triggerLap(timer.getLastCrossingAbsoluteMs(), timer.getRaceStartMs());
+        }
         
 #ifdef HAS_I2S_AUDIO
         // Announce lap on speaker
@@ -911,7 +923,11 @@ void loop() {
     
     // Process RotorHazard connection and queued lap events
     rhManager.process();
-    
+
+#ifdef FPVGATE_ETH_W5500
+    ethnet_update(currentTimeMs);
+#endif
+
     // WiFi mode - original behavior (RotorHazard mode disabled)
     ElegantOTA.loop();
     
