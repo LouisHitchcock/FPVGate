@@ -2,7 +2,7 @@
     "name": "AUDIO",
     "version": "1.0.0",
     "dependencies": {
-        "earlephilhower/ESP8266Audio": "^1.9.7",
+        "earlephilhower/ESP8266Audio": "1.9.9",
         "bblanchon/ArduinoJson": "7.2.0"
     }
 }
