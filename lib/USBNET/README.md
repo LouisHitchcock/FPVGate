@@ -45,6 +45,16 @@ Arduino framework instead of a sibling header. It also contains temporary
 RX rearm/completion counters and an endpoint-state diagnostic accessor. The framework supplies all
 other TinyUSB headers and the USB core; do not compile a second USB core.
 
+`tinyusb/dcd_esp32sx.c` is the ESP32-S2/S3 controller driver exactly as
+Arduino-ESP32 2.0.17 builds it (MIT): espressif/esp32-arduino-lib-builder
+`release/v4.4`, `components/arduino_tinyusb/src/dcd_esp32sx.c`, upstream
+commit 3eb9cb0, SHA-256 of the unmodified file
+`e76f7ff75e0bb9d2a4dce47650cf5d5293f0436abb134c53bd8293d98b06630c`. It is not
+upstream TinyUSB's file. Three fixes are marked `FPVGate:` (DIEPEMPMSK
+spinlock, no local reset on DIEPINT bit 15, GINTSTS cleared write-1 only); see
+`docs/USB_NETWORKING.md`, "Root causes found". It replaces the archive's copy
+at link time; `usbnet_txfe.c` references it so the linker takes it.
+
 `idf/dhcpserver.inc` is a vendored copy of
 `components/lwip/apps/dhcpserver/dhcpserver.c` from ESP-IDF v4.4.7 (Apache-2.0):
 https://github.com/espressif/esp-idf/blob/v4.4.7/components/lwip/apps/dhcpserver/dhcpserver.c

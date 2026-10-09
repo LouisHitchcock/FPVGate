@@ -13,6 +13,78 @@ Status: **the full FPVGate web UI now loads over USB-C on the AIO target**,
 but the firmware resets after sustained load. See section 5 for the exact
 state, what is proven, and what is still open.
 
+### Root causes found - 2026-10-09 (Seeed XIAO ESP32-S3, firmware 1.9.0 alpha)
+
+This supersedes the open questions below. The link dies from two separate
+bugs in the USB controller driver that Arduino-ESP32 2.0.17 links. That
+driver is Espressif's build of TinyUSB's `dcd_esp32sx.c`, precompiled in
+`libarduino_tinyusb.a`, and it is **not** identical to upstream 0.16.0. Both
+bugs were reproduced on the bench with the repairs switched off, and read
+over Wi-Fi from `GET /api/usbnet/regs`, which keeps working when USB is dead.
+
+**1. Lost TX-FIFO-empty interrupt bit (network send stalls).** An IN
+endpoint is refilled from the "TX FIFO empty" interrupt, enabled per endpoint
+in one shared register, DIEPEMPMSK. `dcd_edpt_xfer()` sets its bit with
+`|=` from task context (including CDC serial writes from whichever task
+prints); the ISR clears another endpoint's bit with `&= ~`. Neither is
+atomic, so the set can be lost. Captured state: IN EP1 enabled, one 64-byte
+packet left (`DIEPTSIZ 00080040`), FIFO completely empty, DIEPEMPMSK 0. That
+endpoint never moves again; serial on EP4 carries on. This is the TX stall
+recorded in every earlier run (`busy=1`, submission made, FIFO free).
+
+**2. "Unknown Condition" local reset (everything dies).** Disassembly of the
+linked driver shows a branch upstream does not have: in the IN endpoint
+handler, if bit 15 of DIEPINT is set (undocumented on the S3), it logs
+`TUSB:DCD: Unknown Condition` to UART0 and calls `bus_reset()`. That is the
+driver's *local* reset: it clears the device address, cuts DAINTMSK to
+endpoint 0 and NAKs every OUT endpoint. The host has not reset anything and
+keeps addressing the old number, which the gate no longer answers, so
+networking and serial die together until power is cycled. Captured state:
+DCFG address 0, DAINTMSK `00010001`, OUT EP1 NAKing, no USBRST or RESETDET
+interrupt (counted by a shim, see below), bus frame counter still running.
+
+Also found, not yet seen to cause a failure: the ISR ends with
+`USB0.gintsts |= <bits>`. GINTSTS is write-1-to-clear, so the read-modify-write
+clears every pending flag, including a reset or end of reset raised while the
+handler ran.
+
+**Fix: our own copy of the driver.** `lib/USBNET/tinyusb/dcd_esp32sx.c` is
+the exact lib-builder source (espressif/esp32-arduino-lib-builder
+`release/v4.4`, `components/arduino_tinyusb/src/dcd_esp32sx.c`), which defines
+every `dcd_*` function, so the linker takes it from `libUSBNET.a` and never
+pulls the archive's copy (check: the map lists `libUSBNET.a(dcd_esp32sx.c.o)`
+and the image no longer contains "Unknown Condition"). Three changes, marked
+`FPVGate:` in the file: DIEPEMPMSK updates take a spinlock in both task and
+ISR; DIEPINT bit 15 is cleared without calling `bus_reset()`; the final
+GINTSTS write clears only the ignored flags that were actually pending.
+
+A clean-up note on the evidence: clearing bit 15 from a shim in front of the
+original driver did **not** stop its reset (run B1: bit 15 counted and the
+address lost in the same millisecond), so the bit is re-raised or re-read.
+Only changing the driver removes the reset.
+
+**Safety nets** (`lib/USBNET/usbnet_txfe.c`), kept as backups and telemetry:
+
+- A task pinned to the USB interrupt's core checks every 2 ms for an IN
+  endpoint that is enabled, has bytes left, has an empty FIFO and no
+  FIFO-empty bit, on two passes in a row, and sets the bit again. The ISR
+  refills from DIEPTSIZ as usual, so nothing is sent twice.
+- The driver's interrupt is registered through `esp_intr_alloc`, which is
+  wrapped (`-Wl,--wrap=esp_intr_alloc`) to put a shim in front of it. The
+  shim clears DIEPINT bit 15 before the driver sees it, so it never resets
+  itself, and counts global reset flags at each entry.
+- If the address is still lost, a watcher restores the address, DAINTMSK
+  and the OUT endpoints' NAK, but only when the shim saw no USBRST or
+  RESETDET and no end of reset followed within 50 ms, which a real host
+  reset always produces. (SETUP requests are not used as evidence: one in
+  flight can land after the collapse.)
+- `-Wl,--wrap=dcd_event_handler` counts controller events for diagnosis.
+
+`GET /api/usbnet/status?repair=0|1` switches the repairs at runtime (on after
+every boot) for A/B tests. Bench proof of repair 1: with USB networking
+already stalled by bug 1, switching the repair on brought the link back with
+no replug (ping 0% loss, HTTP 7 ms). Long-soak results: see below.
+
 ### Verification update ? 2026-09-11, follow-up session
 
 This update supersedes the causal conclusions in the earlier handoff below.

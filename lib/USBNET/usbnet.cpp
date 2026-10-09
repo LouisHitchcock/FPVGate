@@ -300,12 +300,27 @@ void usbnet_print_status(void) {
     Serial.printf("[USB IN] busy=%u stalled=%u submit=%u complete=%u ctl=%08x int=%08x size=%08x fifo=%u config=%08x\n",
         inBusy.load(), inStalled.load(), inSubmitLen.load(), inCompleteLen.load(),
         inCtl.load(), inInt.load(), inSize.load(), inFifo.load(), inFifoConfig.load());
+    usbnet_txfe_status_t txfe = {};
+    usbnet_txfe_status(&txfe);
+    Serial.printf("[USB TXFE] repairs=%u (ep1=%u ep3=%u ep4=%u) last=%ums mask=%02x stuck=%02x passes=%u\n",
+        txfe.total, txfe.repairs[1], txfe.repairs[3], txfe.repairs[4], txfe.last_repair_ms,
+        txfe.empty_mask, txfe.stuck_now, txfe.passes);
     // Reset reason is repeated every cycle rather than only in the boot
     // banner, because the banner is easy to miss on a board that resets
     // under load. 4=PANIC 5=INT_WDT 6=TASK_WDT 7=WDT 9=BROWNOUT.
     Serial.printf("[USB SYS] reset_reason=%d uptime=%lus heap=%u min=%u\n",
         (int)esp_reset_reason(), (unsigned long)(millis() / 1000),
         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+}
+
+void usbnet_counters(usbnet_counters_t *counters) {
+    counters->rx = rxPackets.load();
+    counters->queued = txQueued.load();
+    counters->sent = txSent.load();
+    counters->dropped = txDropped.load();
+    counters->defer_lost = txDeferLost.load();
+    counters->pool_low = txPoolLow.load();
+    counters->pool_free = txFreePackets ? static_cast<uint32_t>(uxQueueMessagesWaiting(txFreePackets)) : 0;
 }
 
 static esp_err_t startDhcp(void *arg) {
@@ -368,6 +383,7 @@ esp_err_t usbnet_begin(void) {
         return ESP_ERR_NO_MEM;
     }
     netif = created;
+    usbnet_txfe_start();
     esp_netif_action_start(netif, nullptr, 0, nullptr);
     if (!esp_netif_is_netif_up(netif)) return ESP_FAIL;
     startupResult = esp_netif_tcpip_exec(startDhcp, esp_netif_get_netif_impl(netif));
