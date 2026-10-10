@@ -19,7 +19,7 @@
 #define WEB_C5_FAST_SEND_MS 40       // C5 RSSI debug popout, 25 frames a second
 #define WEB_SSE_KEEPALIVE_MS 15000
 #define RH_LINK_TIMEOUT_MS 15000     // RotorHazard plugin polls the clock every 5 s
-#define WEB_RH_RSSI_SEND_MS 100      // RSSI to the RotorHazard plugin, 10 per second
+#define WEB_RH_RSSI_SEND_MS 50       // RSSI to the RotorHazard plugin, 20 per second
 
 class Webserver : public TransportInterface {
    public:

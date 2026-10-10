@@ -4,8 +4,11 @@
 // the web server listens on every interface.
 //
 // Addressing: DHCP from the network; if no lease arrives within
-// ETHNET_DHCP_TIMEOUT_MS (a cable straight to a laptop), a fixed 192.168.8.1/24,
-// distinct from Wi-Fi AP 192.168.4.1 and USB 192.168.7.1.
+// ETHNET_DHCP_TIMEOUT_MS of the link coming up (a cable straight to a laptop),
+// a fixed 192.168.8.1/24, distinct from Wi-Fi AP 192.168.4.1 and USB
+// 192.168.7.1. Unplugging and replugging asks for DHCP again. The wait allows
+// for switches that hold a new port for ~30 s (spanning tree) before passing
+// traffic.
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
@@ -13,7 +16,7 @@
 extern "C" {
 #endif
 
-#define ETHNET_DHCP_TIMEOUT_MS 15000
+#define ETHNET_DHCP_TIMEOUT_MS 45000
 
 esp_err_t ethnet_begin(void);
 // Call from loop(): applies the fixed-address fallback.

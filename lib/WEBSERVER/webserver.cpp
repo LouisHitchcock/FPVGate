@@ -350,7 +350,7 @@ void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak) 
     rhEvents.send(body, "rhPass");
 }
 
-// Passes as they happen and every node's RSSI ten times a second, while the
+// Passes as they happen and every node's RSSI 20 times a second, while the
 // RotorHazard plugin is linked. C5 RSSI is 0..1023; "rssi" and "peak" are
 // 0..255, the scale of the enter and exit levels, and "raw" and "rawPeak"
 // carry the full 0..1023 for plugins that show it (rawMax in /api/rh/info).
@@ -390,9 +390,11 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     int n = snprintf(body, sizeof(body), "{\"rssi\":[");
     uint8_t inside = 0;
     if (c5) {
+        // The highest value since the last message, so RotorHazard's RSSI
+        // history (and its Marshal page) has every pass's peak.
         uint16_t raw[C5Link::C5_MAX_PILOTS];
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
-            raw[i] = c5MultiPilot->rssi(i);
+            raw[i] = c5MultiPilot->takeRhPeak(i);
             n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i] / 4);
             if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
         }

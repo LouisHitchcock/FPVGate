@@ -12,7 +12,7 @@ The [FPVGate RotorHazard plugin](https://github.com/LouisHitchcock/fpvgate-rh-pl
 
 - **One node** for an RX5808 gate, **eight** for an ESP32-C5 multi-pilot gate
 - **RotorHazard sets** each node's frequency and EnterAt/ExitAt levels; the gate's own settings are copied into RotorHazard the first time it connects
-- **Live RSSI** for every node in RotorHazard's Sensor Tuning, ten times a second
+- **Live RSSI** for every node in RotorHazard's Sensor Tuning and Marshal page, 20 times a second, each reading the highest since the last so no pass's peak is missed
 - **Every pass** is timed by the gate at its RSSI peak and sent with the gate's own timestamp, so network delay doesn't affect lap times
 - **Race mirroring** (optional): the gate's own race starts, stops and clears with RotorHazard's, for its display, LEDs and speaker
 
@@ -85,9 +85,11 @@ The plugin talks to the gate over HTTP:
 | `GET /api/rh/info` | Firmware, board, frequency range, and every node's frequency and EnterAt/ExitAt levels |
 | `GET /api/rh/clock` | The gate's clock in microseconds since boot. Polled every 5 s; this also keeps the link alive |
 | `POST /api/rh/node` | `{"node", "frequency", "enter", "exit"}`: tune one node. Replies with the node as stored |
-| `GET /api/rh/events` | Server-sent events (needs `Accept: text/event-stream`): `rhPass` for each pass, `rhRssi` ten times a second |
+| `GET /api/rh/events` | Server-sent events (needs `Accept: text/event-stream`): `rhPass` for each pass, `rhRssi` 20 times a second |
 
 While the plugin has polled the clock in the last 15 seconds, the gate is linked: it reports every pass to RotorHazard, including outside the gate's own races, and RotorHazard applies its own race rules.
+
+A pass starts when a node's RSSI rises above EnterAt and ends once it has stayed below ExitAt for 300 ms. A dip below ExitAt that recovers above EnterAt within that time (multipath as a quad flies through) stays part of the same pass, so one fly-through is reported once, timed at its highest peak.
 
 ### Clock synchronisation
 
@@ -112,7 +114,7 @@ Levels are 0-255 on every gate. A C5 gate measures RSSI as 0-1023 and compares i
 **Nodes show but RSSI stays at 0**
 - From the RotorHazard machine, run
   `curl -N -H "Accept: text/event-stream" http://<gate>/api/rh/events`
-  (`curl.exe` on Windows). `rhRssi` lines should scroll ten times a second. A browser address bar gets a 404 here, which is expected.
+  (`curl.exe` on Windows). `rhRssi` lines should scroll 20 times a second. A browser address bar gets a 404 here, which is expected.
 
 **Laps not appearing**
 - Laps are only recorded while RotorHazard is racing.

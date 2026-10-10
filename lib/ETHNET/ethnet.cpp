@@ -25,15 +25,22 @@ static volatile bool isStatic;
 static volatile unsigned long linkUpMs;
 static esp_ip4_addr_t address;
 
+// A new link may be a different network: drop the old address and ask for
+// one again, even after falling back to the fixed one.
 static void onEthEvent(void *, esp_event_base_t, int32_t id, void *) {
     switch (id) {
         case ETHERNET_EVENT_CONNECTED:
             linkUp = true;
             linkUpMs = millis();
+            if (isStatic && netif) {
+                isStatic = false;
+                esp_netif_dhcpc_start(netif);
+            }
             DEBUG("[ETH] Link up\n");
             break;
         case ETHERNET_EVENT_DISCONNECTED:
             linkUp = false;
+            hasIp = false;
             DEBUG("[ETH] Link down\n");
             break;
         default:

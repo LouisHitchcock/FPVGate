@@ -40,10 +40,12 @@ GPIO33 to GPIO37 (used by the PSRAM).
 Plug in a cable and the gate asks the network for an address (DHCP). Find it
 in your router's client list, or on the device's System page.
 
-If no DHCP server answers within 15 seconds, for example with a cable straight
+If no DHCP server answers within 45 seconds, for example with a cable straight
 to a laptop, the gate uses the fixed address **192.168.8.1**. Give the laptop's
 Ethernet adapter a fixed address on the same network, such as 192.168.8.2 with
-netmask 255.255.255.0, then open `http://192.168.8.1`.
+netmask 255.255.255.0, then open `http://192.168.8.1`. Unplugging and
+replugging the cable makes the gate ask for an address again, so moving it to
+another network works without a restart.
 
 Wi-Fi (192.168.4.1 in access-point mode) and USB networking (192.168.7.1) keep
 working alongside Ethernet. For RotorHazard, enter the gate's Ethernet address
