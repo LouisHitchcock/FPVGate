@@ -40,6 +40,16 @@ void C5MultiPilot::update(uint32_t nowMs) {
     if (!config_ || !link_) return;
     // The race roster is frozen by start(), including after stop for history.
 
+    portENTER_CRITICAL(&lapMux_);
+    uint8_t manual = manualMask_;
+    manualMask_ = 0;
+    portEXIT_CRITICAL(&lapMux_);
+    if (manual && running_) {
+        const uint32_t nowUs = micros();
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            if ((manual >> i) & 1) crossing(i, nowUs, true);
+    }
+
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         if (!config_->getC5Frequency(i)) {   // slot switched off
             filtered_[i] = 0;
@@ -99,8 +109,8 @@ void C5MultiPilot::endPass(uint8_t pilot) {
 
 // LapTimer's rules for every slot: the first pass after the start is Gate 1
 // (timed from the start), then pass to pass, ignoring passes inside the
-// minimum lap time.
-void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs) {
+// minimum lap time (except a manual lap: the race director meant it).
+void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs, bool manual) {
     const bool racer = (racerMask_ >> pilot) & 1;
     if (racer && racerCount_ == 1) {
         portENTER_CRITICAL(&lapMux_);
@@ -114,7 +124,7 @@ void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs) {
         lapUs = crossingUs - raceStartUs_;
     } else {
         lapUs = crossingUs - lastCrossingUs_[pilot];
-        if (lapUs <= config_->getMinLapMs() * 1000u) return;
+        if (!manual && lapUs <= config_->getMinLapMs() * 1000u) return;
     }
     lastCrossingUs_[pilot] = crossingUs;
     const C5LapEvent lap = {pilot, n, (lapUs + 500u) / 1000u, racer};
@@ -198,4 +208,12 @@ uint8_t C5MultiPilot::copyLaps(uint8_t pilot, uint32_t *out, uint8_t max) {
     memcpy(out, laps_[pilot], n * sizeof(uint32_t));
     portEXIT_CRITICAL(&lapMux_);
     return n;
+}
+
+bool C5MultiPilot::requestManualLap(uint8_t pilot) {
+    if (pilot >= C5Link::C5_MAX_PILOTS || !running_ || !((racerMask_ >> pilot) & 1)) return false;
+    portENTER_CRITICAL(&lapMux_);
+    manualMask_ |= (uint8_t)(1u << pilot);
+    portEXIT_CRITICAL(&lapMux_);
+    return true;
 }

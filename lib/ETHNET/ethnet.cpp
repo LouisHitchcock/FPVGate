@@ -11,7 +11,12 @@
 #include "esp_event.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_rom_sys.h"
 #include "lwip/ip4_addr.h"
+
+// The project's copy of ESP-IDF's W5500 MAC driver (w5500_mac.c).
+extern "C" esp_eth_mac_t *ethnet_w5500_mac_new(const eth_w5500_config_t *w5500_config,
+                                               const eth_mac_config_t *mac_config);
 
 // The W5500 is on its own SPI controller; the SD card uses HSPI (SPI3).
 #define ETHNET_SPI_HOST SPI2_HOST
@@ -24,6 +29,7 @@ static volatile bool hasIp;
 static volatile bool isStatic;
 static volatile unsigned long linkUpMs;
 static esp_ip4_addr_t address;
+static int bootPhycfgr = -1;
 
 // A new link may be a different network: drop the old address and ask for
 // one again, even after falling back to the fixed one.
@@ -64,6 +70,18 @@ esp_err_t ethnet_begin(void) {
     err = gpio_install_isr_service(0);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
 
+    // Hardware reset first, then let the MAC driver configure the chip. Given
+    // the reset pin, ESP-IDF 4.4's W5500 PHY driver pulses it after the MAC
+    // driver has set up the chip, which puts the 16 KB socket buffers back to
+    // their 2 KB default: one full frame, so the second of any back-to-back
+    // pair was dropped and uploads (OTA) crawled at ~10 KB/s.
+    gpio_reset_pin((gpio_num_t)PIN_ETH_RST);
+    gpio_set_direction((gpio_num_t)PIN_ETH_RST, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)PIN_ETH_RST, 0);
+    esp_rom_delay_us(600);                   // RSTn low >= 500 us
+    gpio_set_level((gpio_num_t)PIN_ETH_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(2));            // >= 1 ms for the PLL to lock
+
     spi_bus_config_t bus = {};
     bus.mosi_io_num = PIN_ETH_MOSI;
     bus.miso_io_num = PIN_ETH_MISO;
@@ -88,8 +106,8 @@ esp_err_t ethnet_begin(void) {
     w5500.int_gpio_num = PIN_ETH_INT;
     eth_mac_config_t macConfig = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phyConfig = ETH_PHY_DEFAULT_CONFIG();
-    phyConfig.reset_gpio_num = PIN_ETH_RST;
-    esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500, &macConfig);
+    phyConfig.reset_gpio_num = -1;   // reset above, before the MAC setup
+    esp_eth_mac_t *mac = ethnet_w5500_mac_new(&w5500, &macConfig);
     esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phyConfig);
     if (!mac || !phy) return ESP_FAIL;
     esp_eth_config_t ethConfig = ETH_DEFAULT_CONFIG(mac, phy);
@@ -110,8 +128,12 @@ esp_err_t ethnet_begin(void) {
 
     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, onEthEvent, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, onGotIp, nullptr);
-    return esp_eth_start(eth);
+    err = esp_eth_start(eth);
+    bootPhycfgr = ethnet_w5500_phycfgr();   // diagnostics: the PHY's mode as started
+    return err;
 }
+
+int ethnet_boot_phycfgr(void) { return bootPhycfgr; }
 
 void ethnet_update(unsigned long nowMs) {
     if (!netif || !linkUp || hasIp || isStatic) return;
@@ -133,6 +155,17 @@ void ethnet_update(unsigned long nowMs) {
 bool ethnet_link_up(void) { return linkUp; }
 bool ethnet_has_ip(void) { return hasIp && linkUp; }
 bool ethnet_is_static(void) { return isStatic; }
+
+int ethnet_speed_mbps(void) {
+    eth_speed_t speed = ETH_SPEED_10M;
+    if (!eth || !linkUp || esp_eth_ioctl(eth, ETH_CMD_G_SPEED, &speed) != ESP_OK) return 0;
+    return speed == ETH_SPEED_100M ? 100 : 10;
+}
+
+bool ethnet_full_duplex(void) {
+    eth_duplex_t duplex = ETH_DUPLEX_HALF;
+    return eth && linkUp && esp_eth_ioctl(eth, ETH_CMD_G_DUPLEX_MODE, &duplex) == ESP_OK && duplex == ETH_DUPLEX_FULL;
+}
 
 void ethnet_ip_string(char *out, size_t len) {
     if (!len) return;

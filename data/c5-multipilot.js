@@ -933,6 +933,43 @@ const C5UI = (() => {
     }));
   }
 
+  // The 8 slots' channels, for the race director's heat editor.
+  function getSlots() {
+    return pilots.map((p, slot) => ({ slot, freq: p.freq, channel: channelName(p.freq, p.bandIndex) }));
+  }
+
+  // Race director: put a heat's pilots in the slots and race only those.
+  // seats[slot] is { name, phonetic, color, freq, enter, exit } or null; an
+  // empty slot is switched off so the C5 doesn't spend time on it. Returns
+  // the seated slots with no usable channel, or null if a race is running.
+  function applyHeat(seats) {
+    if (live.race) return null;
+    const noChannel = [];
+    for (let i = 0; i < SLOTS; i++) {
+      const s = seats[i], p = pilots[i];
+      const freq = s && inRange(+s.freq) ? +s.freq : 0;
+      if (freq !== p.freq) {
+        hist[i].t.length = hist[i].v.length = 0;
+        laps[i] = { count: 0, last: null, best: null, flashUntil: 0 };
+        calib.results[i] = undefined;
+      }
+      p.freq = freq;
+      p.race = !!s;
+      if (!s) continue;
+      p.name = String(s.name || "").slice(0, 20);
+      p.phonetic = String(s.phonetic || "").slice(0, 20);
+      p.color = s.color || COLORS[i];
+      if (s.enter > 0) {
+        p.enter = clamp(Math.round(s.enter), 1, 255);
+        p.exit = clamp(Math.round(s.exit ?? p.enter - 1), 0, p.enter - 1);
+      }
+      if (!freq) noChannel.push(i);
+    }
+    if (built) buildCards();
+    scheduleSave();
+    return noChannel;
+  }
+
   function setVisible(on) {
     visible = on;
     if (on) build();
@@ -959,5 +996,5 @@ const C5UI = (() => {
   requestAnimationFrame(frame);
 
   return { load, getProfilesForSave, getGain: () => gain, onRssi, onLap, setVisible, saveState: () => saveState, channelName,
-           getRacePilots };
+           getRacePilots, getSlots, applyHeat };
 })();

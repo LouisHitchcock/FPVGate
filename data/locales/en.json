@@ -36,6 +36,10 @@
         "usb_details": "Direct serial connection<br>Zero latency",
         "wifi_ap_details": "SSID: {ssid}<br>IP: {ip}<br>Connected Clients: {clients}",
         "wifi_sta_details": "SSID: {ssid}<br>IP: {ip}<br>Signal: {quality} ({rssi} dBm)",
+        "eth_details": "Ethernet<br>IP: {ip} ({how})",
+        "eth_fixed": "fixed, no DHCP server",
+        "eth_no_ip": "Ethernet<br>Cable connected, waiting for an address",
+        "eth_unplugged": "Ethernet: no cable",
         "table": {
             "lap_no": "Lap No",
             "lap_time": "Lap Time",
@@ -494,6 +498,27 @@
             "obs_step2": "2. Click \"Copy URL\" to copy the link",
             "obs_step3": "3. In OBS, add a Browser Source and paste the URL",
             "obs_step4": "4. Set width to 1920 and height to 1080 (or 1080x1920 for vertical)"
+        },
+        "c5fw": {
+            "title": "C5 Receiver Firmware",
+            "install": "Update C5",
+            "hint": "The gate sends it to the C5 over their link in about half a minute. Laps aren't timed meanwhile.",
+            "source_file": "Use my own file",
+            "source_online": "Choose a release",
+            "info": "{board} · firmware {version}",
+            "installed": "(installed)",
+            "offline": "The C5 isn't answering. Check its wiring and power.",
+            "too_old": "This C5's firmware is too old to update from here. Flash it over USB once (see FPVGateC5MK), then later updates come through the gate.",
+            "no_versions": "No C5 releases found",
+            "no_file": "Choose a .bin file",
+            "downloading": "Downloading {version}...",
+            "uploading": "Passing it to the gate...",
+            "starting": "The C5 is clearing space...",
+            "sending": "Sending to the C5: {percent}%",
+            "finishing": "The C5 is checking the firmware...",
+            "restarting": "The C5 is restarting...",
+            "done": "The C5 is now on {version}",
+            "failed": "Update failed: {error}. The C5 kept its previous firmware."
         },
         "firmware": {
             "title": "Firmware",

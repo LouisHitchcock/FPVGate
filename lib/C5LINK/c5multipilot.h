@@ -63,6 +63,10 @@ public:
     // This race's laps so far (ms; [0] is Gate 1). Copies up to max; returns
     // the count. Safe from another task.
     uint8_t copyLaps(uint8_t pilot, uint32_t *out, uint8_t max);
+    // A manual lap for a racing slot, timed when update() next runs and
+    // exempt from the minimum lap. False if no race runs or the slot doesn't
+    // race. Safe from another task.
+    bool requestManualLap(uint8_t pilot);
 
 private:
     Config *config_ = nullptr;
@@ -98,7 +102,8 @@ private:
     static constexpr uint8_t PASS_QUEUE = 16;
     C5Pass passes_[PASS_QUEUE] = {};
     uint8_t passCount_ = 0;
+    uint8_t manualMask_ = 0;   // bit i: a manual lap waits for slot i (under lapMux_)
 
-    void crossing(uint8_t pilot, uint32_t crossingUs);
+    void crossing(uint8_t pilot, uint32_t crossingUs, bool manual = false);
     void endPass(uint8_t pilot);
 };

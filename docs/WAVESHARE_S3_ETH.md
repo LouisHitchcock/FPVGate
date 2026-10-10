@@ -47,9 +47,12 @@ netmask 255.255.255.0, then open `http://192.168.8.1`. Unplugging and
 replugging the cable makes the gate ask for an address again, so moving it to
 another network works without a restart.
 
-Wi-Fi (192.168.4.1 in access-point mode) and USB networking (192.168.7.1) keep
-working alongside Ethernet. For RotorHazard, enter the gate's Ethernet address
-in the FPVGate plugin's settings.
+Wi-Fi (192.168.4.1 in access-point mode) keeps working alongside Ethernet.
+USB networking (192.168.7.1) only runs while no Ethernet cable is connected: a
+computer plugged into the USB-C port still sees the gate's USB adapter and
+serial port, but gets no address on it while the cable is in. The header's
+connection indicator shows the Ethernet address. For RotorHazard, enter the
+gate's Ethernet address in the FPVGate plugin's settings.
 
 ## Status
 

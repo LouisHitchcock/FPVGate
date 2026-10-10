@@ -571,7 +571,8 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
         pilot["race"] = (conf.c5RaceMask >> i) & 1;
     }
     config["c5Gain"] = conf.c5Gain;
-    
+    config["eventMode"] = getEventMode();
+
     // Novacore filter config
     config["novaFilterKalman"] = conf.novaFilterKalman;
     config["novaFilterMedian"] = conf.novaFilterMedian;
@@ -973,6 +974,10 @@ void Config::fromJson(JsonObject source) {
     }
     if (!source["c5Gain"].isNull()) {
         setC5Gain(source["c5Gain"].as<uint8_t>());
+    }
+    if (!source["eventMode"].isNull()) {
+        const uint8_t on = source["eventMode"].as<uint8_t>() ? 1 : 0;
+        if (conf.eventMode != on) { conf.eventMode = on; modified = true; }
     }
     if (!source["c5Pilots"].isNull()) {
         // The list is the complete set of 8 slots: a slot that isn't in it
@@ -1621,6 +1626,7 @@ const char* Config::getC5PilotName(uint8_t pilot) { return pilot < 8 ? conf.c5Pi
 const char* Config::getC5PilotPhonetic(uint8_t pilot) { return pilot < 8 ? conf.c5PilotPhonetic[pilot] : ""; }
 uint32_t Config::getC5PilotColor(uint8_t pilot) { return pilot < 8 ? conf.c5PilotColor[pilot] : 0; }
 uint8_t Config::getC5RaceMask() { return conf.c5RaceMask; }
+uint8_t Config::getEventMode() { return conf.eventMode ? 1 : 0; }
 
 void Config::setC5PilotIdentity(uint8_t pilot, const char* name, const char* phonetic, uint32_t color, bool races) {
     if (pilot >= 8) return;
@@ -1644,6 +1650,7 @@ void Config::initC5PilotIdentity() {
     memset(conf.c5PilotName, 0, sizeof(conf.c5PilotName));
     memset(conf.c5PilotPhonetic, 0, sizeof(conf.c5PilotPhonetic));
     memcpy(conf.c5PilotColor, kColors, sizeof(kColors));
+    conf.eventMode = 0;
     memset(conf._reservedC5, 0, sizeof(conf._reservedC5));
     uint8_t mask = 0, enabled = 0;
     for (uint8_t i = 0; i < 8; ++i) {

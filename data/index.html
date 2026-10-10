@@ -183,6 +183,7 @@
       </nav>
       <ul class="nav-links">
         <li><a id="nav-link-race" class="tablinks active" onclick="openTab(event, 'race')" data-i18n="nav.race">Race</a></li>
+        <li style="display: none"><a id="nav-link-event" class="tablinks" onclick="openTab(event, 'raceEvent')">Event</a></li>
         <li><a id="nav-link-history" class="tablinks" onclick="openTab(event, 'history')" data-i18n="nav.history">Race History</a></li>
         <li><a id="nav-link-calib" class="tablinks" onclick="openTab(event, 'calib')" data-i18n="nav.calib">Calibration</a></li>
         <li><a id="nav-link-config" class="tablinks" onclick="openSettingsModal()" data-i18n="nav.config">Configuration</a></li>
@@ -195,6 +196,7 @@
       </div>
 
       <div id="race" class="tabcontent">
+        <div id="eventRaceBanner" class="ev-race-banner" style="display: none"></div>
         <span id="timer" data-i18n="race.timer_default">00:00:00s</span>
         <div id="lapCounter" style="text-align: center; font-size: 18px; font-weight: bold; color: var(--primary-color); margin: 8px 0">
           <span id="lapCounterText" data-i18n="race.lap_counter">Lap 0</span> - <span id="currentLapTimer">00:00:00s</span>
@@ -204,8 +206,9 @@
           <button id="stopRaceButton" onclick="stopRace()" disabled data-i18n="race.stop_race">Stop Race</button>
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
+          <button id="nextHeatButton" style="display: none" onclick="RaceEvent.nextHeat()">Next Heat</button>
           <div class="race-notes-inline">
-            <button id="raceNotesButton" class="secondary-button" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
+            <button id="raceNotesButton" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
             <span id="raceNotesIndicator" class="race-notes-indicator" style="display: none" data-i18n="race.notes_saved">Notes saved</span>
           </div>
         </div>
@@ -294,7 +297,7 @@
             </div>
           </div>
           <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;">
-            Enable at least one analytics tab in System Settings to display additional race analytics.
+            Turn on at least one panel under Settings → User Interface → Race Analytics Display to see more race analytics.
           </div>
           <div id="raceAnalyticsTabs" class="analysis-tabs" style="margin-top: 8px;"></div>
           <div id="raceAnalysisContent" class="analysis-content" style="min-height: 350px;">
@@ -363,6 +366,11 @@
           </div>
           <div id="detailContent" class="analysis-content"></div>
         </div>
+      </div>
+
+      <!-- Race director: pilots, formats, heats and results (event.js) -->
+      <div id="raceEvent" class="tabcontent" style="display: none;">
+        <div id="eventPanel"></div>
       </div>
 
       <div id="calib" class="tabcontent" style="display: none;">
@@ -750,6 +758,9 @@
             </div>
             <div class="settings-nav-item" data-settings-section="osd" onclick="switchSettingsSection(event, 'osd')">
               <span data-i18n="settings.tabs.osd">On Screen Displays</span>
+            </div>
+            <div class="settings-nav-item" data-settings-section="ui" onclick="switchSettingsSection(event, 'ui')">
+              <span>User Interface</span>
             </div>
             <div class="settings-nav-item" data-settings-section="system" onclick="switchSettingsSection(event, 'system')">
               <span data-i18n="settings.tabs.system">System Settings</span>
@@ -1302,9 +1313,21 @@
               </div>
             </div>
 
-            <!-- System Section -->
-            <div id="settings-system" class="settings-section">
-              <h2 data-i18n="settings.system.title">System Settings</h2>
+            <!-- User Interface Section -->
+            <div id="settings-ui" class="settings-section">
+              <h2>User Interface</h2>
+
+              <h3 style="margin-top: 0">Race Notes</h3>
+              <div class="config-item">
+                <label for="showRaceNotesButton">Race Notes Button:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="showRaceNotesButton" onchange="toggleShowRaceNotesButton(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Show the Race Notes button on the Race tab. Remembered on this device.</div>
               <div class="config-item">
                 <label for="openRaceNotesOnRaceEnd" data-i18n="settings.system.notes_auto_open">Open Race Notes on Race End:</label>
                 <div style="flex: 1">
@@ -1315,9 +1338,10 @@
                 </div>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.system.notes_auto_open_tip">Automatically open race notes when a race is stopped.</div>
+
               <h3>Race Analytics Display</h3>
               <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);">
-                Choose which multi-pilot race analytics panels to display in the Race tab (up to 3 enabled at once).
+                Choose which race analytics panels to show on the Race tab. Each one you turn on gets a tab there.
               </div>
 
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
@@ -1364,6 +1388,22 @@
                 </div>
               </div>
 
+              <h3>Event Mode</h3>
+              <div class="config-item">
+                <label for="eventMode">Event Mode:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="eventMode" onchange="applyEventMode(this.checked); autoSaveConfig()" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Adds the Event tab for running club races and events: pilots, groups, heats and results. Needs the ESP32-C5 receiver. Saved on the gate, so every device sees it. Leave off for solo flying.</div>
+            </div>
+
+            <!-- System Section -->
+            <div id="settings-system" class="settings-section">
+              <h2 data-i18n="settings.system.title">System Settings</h2>
               <h3 style="margin-top: 0" data-i18n="settings.system.receiver_radio">Receiver Radio</h3>
               <div class="config-item">
                 <label for="receiverRadio" data-i18n="settings.system.receiver_label">Receiver Module:</label>
@@ -1665,6 +1705,43 @@
                 <label data-i18n="settings.firmware.first_install">First install or recovery:</label>
                 <a href="https://fpvgate.xyz/flasher" target="_blank" class="update-link" data-i18n="settings.firmware.open_page">Open Web Flasher</a>
               </div>
+
+              <!-- The C5 receiver has its own firmware and versions
+                   (FPVGateC5MK). The gate sends it over the link, so it is
+                   shown only once a C5 answers. -->
+              <div id="c5FwSection" style="display: none">
+                <h3 data-i18n="settings.c5fw.title">C5 Receiver Firmware</h3>
+                <div id="c5FwInfo" class="ota-device-info"></div>
+                <div class="ota-panel">
+                  <div id="c5FwOnline">
+                    <div class="ota-line">
+                      <select id="c5FwVersionSelect" onchange="onC5FwVersionChange()" aria-label="C5 version">
+                        <option value="" data-i18n="settings.firmware.loading_versions">Loading versions...</option>
+                      </select>
+                    </div>
+                    <details id="c5FwNotesWrap" class="ota-notes" style="display: none">
+                      <summary data-i18n="settings.firmware.whats_new">What's new</summary>
+                      <div id="c5FwNotes"></div>
+                    </details>
+                  </div>
+                  <div id="c5FwFile" style="display: none">
+                    <div class="ota-line">
+                      <label for="c5FwFileInput" data-i18n="settings.firmware.file_firmware_short">Firmware</label>
+                      <input type="file" id="c5FwFileInput" accept=".bin" />
+                    </div>
+                  </div>
+                  <div id="c5FwWarning" class="ota-warning" style="display: none"></div>
+                  <div class="ota-actions">
+                    <button type="button" id="c5FwStartBtn" onclick="startC5Update()" data-i18n="settings.c5fw.install">Update C5</button>
+                    <span class="ota-hint" data-i18n="settings.c5fw.hint">The gate sends it to the C5 over their link in about half a minute. Laps aren't timed meanwhile.</span>
+                    <button type="button" id="c5FwSourceToggle" class="ota-link" onclick="toggleC5FwSource()" data-i18n="settings.c5fw.source_file">Use my own file</button>
+                  </div>
+                  <div id="c5FwRunning" class="ota-running" style="display: none">
+                    <div class="ota-progress-track"><div id="c5FwProgressBar" class="ota-progress-bar"></div></div>
+                    <div id="c5FwProgressText" class="ota-progress-text"></div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- OSD Section -->
@@ -1822,6 +1899,7 @@
     <script src="script.js" defer></script>
     <script src="race-trace.js" defer></script>
     <script src="c5-multipilot.js" defer></script>
+    <script src="event.js" defer></script>
   </body>
 </html>
 

@@ -1,4 +1,5 @@
 #include "c5link.h"
+#include <LittleFS.h>
 #include "debug.h"
 
 static uint8_t xorChecksum(const char *s) {
@@ -109,8 +110,8 @@ void C5Link::sendSlots(uint32_t nowMs) {
     tuningReady_ = false;
 }
 
-void C5Link::poll(uint32_t nowMs) {
-    if (!port_) return;
+bool C5Link::poll(uint32_t nowMs) {
+    if (!port_) return false;
     if (config_->getC5Gain() != gain_) {
         gain_ = config_->getC5Gain();
         gainDirty_ = true;
@@ -133,8 +134,13 @@ void C5Link::poll(uint32_t nowMs) {
     // scan-mode data rate.
     uint8_t chunk[256];
     size_t got = 0, at = 0;
+    bool more = false;
     for (;;) {
         if (at == got) {
+            if (bytes >= POLL_MAX_BYTES) {
+                more = port_->available() > 0;
+                break;
+            }
             const int avail = port_->available();
             if (avail <= 0) break;
             got = port_->read(chunk, (size_t)avail < sizeof(chunk) ? (size_t)avail : sizeof(chunk));
@@ -183,6 +189,22 @@ void C5Link::poll(uint32_t nowMs) {
         }
     }
     if (bytes > pollBytesMax_) pollBytesMax_ = bytes;
+    if (updateRequested_ || updateState_ != UpdateState::Idle) {
+        // The transfer and the C5's restart aren't link faults: hold the
+        // error counts where they were when the update started.
+        if (updating() && !updateRequested_) {
+            badRecords_ = updateBadRecords_;
+            sampleSequenceGaps_ = updateSeqGaps_;
+        }
+        serviceUpdate(nowMs);
+        // While the image goes over, nothing else is sent: the C5 would
+        // reject a retune anyway, and chunks must not interleave with lines.
+        // Once it restarts, the slot list goes out as usual, which is what
+        // tells the new image the S3 can reach it.
+        if (updateState_ == UpdateState::Starting || updateState_ == UpdateState::Sending ||
+            updateState_ == UpdateState::Finishing)
+            return more;
+    }
     if (scanMode_) {
         // Send the slot list when it changes, and again while the C5 isn't
         // scanning it (it rebooted, or the P was lost).
@@ -201,6 +223,7 @@ void C5Link::poll(uint32_t nowMs) {
         lastStatusMs_ = nowMs;
         sendPayload("Q");
     }
+    return more;
 }
 
 void C5Link::parseLine(char *line, uint32_t nowMs) {
@@ -243,15 +266,24 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             }
             online_ = true;
         }
+    } else if (line[0] == 'u' && line[1] == ',') {
+        updateReply(line + 2, nowMs);
     } else if (line[0] == 'S' && line[1] == ',') {
         unsigned freq = 0, gain = 0, firmware = 0;
         char status[12] = {};
-        const int fields = sscanf(line, "S,%u,%u,%11[^,],%u", &freq, &gain, status, &firmware);
+        char version[16] = {};
+        char board[12] = {};
+        // Firmware 3 adds ,<version>,<board>.
+        const int fields =
+            sscanf(line, "S,%u,%u,%11[^,],%u,%15[^,],%11[^,]", &freq, &gain, status, &firmware, version, board);
         if (fields >= 3) {
             reportedFrequency_ = (uint16_t)freq;
             reportedGain_ = (uint8_t)gain;
             strlcpy(state_, status, sizeof(state_));
-            const bool canScan = fields == 4 && firmware >= 2;
+            firmware_ = fields >= 4 ? (uint8_t)firmware : 1;
+            strlcpy(version_, fields >= 6 ? version : "", sizeof(version_));
+            strlcpy(board_, fields >= 6 ? board : "", sizeof(board_));
+            const bool canScan = fields >= 4 && firmware >= 2;
             if (canScan && !scanMode_) {
                 scanMode_ = true;   // poll() sends the slot list next
                 slotsSent_ = false;
@@ -356,4 +388,135 @@ bool C5Link::takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs) {
     timestampUs = sample.timestampUs;
     sampleTail_[pilot] = (uint8_t)((sampleTail_[pilot] + 1u) % SAMPLE_QUEUE_DEPTH);
     return true;
+}
+
+bool C5Link::requestUpdate(const char *path, uint32_t size, const uint8_t sha256[32], const char *version) {
+    if (!port_ || updating()) return false;
+    strlcpy(updatePath_, path, sizeof(updatePath_));
+    strlcpy(updateVersion_, version, sizeof(updateVersion_));
+    memcpy(updateSha_, sha256, sizeof(updateSha_));
+    updateSize_ = size;
+    updateAcked_ = 0;
+    updateError_[0] = 0;
+    updateState_ = UpdateState::Idle;
+    __sync_synchronize();   // the fields above before the flag the C5 task reads
+    updateRequested_ = true;
+    return true;
+}
+
+void C5Link::failUpdate(const char *reason) {
+    if (updateFile_) updateFile_.close();
+    strlcpy(updateError_, reason, sizeof(updateError_));
+    updateState_ = UpdateState::Failed;
+    // The C5 is back on its old image (or still on it): resend the slots.
+    slotsSent_ = false;
+    DEBUG("[C5] update failed: %s\n", reason);
+}
+
+// One chunk, at the offset the C5 last acknowledged:
+// sync, len, 'W', offset (4), data (n), crc8 over len to the end of data.
+void C5Link::sendChunk(uint32_t nowMs) {
+    uint8_t frame[8 + UPDATE_CHUNK];
+    if (!updateFile_.seek(updateAcked_)) return failUpdate("file seek");
+    const size_t want = min<uint32_t>(UPDATE_CHUNK, updateSize_ - updateAcked_);
+    const size_t n = updateFile_.read(frame + 7, want);
+    if (n != want) return failUpdate("file read");
+    frame[0] = CHUNK_SYNC;
+    frame[1] = (uint8_t)(5 + n);
+    frame[2] = 'W';
+    const uint32_t offset = updateAcked_;
+    memcpy(frame + 3, &offset, 4);   // little-endian on both chips
+    frame[7 + n] = crc8(frame + 1, 6 + n);
+    port_->write(frame, 8 + n);
+    updateSentMs_ = nowMs;
+}
+
+void C5Link::updateReply(const char *reply, uint32_t nowMs) {
+    if (!strcmp(reply, "ready")) {
+        if (updateState_ != UpdateState::Starting) return;
+        updateState_ = UpdateState::Sending;
+        updateTries_ = 0;
+        sendChunk(nowMs);
+    } else if (!strncmp(reply, "ack,", 4)) {
+        if (updateState_ != UpdateState::Sending) return;
+        // The C5 says where it is; a repeat or an out-of-order ack just
+        // moves the next chunk to that offset.
+        const uint32_t at = strtoul(reply + 4, nullptr, 10);
+        if (at > updateSize_) return failUpdate("bad ack");
+        if (at > updateAcked_) updateTries_ = 0;
+        updateAcked_ = at;
+        if (at == updateSize_) {
+            if (updateFile_) updateFile_.close();
+            sendPayload("E");
+            updateState_ = UpdateState::Finishing;
+            updateSentMs_ = nowMs;
+        } else {
+            sendChunk(nowMs);
+        }
+    } else if (!strcmp(reply, "done")) {
+        if (updateState_ != UpdateState::Finishing) return;
+        updateState_ = UpdateState::Restarting;
+        updateSentMs_ = nowMs;
+        version_[0] = 0;   // until the new image reports
+        slotsSent_ = false;      // resent, and acknowledged only by an image that hears it
+        tuningReady_ = false;
+    } else if (!strncmp(reply, "err,", 4)) {
+        if (updateState_ == UpdateState::Starting || updateState_ == UpdateState::Sending ||
+            updateState_ == UpdateState::Finishing)
+            failUpdate(reply + 4);
+    }
+}
+
+void C5Link::serviceUpdate(uint32_t nowMs) {
+    if (updateRequested_) {
+        updateRequested_ = false;
+        updateBadRecords_ = badRecords_;
+        updateSeqGaps_ = sampleSequenceGaps_;
+        updateFile_ = LittleFS.open(updatePath_, "r");
+        if (!updateFile_ || updateFile_.size() != updateSize_) return failUpdate("no image");
+        char command[8 + 10 + 64 + 1];
+        int n = snprintf(command, sizeof(command), "U,%lu,", (unsigned long)updateSize_);
+        for (uint8_t i = 0; i < 32; ++i) n += snprintf(command + n, sizeof(command) - n, "%02x", updateSha_[i]);
+        sendPayload(command);
+        updateState_ = UpdateState::Starting;
+        updateSentMs_ = nowMs;
+        DEBUG("[C5] update: %lu bytes to %s\n", (unsigned long)updateSize_, updateVersion_);
+        return;
+    }
+    switch (updateState_) {
+        case UpdateState::Starting:
+            if (nowMs - updateSentMs_ >= UPDATE_BEGIN_TIMEOUT_MS) failUpdate("no reply");
+            break;
+        case UpdateState::Sending:
+            // A chunk lost either way (or its ack) is sent again.
+            if (nowMs - updateSentMs_ >= UPDATE_ACK_TIMEOUT_MS) {
+                if (++updateTries_ > UPDATE_RETRIES) failUpdate("no ack");
+                else sendChunk(nowMs);
+            }
+            break;
+        case UpdateState::Finishing:
+            if (nowMs - updateSentMs_ >= UPDATE_FINISH_TIMEOUT_MS) failUpdate("no finish");
+            break;
+        case UpdateState::Restarting: {
+            // Reporting the new version isn't enough: an image that can send
+            // but not hear the S3 does that, then rolls back. Scanning the
+            // slot list sent since its restart shows it hears the S3, which
+            // is also what confirms the image on the C5.
+            const bool newVersion = version_[0] && !strcmp(version_, updateVersion_);
+            const bool hearsUs = enabledCount() == 0 || (scanMode_ && tuningReady_);
+            if (newVersion && hearsUs) {
+                updateState_ = UpdateState::Done;
+                DEBUG("[C5] update done: %s\n", version_);
+            } else if (version_[0] && !newVersion && nowMs - updateSentMs_ >= UPDATE_STALE_STATUS_MS) {
+                // Another version once the old image has gone: the C5 is
+                // back on its previous firmware.
+                failUpdate("rolled back");
+            } else if (nowMs - updateSentMs_ >= UPDATE_RESTART_TIMEOUT_MS) {
+                failUpdate(version_[0] && !newVersion ? "rolled back" : "not back");
+            }
+            break;
+        }
+        default:
+            break;
+    }
 }

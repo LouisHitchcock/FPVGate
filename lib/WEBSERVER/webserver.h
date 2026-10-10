@@ -20,6 +20,12 @@
 #define WEB_SSE_KEEPALIVE_MS 15000
 #define RH_LINK_TIMEOUT_MS 15000     // RotorHazard plugin polls the clock every 5 s
 #define WEB_RH_RSSI_SEND_MS 50       // RSSI to the RotorHazard plugin, 20 per second
+#define EVENT_PATH "/event.json"     // race director event (SD if present, else LittleFS)
+#define EVENT_TMP_PATH "/event.tmp"
+#define EVENT_MAX_BYTES (512u * 1024u)
+#define C5_IMAGE_PATH "/c5fw.bin"          // LittleFS: C5 firmware waiting to be sent
+#define C5_IMAGE_TMP_PATH "/c5fw.tmp"
+#define C5_IMAGE_MAX_BYTES 0x1E0000u       // one C5 app partition (FPVGateC5MK partitions.csv)
 
 class Webserver : public TransportInterface {
    public:
@@ -134,4 +140,20 @@ class Webserver : public TransportInterface {
     // rawPeak: the C5's 0..1023 peak, or -1 for RX5808 passes (no raw scale).
     void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1);
     void sendRhUpdates(uint32_t currentTimeMs);
+
+    // Race director event (/api/event): written to EVENT_TMP_PATH as it
+    // arrives, then renamed over EVENT_PATH once complete.
+    bool eventUploadOk_ = false;
+
+    // C5 firmware image (/api/c5/firmware), for C5Link::requestUpdate().
+    struct C5Image {
+        bool ok = false;
+        uint32_t size = 0;
+        uint8_t sha256[32] = {};
+        char version[16] = {};   // "1.0.0"
+        char board[12] = {};     // "c5zero"
+        char error[48] = {};
+    };
+    C5Image c5Image_;
+    void c5ImageChunk(uint8_t *data, size_t len, size_t index, size_t total);
 };

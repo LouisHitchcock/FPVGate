@@ -227,6 +227,10 @@
                       background: var(--background-color); color: var(--secondary-color); }
 .multi-pilot-status.racing { background: var(--primary-color); color: var(--background-color); }
 .multi-pilot-status.finished { background: #4CAF50; color: white; }
+.mps-add-lap { margin: 0; padding: 3px 10px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--background-color);
+               color: var(--text-color); font-size: 12px; font-weight: bold; white-space: nowrap; cursor: pointer; }
+.mps-add-lap:hover:not(:disabled) { border-color: var(--primary-color); }
+.mps-add-lap:disabled { opacity: .35; cursor: default; }
 .multi-mode-indicator { display: flex; align-items: center; padding: 6px 12px; background-color: rgba(255, 255, 255, 0.15);
                         border-radius: 4px; font-size: 11px; font-weight: bold; color: white; letter-spacing: 0.5px; }
 #unifiedRaceView { overflow-x: auto; }
@@ -860,4 +864,155 @@
   .marshal-laps-list {
     max-height: 240px;
   }
+}
+
+/* Race director Event tab (event.js), built on the C5 panel's classes above */
+.ev-title { flex: 1; min-width: 160px; height: 34px; box-sizing: border-box; margin: 0; padding: 0 10px; border: 2px solid transparent;
+  border-radius: 6px; background: transparent; color: inherit; font-size: 17px; font-weight: bold; }
+.ev-title:hover, .ev-title:focus { border-color: var(--border-color); outline: none; }
+.ev-status-text { flex: 1; min-width: 0; }
+.ev-main { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); }
+.ev-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ev-section { display: flex; flex-direction: column; gap: 6px; }
+.ev-sec-head { display: flex; justify-content: space-between; padding: 0 2px 2px; cursor: default; }
+details.ev-section > summary { cursor: pointer; list-style: none; }
+details.ev-section > summary::-webkit-details-marker { display: none; }
+details.ev-section > summary::before { content: "▸ "; }
+details.ev-section[open] > summary::before { content: "▾ "; }
+.ev-empty { padding: 8px 2px; font-size: 13px; color: var(--secondary-color); }
+.ev-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-danger:hover:not(:disabled) { border-color: #ef5350; color: #ef5350; }
+.ev-x { flex: none; margin: 0; padding: 0 6px; border: none; background: none; color: var(--secondary-color); font-size: 13px; cursor: pointer; }
+.ev-x:hover:not(:disabled) { color: #ef5350; }
+
+/* Heats: the races in order, one row each (like the Calibration pilot rows) */
+.ev-heats { display: flex; flex-direction: column; gap: 4px; }
+.ev-heat { display: grid; grid-template-columns: 26px 34px minmax(0, 1fr) auto 22px; align-items: center; gap: 10px; padding: 7px 10px;
+  border: 2px solid transparent; border-radius: 6px; background: var(--background-color); cursor: pointer; }
+.ev-heat:hover { border-color: var(--border-color); }
+.ev-heat.ev-heat-on { border-color: var(--primary-color); cursor: default; }
+.ev-heat.ev-heat-done { opacity: .6; }
+.ev-heat-n { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; color: var(--secondary-color); text-align: right; }
+.ev-heat-g { min-width: 26px; padding: 2px 6px; border-radius: 5px; background: var(--bg-secondary); font-weight: bold; text-align: center; }
+.ev-heat-pilots { display: flex; flex-wrap: wrap; gap: 4px 12px; min-width: 0; font-size: 13px; }
+.ev-hp { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ev-hp .ev-dot { width: 8px; height: 8px; }
+.ev-hp b { font-family: 'Courier New', monospace; font-size: 12px; color: var(--primary-color); }
+.ev-heat-state { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-color); white-space: nowrap; }
+.ev-heat-on .ev-heat-state, .ev-heat-next .ev-heat-state { color: var(--primary-color); }
+.ev-heat-done .ev-heat-state { text-transform: none; letter-spacing: 0; color: #4CAF50; }
+
+/* Groups: sets of pilots */
+.ev-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.ev-group { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 2px solid transparent; border-radius: 6px;
+  background: var(--background-color); }
+.ev-group.ev-group-on { border-color: var(--primary-color); }
+.ev-group-head { display: flex; align-items: center; gap: 6px; }
+.ev-group-name { flex: 1; min-width: 0; height: 30px; padding: 0 6px; border: 2px solid transparent; border-radius: 5px; background: transparent;
+  color: inherit; font-size: 15px; font-weight: bold; }
+.ev-group-name:hover, .ev-group-name:focus { border-color: var(--border-color); outline: none; }
+.ev-group-meta { flex: none; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-color); }
+.ev-group-fmt { max-width: 110px; height: 28px; font-size: 12px; }
+.ev-group-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.ev-group-foot .c5p-small { height: 26px; padding: 0 10px; font-size: 12px; }
+.ev-seats { display: flex; flex-direction: column; gap: 3px; }
+.ev-seat { display: grid; grid-template-columns: 10px minmax(0, 1fr) 110px 22px; align-items: center; gap: 8px; padding: 3px 4px;
+  border-radius: 5px; background: var(--bg-secondary); font-size: 13px; }
+.ev-seat-bad { box-shadow: inset 0 0 0 1px #ef5350; }
+.ev-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.ev-seat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-ch { height: 26px; padding: 0 4px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--background-color);
+  color: var(--primary-color); font-family: 'Courier New', monospace; font-size: 12px; }
+.ev-ch-over { border-style: dashed; border-color: #f0b429; }
+.ev-add { height: 26px; border: 1px dashed var(--border-color); border-radius: 5px; background: transparent; color: var(--secondary-color); font-size: 12px; }
+.ev-results summary { cursor: pointer; padding: 2px 0; font-size: 12px; color: var(--secondary-color); }
+.ev-race { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 12px; color: var(--secondary-color); }
+.ev-table { width: 100%; margin: 4px 0; border-collapse: collapse; font-size: 12px; }
+.ev-table th { padding: 3px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; text-align: left;
+  color: var(--secondary-color); background: none; }
+.ev-table td { padding: 3px 6px; text-align: left; font-family: 'Courier New', monospace; }
+.ev-table td:nth-child(2) { font-family: inherit; }
+
+/* Schedule */
+.ev-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.ev-step { min-width: 28px; height: 26px; margin: 0; padding: 0 6px; border: 2px solid var(--border-color); border-radius: 5px;
+  background: var(--background-color); color: var(--text-color); font-size: 12px; font-weight: bold; cursor: pointer; }
+.ev-step:hover { border-color: var(--primary-color); }
+.ev-step-done { opacity: .45; }
+.ev-step-on { background: var(--primary-color); border-color: var(--primary-color); color: var(--background-color); }
+/* Pilots */
+.ev-prow { display: grid; grid-template-columns: 26px minmax(0, 1fr) 104px 52px 22px; grid-template-rows: auto auto; align-items: center;
+  gap: 4px 6px; padding: 5px 6px; border-radius: 6px; background: var(--background-color); }
+.ev-prow input[type=text], .ev-prow select { height: 28px; box-sizing: border-box; margin: 0; padding: 0 6px;
+  border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-secondary); color: inherit; font-size: 13px; min-width: 0; }
+.ev-prow select { color: var(--primary-color); font-family: 'Courier New', monospace; font-size: 12px; }
+.ev-color { width: 26px; height: 26px; padding: 0; border: none; background: none; cursor: pointer; }
+.ev-th { text-align: right; font-family: 'Courier New', monospace; font-size: 11px; color: var(--secondary-color); }
+.ev-phon { grid-column: 2 / 4; height: 24px !important; font-size: 12px !important; }
+.ev-elo { grid-column: 4 / 6; text-align: right; font-family: 'Courier New', monospace; font-size: 11px; color: var(--secondary-color); white-space: nowrap; }
+
+/* Formats: full width, one row each */
+.ev-formats { margin-top: 16px; }
+.ev-frow { display: grid; grid-template-columns: minmax(120px, 1.2fr) minmax(170px, 1.6fr) 70px 100px 90px 140px minmax(90px, 1fr) 22px;
+  align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--background-color); }
+.ev-frow .c5p-mini { width: 100%; min-width: 0; }
+.ev-frow-head { padding: 0 8px; background: none; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--secondary-color); }
+.ev-frow-used { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-foot { justify-content: flex-end; margin-top: 12px; }
+
+/* Leaderboard */
+.ev-sort { margin: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+.ev-sort-on { color: var(--primary-color); }
+.ev-sort-on::after { content: " ↑"; }
+.ev-up { color: #4CAF50; font-size: 11px; }
+.ev-down { color: #ef5350; font-size: 11px; }
+.ev-info-btn { font-size: 11px; text-transform: none; letter-spacing: 0; text-decoration: underline; }
+.ev-info { padding: 10px 12px; border-radius: 6px; background: var(--background-color); font-size: 13px; line-height: 1.5; }
+
+/* Schedule editor pop-out */
+.ev-sched-box { flex-direction: column; max-width: 900px; height: auto; max-height: 90vh; padding: 0; overflow: hidden; }
+.ev-sched-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-color); }
+.ev-sched-head h2 { margin: 0; }
+.ev-sched-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; padding: 16px 20px; overflow: auto; }
+.ev-palette, .ev-program { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 2px dashed transparent; border-radius: 8px; }
+.ev-palette { background: var(--bg-secondary); }
+.ev-palette.ev-drop-out { border-color: #ef5350; }
+.ev-tile { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 2px solid var(--border-color); border-radius: 6px;
+  background: var(--background-color); cursor: grab; touch-action: none; user-select: none; }
+.ev-tile:hover { border-color: var(--primary-color); }
+.ev-tile b { min-width: 24px; font-size: 16px; text-align: center; color: var(--primary-color); }
+.ev-tile span { font-size: 12px; color: var(--secondary-color); }
+.ev-lane { display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
+.ev-lane-empty { display: flex; align-items: center; justify-content: center; min-height: 120px; border: 2px dashed var(--border-color); border-radius: 8px; }
+.ev-pblock { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 2px solid var(--border-color); border-radius: 6px;
+  background: var(--background-color); touch-action: none; user-select: none; }
+.ev-pblock-rot { border-style: dashed; }
+.ev-pblock.ev-drop-into { border-color: var(--primary-color); border-style: solid; }
+.ev-pblock.ev-dragging { opacity: .35; }
+.ev-grip { cursor: grab; color: var(--secondary-color); font-size: 16px; }
+.ev-pblock-kind { min-width: 52px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--secondary-color); }
+.ev-pblock-heats { display: flex; flex: 1; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.ev-pblock .c5p-step input[type=number] { width: 44px; height: 32px; }
+.ev-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border-radius: 12px; background: var(--bg-secondary);
+  font-size: 13px; font-weight: bold; }
+.ev-drop-line { height: 3px; border-radius: 2px; background: var(--primary-color); }
+.ev-ghost { position: fixed; z-index: 2000; pointer-events: none; opacity: .9; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+.ev-sched-foot { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--border-color); }
+.ev-sched-foot .ev-steps { flex: 1; min-width: 0; }
+.ev-sched-foot .calib-wizard-btn { margin: 0; }
+
+/* Race tab banner */
+.ev-race-banner { flex-wrap: wrap; margin: 0 0 10px; padding: 8px 12px; border-radius: 6px; background: var(--bg-secondary); }
+.ev-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.ev-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 10px;
+  background: var(--background-color); font-size: 12px; color: var(--text-color); }
+.ev-pill .ev-dot { width: 8px; height: 8px; }
+.ev-pill b { font-family: 'Courier New', monospace; color: var(--primary-color); }
+
+@media (max-width: 900px) {
+  .ev-main { grid-template-columns: 1fr; }
+  .ev-frow { grid-template-columns: 1fr 1fr; }
+  .ev-frow-head { display: none; }
+  .ev-sched-body { grid-template-columns: 1fr; }
 }
