@@ -813,6 +813,22 @@ function c5MultiMode() {
   return c5ReceiverSelected() || raceSyncMode === 3;
 }
 
+// Race director Event tab (event.js), off unless "Event mode" is on.
+function applyEventMode(on) {
+  const link = document.getElementById("nav-link-event");
+  if (link) link.parentElement.style.display = on ? "" : "none";
+  const tab = document.getElementById("raceEvent");
+  if (!on && tab && tab.style.display !== "none") document.getElementById("nav-link-race").click();
+  if (typeof RaceEvent !== "undefined") RaceEvent.setEnabled(on);
+}
+
+function loadEventMode(value) {
+  const box = document.getElementById("eventMode");
+  if (value === undefined || !box) return;
+  if (box.checked !== !!+value) box.checked = !!+value;
+  applyEventMode(box.checked);
+}
+
 function c5RacePilotsNow() {
   return c5ReceiverSelected() ? C5UI.getRacePilots() : [];
 }
@@ -916,6 +932,16 @@ function handleC5RaceLap(d) {
       }, 500);
     }
   }
+}
+
+// A missed pass, added by hand: the gate times it now and sends it back as
+// a normal "c5Lap" event, so the tables, callouts and saved race all see it.
+function addC5ManualLap(slot, button) {
+  if (button) button.disabled = true;
+  fetch(`/api/c5/addLap?pilot=${slot}`, { method: "POST" })
+    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+    .catch((e) => console.warn("[C5] manual lap failed", e))
+    .finally(() => { if (button) setTimeout(() => { button.disabled = !raceRunning; }, 400); });
 }
 
 // Always "pilot, time": with several pilots the name is what matters.
@@ -1077,8 +1103,9 @@ function renderMultiPilotRaceView() {
     });
     const leader = rows.find(r => r.pilot.lapTimes.length);
     const overallBest = Math.min(...rows.map(r => r.best ?? Infinity));
+    const manual = c5MultiRaceView();   // C5 racers can be given a lap by hand
     summaryHost.innerHTML = `<table class="multi-pilot-standings-table">
-      <thead><tr><th>Pos</th><th class="mps-pilot">Pilot</th><th>Laps</th><th>Last</th><th>Best</th><th>Total</th><th>Gap</th><th>Status</th></tr></thead>
+      <thead><tr><th>Pos</th><th class="mps-pilot">Pilot</th><th>Laps</th><th>Last</th><th>Best</th><th>Total</th><th>Gap</th><th>Status</th>${manual ? "<th></th>" : ""}</tr></thead>
       <tbody>${rows.map((r, i) => {
         const started = r.pilot.lapTimes.length > 0;
         const colorHex = '#' + ((r.pilot.color || 0) >>> 0).toString(16).padStart(6, '0');
@@ -1100,6 +1127,8 @@ function renderMultiPilotRaceView() {
           <td>${started ? r.total.toFixed(3) + "s" : "--"}</td>
           <td class="mps-gap">${gap}</td>
           <td><span class="multi-pilot-status ${statusClass}">${status}</span></td>
+          ${manual ? `<td><button class="mps-add-lap" onclick="addC5ManualLap(${r.pilot.id.slice(3)}, this)"${raceRunning ? "" : " disabled"}
+            title="Give ${escapeHtml(r.pilot.name || "this pilot")} a lap now">+ Lap</button></td>` : ""}
         </tr>`;
       }).join("")}</tbody></table>`;
   }
@@ -1233,6 +1262,8 @@ function stopRaceTimer() {
 
 // Update race control buttons based on race state
 function updateRaceButtons() {
+  document.querySelectorAll(".mps-add-lap").forEach((b) => { b.disabled = !raceRunning; });
+  if (typeof RaceEvent !== "undefined") RaceEvent.refreshRaceTab();   // Next Heat button
   if (raceRunning) {
     startRaceButton.disabled = true;
     stopRaceButton.disabled = false;
@@ -1285,6 +1316,17 @@ async function updateConnectionStatus(mode, connected) {
             const signalQuality = wifiData.rssi > -50 ? i18n.t("messages.wifi_excellent") : wifiData.rssi > -60 ? i18n.t("messages.wifi_good") : wifiData.rssi > -70 ? i18n.t("messages.wifi_fair") : i18n.t("messages.wifi_weak");
             details = i18n.t("race.wifi_sta_details", { ssid: wifiData.ssid, ip: wifiData.ip, quality: signalQuality, rssi: wifiData.rssi });
           }
+          // Ethernet boards: the wired connection first, Wi-Fi below it.
+          const eth = wifiData.ethernet;
+          if (eth && eth.link) {
+            if (modeEl) modeEl.textContent = i18n.t("race.connected", { mode: "Ethernet" });
+            const ethDetails = eth.ip
+              ? i18n.t("race.eth_details", { ip: eth.ip, how: eth.fixed ? i18n.t("race.eth_fixed") : "DHCP" })
+              : i18n.t("race.eth_no_ip");
+            details = details ? ethDetails + "<br><br>" + details : ethDetails;
+          } else if (eth) {
+            details = i18n.t("race.eth_unplugged") + (details ? "<br><br>" + details : "");
+          }
         }
       } catch (err) {
         console.error("Failed to fetch WiFi info:", err);
@@ -1306,6 +1348,7 @@ onload = async function (e) {
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
+  applyRaceNotesButton();
   syncRaceAnalyticsToggleUI();
 
   config.style.display = "none";
@@ -1590,6 +1633,7 @@ onload = async function (e) {
     if (receiverRadioSelect && configData.receiverRadio !== undefined) {
       receiverRadioSelect.value = configData.receiverRadio;
     }
+    loadEventMode(configData.eventMode);
     loadC5Profiles(configData.c5Pilots || [], configData.c5Gain);
     toggleNovaFilterSection();
 
@@ -2190,6 +2234,20 @@ function toggleOpenRaceNotesOnRaceEnd(enabled) {
   syncOpenRaceNotesOnRaceEndToggle();
 }
 
+// Race Notes button on the Race tab, shown unless turned off on this device.
+function toggleShowRaceNotesButton(show) {
+  localStorage.setItem("showRaceNotesButton", show ? "1" : "0");
+  applyRaceNotesButton();
+}
+
+function applyRaceNotesButton() {
+  const show = localStorage.getItem("showRaceNotesButton") !== "0";
+  const btn = document.getElementById("raceNotesButton");
+  if (btn) btn.style.display = show ? "" : "none";
+  const toggle = document.getElementById("showRaceNotesButton");
+  if (toggle) toggle.checked = show;
+}
+
 function updateSavedRaceNotes(timestamp, notes) {
   const existingRace = raceHistoryData.find((race) => race.timestamp === timestamp) || {};
   const formData = new URLSearchParams();
@@ -2316,6 +2374,10 @@ function openTab(evt, tabName) {
   // Notes modal only applies to race tab
   if (tabName !== "race") {
     closeRaceNotesModal();
+  }
+
+  if (tabName === "raceEvent" && typeof RaceEvent !== "undefined") {
+    RaceEvent.show();
   }
 
   // Load race history when opening history tab
@@ -2452,6 +2514,7 @@ async function saveConfig() {
     maxLaps: maxLaps,
     maxHeatTime30s: maxHeatTime30s,
     receiverRadio: receiverRadioSelect ? parseInt(receiverRadioSelect.value) : 0,
+    eventMode: document.getElementById("eventMode")?.checked ? 1 : 0,
     c5Gain: getC5GainForSave(),
     c5Pilots: getC5ProfilesForSave(),
     novaFilterKalman: document.getElementById("novaFilterKalman") ? (document.getElementById("novaFilterKalman").checked ? 1 : 0) : 1,
@@ -2750,6 +2813,7 @@ async function refreshConfigFromDevice() {
       receiverRadioSelect.value = configData.receiverRadio;
       toggleNovaFilterSection();
     }
+    loadEventMode(configData.eventMode);
     if (configData.c5Pilots && typeof C5UI !== "undefined" && !/^(pending|saving)$/.test(C5UI.saveState())) {
       loadC5Profiles(configData.c5Pilots, configData.c5Gain);
     }
@@ -4857,7 +4921,6 @@ function renderAlwaysOnRaceStats(stats) {
 // ============================================
 // Race Analysis (Multi-Pilot + Personal Tabbed Analytics)
 // ============================================
-const MAX_ENABLED_RACE_ANALYTICS = 3;
 const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsDisplaySettings";
 const RACE_ANALYTICS_DEFAULTS = {
   fastestLap: true,
@@ -4895,10 +4958,6 @@ function saveRaceAnalyticsDisplaySettings() {
   localStorage.setItem(RACE_ANALYTICS_STORAGE_KEY, JSON.stringify(raceAnalyticsDisplaySettings));
 }
 
-function getEnabledRaceAnalyticsCount() {
-  return Object.values(raceAnalyticsDisplaySettings).filter(Boolean).length;
-}
-
 function getEnabledRaceAnalyticsTabs() {
   const order = ["fastestLap", "fastest3Consec", "lapTimes", "consistency"];
   return order.filter((key) => !!raceAnalyticsDisplaySettings[key]);
@@ -4925,13 +4984,6 @@ function syncRaceAnalyticsToggleUI() {
 
 function toggleRaceAnalyticsPanel(panelKey, enabled) {
   if (!(panelKey in RACE_ANALYTICS_DEFAULTS)) return;
-
-  const alreadyEnabled = !!raceAnalyticsDisplaySettings[panelKey];
-  if (enabled && !alreadyEnabled && getEnabledRaceAnalyticsCount() >= MAX_ENABLED_RACE_ANALYTICS) {
-    alert(`You can enable up to ${MAX_ENABLED_RACE_ANALYTICS} analytics panels at once.`);
-    syncRaceAnalyticsToggleUI();
-    return;
-  }
 
   raceAnalyticsDisplaySettings[panelKey] = enabled;
   if (!raceAnalyticsDisplaySettings[currentRaceAnalyticsTab]) {
@@ -5452,6 +5504,8 @@ function saveCurrentRace(options = {}) {
       };
     });
     console.log(`[Race] Saving C5 multi-pilot race with ${raceData.pilots.length} pilots`);
+    // Race director: named after the loaded heat and round (event.js).
+    if (typeof RaceEvent !== "undefined") Object.assign(raceData, RaceEvent.raceLabel(c5Race.racers));
   }
   // Build pilots array for multi-pilot races (sync mode active)
   else if (raceSyncMode === 1 || raceSyncMode === 2) {
@@ -5512,6 +5566,7 @@ function saveCurrentRace(options = {}) {
       if (setAsCurrentSession) {
         currentRaceSessionTimestamp = raceTimestamp;
       }
+      if (c5Multi && typeof RaceEvent !== "undefined") RaceEvent.recordRace(raceData);
       loadRaceHistory();
       return raceTimestamp;
     })
@@ -7882,6 +7937,191 @@ function formatBytes(n) {
   if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
   if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
   return n + " B";
+}
+
+// ---- C5 receiver firmware -------------------------------------------------
+// The C5 has its own firmware and releases (FPVGateC5MK). Each release commits
+// release/<board>/firmware.bin, which raw.githubusercontent.com serves with
+// Access-Control-Allow-Origin, as the releases API does. So, as for the gate's
+// own firmware, the browser downloads it, passes it to the gate, and the gate
+// sends it to the C5 over their link (C5 firmware 3 and up).
+const C5FW_RELEASES_API = "https://api.github.com/repos/LouisHitchcock/FPVGateC5MK/releases";
+const C5FW_RAW = "https://raw.githubusercontent.com/LouisHitchcock/FPVGateC5MK";
+let c5FwSource = "online";
+let c5FwReleases = [];
+let c5FwStatus = null;
+let c5FwTimer = null;
+
+function c5FwShowWarning(text) {
+  const el = document.getElementById("c5FwWarning");
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.display = text ? "block" : "none";
+}
+
+function c5FwProgress(percent, text) {
+  const wrap = document.getElementById("c5FwRunning");
+  if (!wrap) return;
+  wrap.style.display = "block";
+  document.getElementById("c5FwProgressBar").style.width = Math.max(0, Math.min(100, percent)) + "%";
+  document.getElementById("c5FwProgressText").textContent = text;
+}
+
+function c5FwBusy(state) {
+  return ["starting", "sending", "finishing", "restarting"].includes(state);
+}
+
+function loadC5Firmware() {
+  const section = document.getElementById("c5FwSection");
+  if (!section) return;
+  fetch("/api/c5/update")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      if (!s) return;
+      c5FwStatus = s;
+      const c5 = s.c5 || {};
+      section.style.display = c5.online || c5FwBusy(s.state) ? "block" : "none";
+      renderC5FwInfo();
+      if (!c5FwReleases.length) loadC5FwVersions();
+      if (c5FwBusy(s.state)) watchC5Update();
+    })
+    .catch(() => {});
+}
+
+function renderC5FwInfo() {
+  const box = document.getElementById("c5FwInfo");
+  const button = document.getElementById("c5FwStartBtn");
+  const c5 = (c5FwStatus && c5FwStatus.c5) || {};
+  const updatable = c5.online && c5.firmware >= 3;
+  if (box) {
+    box.innerHTML = updatable
+      ? `<span class="ota-device-name">${c5.board}</span><span class="ota-device-sizes">${c5.version}</span>`
+      : "";
+  }
+  if (!c5.online) c5FwShowWarning(i18n.t("settings.c5fw.offline"));
+  else if (c5.firmware < 3) c5FwShowWarning(i18n.t("settings.c5fw.too_old"));
+  else c5FwShowWarning("");
+  if (button) button.disabled = !updatable || c5FwBusy(c5FwStatus && c5FwStatus.state);
+}
+
+function loadC5FwVersions() {
+  const select = document.getElementById("c5FwVersionSelect");
+  if (!select) return;
+  fetch(C5FW_RELEASES_API)
+    .then((r) => (r.ok ? r.json() : []))
+    .then((list) => {
+      c5FwReleases = (list || [])
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name,
+          name: (r.name || r.tag_name) + (r.prerelease ? " (pre-release)" : ""),
+          notes: r.body || "",
+        }));
+      select.innerHTML = "";
+      if (!c5FwReleases.length) {
+        select.innerHTML = `<option value="">${i18n.t("settings.c5fw.no_versions")}</option>`;
+        return;
+      }
+      const installed = ((c5FwStatus && c5FwStatus.c5) || {}).version;
+      c5FwReleases.forEach((r, i) => {
+        const opt = document.createElement("option");
+        opt.value = r.tag;
+        opt.textContent =
+          r.name +
+          (i === 0 ? ` ${i18n.t("settings.firmware.newest")}` : "") +
+          (installed && r.tag.replace(/^v/, "") === installed ? ` ${i18n.t("settings.c5fw.installed")}` : "");
+        select.appendChild(opt);
+      });
+      onC5FwVersionChange();
+    })
+    .catch(() => {
+      select.innerHTML = `<option value="">${i18n.t("settings.c5fw.no_versions")}</option>`;
+    });
+}
+
+function onC5FwVersionChange() {
+  const select = document.getElementById("c5FwVersionSelect");
+  const wrap = document.getElementById("c5FwNotesWrap");
+  const release = c5FwReleases.find((r) => r.tag === (select && select.value));
+  if (!wrap) return;
+  wrap.style.display = release && release.notes ? "block" : "none";
+  document.getElementById("c5FwNotes").textContent = release ? release.notes.trim() : "";
+}
+
+function toggleC5FwSource() {
+  c5FwSource = c5FwSource === "online" ? "file" : "online";
+  document.getElementById("c5FwOnline").style.display = c5FwSource === "online" ? "block" : "none";
+  document.getElementById("c5FwFile").style.display = c5FwSource === "file" ? "block" : "none";
+  document.getElementById("c5FwSourceToggle").textContent = i18n.t(
+    c5FwSource === "online" ? "settings.c5fw.source_file" : "settings.c5fw.source_online"
+  );
+}
+
+// The image for the C5's own board: the boards' link pins differ, so the
+// gate also refuses an image built for the other one.
+async function c5FwImage() {
+  if (c5FwSource === "file") {
+    const file = document.getElementById("c5FwFileInput").files[0];
+    if (!file) throw new Error(i18n.t("settings.c5fw.no_file"));
+    return file;
+  }
+  const tag = document.getElementById("c5FwVersionSelect").value;
+  const board = c5FwStatus.c5.board;
+  if (!tag) throw new Error(i18n.t("settings.c5fw.no_versions"));
+  c5FwProgress(0, i18n.t("settings.c5fw.downloading", { version: tag }));
+  const r = await fetch(`${C5FW_RAW}/${tag}/release/${board}/firmware.bin`, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${tag} (${board}): HTTP ${r.status}`);
+  return r.blob();
+}
+
+async function startC5Update() {
+  const button = document.getElementById("c5FwStartBtn");
+  c5FwShowWarning("");
+  if (button) button.disabled = true;
+  try {
+    const image = await c5FwImage();
+    c5FwProgress(0, i18n.t("settings.c5fw.uploading"));
+    const up = await fetch("/api/c5/firmware", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: image,
+    });
+    const info = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(info.error || "HTTP " + up.status);
+    const start = await fetch("/api/c5/update", { method: "POST" });
+    const started = await start.json().catch(() => ({}));
+    if (!start.ok) throw new Error(started.error || "HTTP " + start.status);
+    watchC5Update();
+  } catch (err) {
+    document.getElementById("c5FwRunning").style.display = "none";
+    c5FwShowWarning(err.message);
+    if (button) button.disabled = false;
+  }
+}
+
+// Progress comes from the gate, which does the sending.
+function watchC5Update() {
+  if (c5FwTimer) return;
+  c5FwTimer = setInterval(() => {
+    fetch("/api/c5/update")
+      .then((r) => r.json())
+      .then((s) => {
+        c5FwStatus = s;
+        const pct = s.size ? Math.floor((100 * s.sent) / s.size) : 0;
+        if (s.state === "starting") c5FwProgress(0, i18n.t("settings.c5fw.starting"));
+        else if (s.state === "sending") c5FwProgress(pct, i18n.t("settings.c5fw.sending", { percent: pct }));
+        else if (s.state === "finishing") c5FwProgress(100, i18n.t("settings.c5fw.finishing"));
+        else if (s.state === "restarting") c5FwProgress(100, i18n.t("settings.c5fw.restarting"));
+        if (c5FwBusy(s.state)) return;
+        clearInterval(c5FwTimer);
+        c5FwTimer = null;
+        if (s.state === "done") c5FwProgress(100, i18n.t("settings.c5fw.done", { version: s.c5.version }));
+        else if (s.state === "failed") c5FwProgress(0, i18n.t("settings.c5fw.failed", { error: s.error }));
+        renderC5FwInfo();
+        loadC5FwVersions();
+      })
+      .catch(() => {});   // the gate is busy; try again next tick
+  }, 500);
 }
 
 // Reads what the device is and how much room it has. Everything the update
@@ -10310,10 +10550,12 @@ function openSettingsModal() {
   if (modal) {
   modal.classList.add("active");
     syncOpenRaceNotesOnRaceEndToggle();
+    applyRaceNotesButton();
 
     // Refresh each time the modal opens rather than once at page load, so the
     // panel reflects the device after an update without needing a reload.
     loadOtaDeviceInfo();
+    loadC5Firmware();
 
     // Load full config to populate all settings
     _refreshingFromDevice = true;

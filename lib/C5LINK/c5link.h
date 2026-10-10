@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <FS.h>
 #include "config.h"
 
 // UART contract shared with the ESP32-C5 RF node. Lines are payload*XOR\n,
@@ -13,6 +14,14 @@
 //   payload: 'M', seq u8, t0 u32, slot mask u8, then per slot in the mask:
 //   value u16 (bits 0-9 rssi, bit 15 failed), dt u16 (us after t0)
 // Older C5 firmware gets the F/OK slot cycle below.
+//
+// C5 firmware 3 reports its version and board in its status line, and takes
+// a new application image over the link: U,<bytes>,<sha256> (the C5 erases,
+// then u,ready), then one chunk at a time, each acknowledged before the next:
+//   0xA6, len, payload[len], crc8(len, payload)
+//   payload: 'W', offset u32, data
+// then E (u,done and it restarts into the new image, which confirms itself
+// once it hears the S3, or the C5 goes back to the old one).
 class C5Link {
 public:
     static constexpr uint8_t C5_MAX_PILOTS = 8;
@@ -27,13 +36,17 @@ public:
     // overwriting samples before C5MultiPilot drains them.
     // Scan mode delivers ~1 kHz per pilot, so this is ~128 ms of history.
     static constexpr uint8_t SAMPLE_QUEUE_DEPTH = 128;
-    // A 2 kHz-per-pilot stream of 42-byte records is ~45 KB/s; 4 KB rides
-    // out ~90 ms of main-loop stall.
-    static constexpr size_t RX_BUFFER_BYTES = 4096;
+    // A 2 kHz-per-pilot stream of 42-byte records is ~45 KB/s; 16 KB rides
+    // out ~350 ms of stall.
+    static constexpr size_t RX_BUFFER_BYTES = 16384;
+    // Most bytes one poll() reads (~30 records, well under the sample
+    // queues), so a backlog is worked through with lap detection between.
+    static constexpr uint32_t POLL_MAX_BYTES = 1024;
     static constexpr uint32_t SLOT_RESEND_MS = 250;
 
     void begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin);
-    void poll(uint32_t nowMs);
+    // True when it stopped at POLL_MAX_BYTES with more waiting.
+    bool poll(uint32_t nowMs);
     // A valid line from the C5 within the last ONLINE_TIMEOUT_MS. Signed
     // difference: the web task (other core) passes a "now" taken a moment
     // before poll() may have stamped a newer line.
@@ -66,6 +79,37 @@ public:
     // since the last call to these (telemetry; read from the web task).
     uint32_t takePollGapMaxUs() { uint32_t v = pollGapMaxUs_; pollGapMaxUs_ = 0; return v; }
     uint32_t takePollBytesMax() { uint32_t v = pollBytesMax_; pollBytesMax_ = 0; return v; }
+
+    // The C5's link protocol (firmware 3 and up take updates), and its
+    // firmware version and board ("1.0.0", "c5zero"; "" before firmware 3).
+    uint8_t firmware() const { return firmware_; }
+    const char *version() const { return version_; }
+    const char *board() const { return board_; }
+
+    // Firmware update over the link. requestUpdate() is called from the web
+    // task; the C5 task does the work in poll().
+    enum class UpdateState : uint8_t { Idle, Starting, Sending, Finishing, Restarting, Done, Failed };
+    static constexpr uint32_t UPDATE_CHUNK = 240;                 // data bytes per chunk
+    static constexpr uint32_t UPDATE_BEGIN_TIMEOUT_MS = 40000;    // the C5 erases first
+    static constexpr uint32_t UPDATE_ACK_TIMEOUT_MS = 300;
+    static constexpr uint8_t UPDATE_RETRIES = 10;                 // for one chunk
+    static constexpr uint32_t UPDATE_FINISH_TIMEOUT_MS = 15000;   // check and switch
+    // Back with the new version and hearing the S3; longer than the C5's
+    // 60 s trial, so a rollback is reported as one.
+    static constexpr uint32_t UPDATE_RESTART_TIMEOUT_MS = 90000;
+    // After u,done, a status the old image already had on the wire.
+    static constexpr uint32_t UPDATE_STALE_STATUS_MS = 2000;
+    // The image is in LittleFS at path. version is what the C5 should report
+    // afterwards. False if an update is already running.
+    bool requestUpdate(const char *path, uint32_t size, const uint8_t sha256[32], const char *version);
+    UpdateState updateState() const { return updateState_; }
+    bool updating() const {
+        return updateRequested_ || (updateState_ != UpdateState::Idle && updateState_ != UpdateState::Done &&
+                                    updateState_ != UpdateState::Failed);
+    }
+    uint32_t updateAcked() const { return updateAcked_; }
+    uint32_t updateSize() const { return updateSize_; }
+    const char *updateError() const { return updateError_; }
 
 private:
     Config *config_ = nullptr;
@@ -133,6 +177,25 @@ private:
     volatile uint32_t pollGapMaxUs_ = 0;
     volatile uint32_t pollBytesMax_ = 0;
 
+    uint8_t firmware_ = 0;
+    char version_[16] = "";
+    char board_[12] = "";
+
+    // Update.
+    static constexpr uint8_t CHUNK_SYNC = 0xA6;
+    volatile bool updateRequested_ = false;
+    volatile UpdateState updateState_ = UpdateState::Idle;
+    char updatePath_[32] = {};
+    char updateVersion_[16] = {};
+    uint8_t updateSha_[32] = {};
+    volatile uint32_t updateSize_ = 0;
+    volatile uint32_t updateAcked_ = 0;   // bytes the C5 has written
+    uint32_t updateSentMs_ = 0;           // when the last command or chunk went out
+    uint8_t updateTries_ = 0;
+    char updateError_[24] = {};
+    File updateFile_;
+    uint32_t updateBadRecords_ = 0, updateSeqGaps_ = 0;   // held while updating
+
     void sendPayload(const char *payload);
     void sendTune(uint8_t pilot);
     void tuneNext();
@@ -140,4 +203,8 @@ private:
     void sendSlots(uint32_t nowMs);
     bool slotsChanged() const;
     void handleRecord(uint32_t nowMs);
+    void serviceUpdate(uint32_t nowMs);
+    void updateReply(const char *reply, uint32_t nowMs);
+    void sendChunk(uint32_t nowMs);
+    void failUpdate(const char *reason);
 };

@@ -16,6 +16,7 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <mbedtls/sha256.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
 #include <memory>
@@ -350,7 +351,7 @@ void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak) 
     rhEvents.send(body, "rhPass");
 }
 
-// Passes as they happen and every node's RSSI ten times a second, while the
+// Passes as they happen and every node's RSSI 20 times a second, while the
 // RotorHazard plugin is linked. C5 RSSI is 0..1023; "rssi" and "peak" are
 // 0..255, the scale of the enter and exit levels, and "raw" and "rawPeak"
 // carry the full 0..1023 for plugins that show it (rawMax in /api/rh/info).
@@ -390,9 +391,11 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     int n = snprintf(body, sizeof(body), "{\"rssi\":[");
     uint8_t inside = 0;
     if (c5) {
+        // The highest value since the last message, so RotorHazard's RSSI
+        // history (and its Marshal page) has every pass's peak.
         uint16_t raw[C5Link::C5_MAX_PILOTS];
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
-            raw[i] = c5MultiPilot->rssi(i);
+            raw[i] = c5MultiPilot->takeRhPeak(i);
             n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i] / 4);
             if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
         }
@@ -404,6 +407,56 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     }
     snprintf(body + n, sizeof(body) - n, "],\"in\":%u}", inside);
     rhEvents.send(body, "rhRssi");
+}
+
+// One piece of a C5 firmware upload. The image is an ESP-IDF application:
+// byte 0 is 0xE9, bytes 12-13 the chip id (ESP32-C5 = 23), and its app
+// description starts at byte 32 (magic 0xABCD5432) with the version, which
+// FPVGateC5MK sets to "<version>+<board>", at byte 48.
+void Webserver::c5ImageChunk(uint8_t *data, size_t len, size_t index, size_t total) {
+    static File file;
+    static mbedtls_sha256_context sha;
+    static uint8_t head[80];
+    auto fail = [&](const char *why) {
+        if (file) file.close();
+        LittleFS.remove(C5_IMAGE_TMP_PATH);
+        strlcpy(c5Image_.error, why, sizeof(c5Image_.error));
+        c5Image_.ok = false;
+    };
+    if (index == 0) {
+        c5Image_ = C5Image();
+        if (c5Link && c5Link->updating()) return fail("A C5 update is running");
+        if (total < sizeof(head) || total > C5_IMAGE_MAX_BYTES) return fail("That isn't a C5 firmware file");
+        LittleFS.remove(C5_IMAGE_PATH);   // room for the new one
+        file = LittleFS.open(C5_IMAGE_TMP_PATH, "w");
+        if (!file) return fail("Couldn't store the file");
+        mbedtls_sha256_init(&sha);
+        mbedtls_sha256_starts(&sha, 0);
+    } else if (!file) {
+        return;   // already failed
+    }
+    if (index < sizeof(head)) memcpy(head + index, data, min(len, sizeof(head) - index));
+    if (file.write(data, len) != len) return fail("Not enough space for the file");
+    mbedtls_sha256_update(&sha, data, len);
+    if (index + len < total) return;
+
+    file.close();
+    mbedtls_sha256_finish(&sha, c5Image_.sha256);
+    mbedtls_sha256_free(&sha);
+    uint32_t magic;
+    memcpy(&magic, head + 32, 4);
+    const uint16_t chip = (uint16_t)(head[12] | head[13] << 8);
+    char version[33] = {};
+    memcpy(version, head + 48, 32);
+    char *plus = strchr(version, '+');
+    if (head[0] != 0xE9 || chip != 23 || magic != 0xABCD5432) return fail("That isn't ESP32-C5 firmware");
+    if (!plus || !plus[1]) return fail("That firmware doesn't say which C5 board it is for");
+    *plus++ = 0;
+    if (!LittleFS.rename(C5_IMAGE_TMP_PATH, C5_IMAGE_PATH)) return fail("Couldn't store the file");
+    strlcpy(c5Image_.version, version, sizeof(c5Image_.version));
+    strlcpy(c5Image_.board, plus, sizeof(c5Image_.board));
+    c5Image_.size = (uint32_t)total;
+    c5Image_.ok = true;
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
@@ -1214,6 +1267,89 @@ EEPROM:\n\
         request->send(200, "application/json", out);
     });
 
+    // Manual lap for one C5 slot in the running race (?pilot=0..7). It goes
+    // out as a normal "c5Lap" event and counts in the race like a pass.
+    server.on("/api/c5/addLap", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot || !request->hasParam("pilot")) {
+            request->send(400, "application/json", "{\"error\":\"pilot required\"}");
+            return;
+        }
+        const long pilot = request->getParam("pilot")->value().toInt();
+        if (pilot < 0 || !c5MultiPilot->requestManualLap((uint8_t)pilot)) {
+            request->send(409, "application/json", "{\"error\":\"no race running for that pilot\"}");
+            return;
+        }
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
+
+    // C5 firmware: an application image from FPVGateC5MK as the raw body.
+    // It is checked as it arrives (c5ImageChunk) and kept in LittleFS until
+    // POST /api/c5/update sends it to the C5 over the link.
+    server.on("/api/c5/firmware", HTTP_POST,
+        [this](AsyncWebServerRequest *request) {
+            JsonDocument doc;
+            if (!c5Image_.ok) {
+                doc["error"] = c5Image_.error[0] ? c5Image_.error : "No file received";
+            } else {
+                doc["version"] = c5Image_.version;
+                doc["board"] = c5Image_.board;
+                doc["size"] = c5Image_.size;
+            }
+            String out;
+            serializeJson(doc, out);
+            request->send(c5Image_.ok ? 200 : 400, "application/json", out);
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            c5ImageChunk(data, len, index, total);
+        });
+
+    server.on("/api/c5/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const char *why = nullptr;
+        if (!c5Link || !c5Link->online(millis())) why = "The C5 isn't connected";
+        else if (c5Link->firmware() < 3) why = "This C5's firmware can't be updated over the link. Flash it over USB once.";
+        else if (!c5Image_.ok) why = "Choose a C5 firmware file first";
+        else if (strcmp(c5Image_.board, c5Link->board()) != 0) why = "That firmware is for a different C5 board";
+        else if (timer->isRaceRunning()) why = "Stop the race first";
+        else if (!c5Link->requestUpdate(C5_IMAGE_PATH, c5Image_.size, c5Image_.sha256, c5Image_.version))
+            why = "An update is already running";
+        if (why) {
+            JsonDocument doc;
+            doc["error"] = why;
+            String out;
+            serializeJson(doc, out);
+            request->send(409, "application/json", out);
+            return;
+        }
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
+
+    // The C5's firmware, the image waiting to be sent, and update progress.
+    server.on("/api/c5/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        static const char *const states[] = {"idle", "starting", "sending", "finishing", "restarting", "done", "failed"};
+        JsonDocument doc;
+        JsonObject c5 = doc["c5"].to<JsonObject>();
+        c5["online"] = c5Link && c5Link->online(millis());
+        c5["firmware"] = c5Link ? c5Link->firmware() : 0;
+        c5["version"] = c5Link ? c5Link->version() : "";
+        c5["board"] = c5Link ? c5Link->board() : "";
+        if (c5Image_.ok) {
+            JsonObject image = doc["image"].to<JsonObject>();
+            image["version"] = c5Image_.version;
+            image["board"] = c5Image_.board;
+            image["size"] = c5Image_.size;
+        }
+        if (c5Link) {
+            doc["state"] = states[(uint8_t)c5Link->updateState()];
+            doc["sent"] = c5Link->updateAcked();
+            doc["size"] = c5Link->updateSize();
+            doc["error"] = c5Link->updateError();
+        }
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
     server.on("/api/system/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
         doc["version"] = FPVGATE_VERSION_STRING();
@@ -1229,6 +1365,23 @@ EEPROM:\n\
         ethernet["link"] = ethnet_link_up();
         ethernet["ip"] = ethIp;
         ethernet["fixed"] = ethnet_is_static();
+        ethernet["mbps"] = ethnet_speed_mbps();
+        ethernet["fullDuplex"] = ethnet_full_duplex();
+        ethnet_w5500_stats_t w5500;
+        ethnet_w5500_stats(&w5500);
+        JsonObject counters = ethernet["w5500"].to<JsonObject>();
+        counters["rxFrames"] = w5500.rx_frames;
+        counters["rxTcp80"] = w5500.rx_tcp80;
+        counters["rxBufKb"] = ethnet_w5500_rxbuf_kb();
+        counters["rxErrors"] = w5500.rx_errors;
+        counters["rxNoMem"] = w5500.rx_nomem;
+        counters["rxMissedEdges"] = w5500.rx_missed_edges;
+        counters["txFrames"] = w5500.tx_frames;
+        counters["txFull"] = w5500.tx_full;
+        counters["txTimeout"] = w5500.tx_timeout;
+        counters["txErrors"] = w5500.tx_errors;
+        counters["phycfgrBoot"] = ethnet_boot_phycfgr();
+        counters["phycfgr"] = ethnet_w5500_phycfgr();
 #endif
 
         // Which application slot is running, and how much room the other one
@@ -1668,7 +1821,18 @@ EEPROM:\n\
             doc["rssi"] = 0;
             doc["connected"] = false;
         }
-        
+#ifdef FPVGATE_ETH_W5500
+        // The header's connection indicator shows Ethernet first when it is up.
+        JsonObject ethernet = doc["ethernet"].to<JsonObject>();
+        char ethIp[16];
+        ethnet_ip_string(ethIp, sizeof(ethIp));
+        ethernet["link"] = ethnet_link_up();
+        ethernet["ip"] = ethIp;
+        ethernet["fixed"] = ethnet_is_static();
+        ethernet["mbps"] = ethnet_speed_mbps();
+        ethernet["fullDuplex"] = ethnet_full_duplex();
+#endif
+
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
@@ -1775,6 +1939,42 @@ EEPROM:\n\
         led->on(200);
     });
 
+    // Race director event: pilots, formats, heats and their results, kept by
+    // the web UI as one JSON document. The gate only stores it, in chunks
+    // either way, so a large event never sits in heap.
+    server.on("/api/event", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        size_t bytes = 0;
+        if (!storage->exists(EVENT_PATH) || !storage->fileSize(EVENT_PATH, bytes) || bytes == 0) {
+            request->send(404, "application/json", "{\"error\":\"no event\"}");
+            return;
+        }
+        request->send(request->beginResponse("application/json", bytes,
+            [this](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                return storage->readBinaryRange(EVENT_PATH, index, buffer, maxLen);
+            }));
+    });
+
+    server.on("/api/event", HTTP_POST,
+        [this](AsyncWebServerRequest *request) {
+            if (request->contentLength() > EVENT_MAX_BYTES) {
+                request->send(413, "application/json", "{\"error\":\"event too large\"}");
+            } else if (!eventUploadOk_) {
+                request->send(500, "application/json", "{\"error\":\"event not saved\"}");
+            } else {
+                request->send(200, "application/json", "{\"status\":\"OK\"}");
+            }
+            eventUploadOk_ = false;   // an empty body never reaches the body handler
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            if (total > EVENT_MAX_BYTES) return;
+            if (index == 0) eventUploadOk_ = storage->writeBinaryFile(EVENT_TMP_PATH, data, len);
+            else if (eventUploadOk_) eventUploadOk_ = storage->appendBinaryFile(EVENT_TMP_PATH, data, len);
+            if (eventUploadOk_ && index + len >= total) {
+                eventUploadOk_ = storage->renameFile(EVENT_TMP_PATH, EVENT_PATH);   // replaces the old file
+            }
+        });
+
     server.on("/races/download", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = history->toJsonString();
         AsyncWebServerResponse *response = request->beginResponse(200, "application/octet-stream", json);
@@ -1798,7 +1998,9 @@ EEPROM:\n\
         race.band = jsonObj["band"] | "";
         race.channel = jsonObj["channel"] | 0;
         race.notes = jsonObj["notes"] | "";
-        
+        race.name = jsonObj["name"] | "";   // e.g. a race director heat and round
+        race.tag = jsonObj["tag"] | "";
+
         DEBUG("Parsing race save: trackId=%u\n", (uint32_t)(jsonObj["trackId"] | 0));
         race.trackId = jsonObj["trackId"] | 0;
         race.trackName = jsonObj["trackName"] | "";

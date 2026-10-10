@@ -456,7 +456,8 @@ typedef struct {
     char c5PilotPhonetic[8][21];   // for announcements; empty = use the name
     uint32_t c5PilotColor[8];      // 0xRRGGBB
     uint8_t c5RaceMask;            // bit i: slot i's laps count in races
-    uint8_t _reservedC5[3];
+    uint8_t eventMode;             // 1 = race director Event tab shown (was reserved, zero)
+    uint8_t _reservedC5[2];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -609,6 +610,7 @@ class Config {
     const char* getC5PilotPhonetic(uint8_t pilot);
     uint32_t getC5PilotColor(uint8_t pilot);
     uint8_t getC5RaceMask();
+    uint8_t getEventMode();
     void setC5PilotIdentity(uint8_t pilot, const char* name, const char* phonetic, uint32_t color, bool races);
     void setC5Gain(uint8_t gain);
     

@@ -7,6 +7,10 @@ extern "C" {
 #endif
 // Start the USB Ethernet netif after Arduino has initialized the network stack.
 esp_err_t usbnet_begin(void);
+// Stop serving the USB network (no DHCP, no traffic) or start again, e.g.
+// while Ethernet is connected. The USB device stays, so the host keeps the
+// adapter and the serial port.
+void usbnet_set_active(bool active);
 // Bench diagnostics; call from the application task.
 void usbnet_print_status(void);
 

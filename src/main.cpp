@@ -188,7 +188,9 @@ static void initParallelTask() {
 
 // The C5 link at ~8k samples/s: serviced every millisecond, above loop()'s
 // priority on the same core, so a slow loop pass (web, SD, JSON) can't let
-// the per-pilot sample queues overflow.
+// the per-pilot sample queues overflow. The web server's task (priority 10)
+// is pinned to core 0 by CONFIG_ASYNC_TCP_RUNNING_CORE, as a slow request
+// there (saving a race to flash) held this task off for ~1 s.
 static void c5Task(void *) {
     for (;;) {
         if (config.getReceiverRadio() == 2) {
@@ -197,10 +199,15 @@ static void c5Task(void *) {
                 c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
                 c5MultiPilot.begin(&config, &c5Link);
             }
-            c5Link.poll(nowMs);
-            if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(timer.getRaceStartMs());
-            if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
-            c5MultiPilot.update(nowMs);
+            // A backlog after a stall is read a piece at a time, with lap
+            // detection draining the sample queues in between.
+            bool more;
+            do {
+                more = c5Link.poll(nowMs);
+                if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(timer.getRaceStartMs());
+                if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
+                c5MultiPilot.update(nowMs);
+            } while (more);
         }
         vTaskDelay(1);
     }
@@ -487,6 +494,11 @@ void setup() {
 #endif
 #ifdef FPVGATE_ETH_W5500
     DEBUG("Ethernet: %s (DHCP, else http://192.168.8.1/)\n", esp_err_to_name(ethnet_begin()));
+#ifdef FPVGATE_USB_NET
+    // Held off until loop() knows whether Ethernet is connected, so the host
+    // doesn't take a USB address it is about to lose.
+    usbnet_set_active(false);
+#endif
 #endif
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
@@ -914,6 +926,11 @@ void loop() {
 
 #ifdef FPVGATE_ETH_W5500
     ethnet_update(currentTimeMs);
+#ifdef FPVGATE_USB_NET
+    // USB networking only while Ethernet is unplugged. At boot the link gets
+    // until ETHNET_USB_WAIT_MS to come up first.
+    if (ethnet_link_up() || currentTimeMs >= ETHNET_USB_WAIT_MS) usbnet_set_active(!ethnet_link_up());
+#endif
 #endif
 
     // WiFi mode - original behavior (RotorHazard mode disabled)

@@ -22,6 +22,7 @@
 extern "C" {
 uint8_t tud_network_mac_address[6] = {0x02, 0, 0, 0, 0, 1};
 esp_err_t usbnet_dhcp_start(struct netif *interface);
+void usbnet_dhcp_stop(struct netif *interface);
 }
 
 static esp_netif_t *netif;
@@ -389,5 +390,32 @@ esp_err_t usbnet_begin(void) {
     startupResult = esp_netif_tcpip_exec(startDhcp, esp_netif_get_netif_impl(netif));
     if (startupResult == ESP_OK) netifReady.store(true, std::memory_order_release);
     return startupResult;
+}
+
+static esp_err_t takeDown(void *arg) {
+    auto *interface = static_cast<struct netif *>(arg);
+    usbnet_dhcp_stop(interface);
+    netif_set_down(interface);
+    return ESP_OK;
+}
+
+static esp_err_t bringUp(void *arg) {
+    auto *interface = static_cast<struct netif *>(arg);
+    netif_set_up(interface);
+    return usbnet_dhcp_start(interface);
+}
+
+void usbnet_set_active(bool active) {
+    if (!netif || startupResult != ESP_OK) return;
+    if (active == netifReady.load(std::memory_order_acquire)) return;
+    if (!active) {
+        // Stop handing received frames to lwIP before the netif goes down.
+        netifReady.store(false, std::memory_order_release);
+        esp_netif_tcpip_exec(takeDown, esp_netif_get_netif_impl(netif));
+        Serial.println("[USB] networking off");
+    } else if (esp_netif_tcpip_exec(bringUp, esp_netif_get_netif_impl(netif)) == ESP_OK) {
+        netifReady.store(true, std::memory_order_release);
+        Serial.println("[USB] networking on");
+    }
 }
 #endif

@@ -22,6 +22,10 @@ struct C5Pass {
 class C5MultiPilot {
 public:
     static constexpr uint8_t MAX_RACE_LAPS = 64;
+    // A pass ends once the RSSI has stayed below Exit this long. Climbing
+    // back above Enter sooner (multipath dips as a quad flies through)
+    // continues the same pass, so one fly-through is one pass.
+    static constexpr uint32_t PASS_MERGE_MS = 300;
 
     void begin(Config *config, C5Link *link);
     // raceStartMs: millis() when the race started (LapTimer::getRaceStartMs).
@@ -41,6 +45,9 @@ public:
     // debug popout: at 25 frames a second a pass's peak would otherwise fall
     // between frames.
     uint16_t takePeakHold(uint8_t pilot);
+    // The same for the RotorHazard RSSI stream, held separately so the two
+    // readers don't take each other's peaks.
+    uint16_t takeRhPeak(uint8_t pilot);
     void takeCaptureFrame(uint8_t* values);
 
     // Slots that have a frequency and race (Calibration tab "Race" switch).
@@ -56,6 +63,10 @@ public:
     // This race's laps so far (ms; [0] is Gate 1). Copies up to max; returns
     // the count. Safe from another task.
     uint8_t copyLaps(uint8_t pilot, uint32_t *out, uint8_t max);
+    // A manual lap for a racing slot, timed when update() next runs and
+    // exempt from the minimum lap. False if no race runs or the slot doesn't
+    // race. Safe from another task.
+    bool requestManualLap(uint8_t pilot);
 
 private:
     Config *config_ = nullptr;
@@ -65,10 +76,13 @@ private:
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
     volatile uint16_t peakHold_[C5Link::C5_MAX_PILOTS] = {};
+    volatile uint16_t rhPeak_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t capturePeak_[C5Link::C5_MAX_PILOTS] = {};
     // Highest filtered value inside the gate and when it was first reached.
     uint16_t peak_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t peakUs_[C5Link::C5_MAX_PILOTS] = {};
+    // While a pass waits to end: when the RSSI went below Exit (0 = above it).
+    uint32_t belowUs_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t lastCrossingUs_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t laps_[C5Link::C5_MAX_PILOTS][MAX_RACE_LAPS] = {};
     uint8_t lapCount_[C5Link::C5_MAX_PILOTS] = {};
@@ -88,6 +102,8 @@ private:
     static constexpr uint8_t PASS_QUEUE = 16;
     C5Pass passes_[PASS_QUEUE] = {};
     uint8_t passCount_ = 0;
+    uint8_t manualMask_ = 0;   // bit i: a manual lap waits for slot i (under lapMux_)
 
-    void crossing(uint8_t pilot, uint32_t crossingUs);
+    void crossing(uint8_t pilot, uint32_t crossingUs, bool manual = false);
+    void endPass(uint8_t pilot);
 };
