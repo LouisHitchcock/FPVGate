@@ -101,6 +101,8 @@ private:
     uint16_t rssiPeak_ = 0;        // highest RSSI since the last idle refresh
     uint16_t enter_ = 0;
     uint16_t lastRssi_ = 0;
+    bool peerAlive_ = false;       // goggles ACKed since the previous refresh
+    uint32_t ackOkSeen_ = 0;
     uint8_t linkTestLeft_ = 0;
     uint32_t linkTestAtMs_ = 0;
 
@@ -111,6 +113,7 @@ private:
     void render();                 // clear + write rows + display
     void renderLinkTest();
     void renderIdle();
+    void updatePeerAlive();
     bool hasResults() const { return gate1Ms_ || !laps_.empty(); }
     void sendOsdText(uint8_t row, uint8_t col, const char* text);
     void sendOsdSub(uint8_t sub);

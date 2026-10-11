@@ -130,9 +130,8 @@ void ElrsOsd::afterModeSet() {
     // keeps its own MAC.
     esp_err_t e = esp_wifi_set_mac(WIFI_IF_STA, uid_);
     if (e != ESP_OK) DEBUG("ELRS OSD: esp_wifi_set_mac(STA) err=%d\n", (int)e);
-    // Same PHY set as the ExpressLRS backpacks (LR included).
-    e = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR);
-    if (e != ESP_OK) DEBUG("ELRS OSD: esp_wifi_set_protocol(STA) err=%d\n", (int)e);
+    // No LR protocol here: the backpack also accepts plain 802.11b frames, and
+    // enabling LR next to the softAP made the AP invisible to phones.
 }
 
 void ElrsOsd::afterApStarted() {
@@ -328,6 +327,13 @@ void ElrsOsd::renderIdle() {
     sendOsdSub(OSD_SUB_DISPLAY);
 }
 
+// Did the goggles ACK anything since the previous check?
+void ElrsOsd::updatePeerAlive() {
+    const uint32_t ok = s_ackOk;
+    peerAlive_ = ok != ackOkSeen_;
+    ackOkSeen_ = ok;
+}
+
 void ElrsOsd::renderLinkTest() {
     sendOsdSub(OSD_SUB_CLEAR);
     sendOsdText(row_, col_, "FPVGATE");
@@ -394,18 +400,22 @@ void ElrsOsd::loop(uint32_t nowMs) {
     }
     if (linkTestLeft_) return;
 
+    // Unicast ESP-NOW to goggles that are off (no ACK) is retried many times by
+    // the radio and eats the airtime the softAP needs for beacons. While nothing
+    // answers, only send a refresh every few seconds.
     if (raceRunning_) {
         if (changed) {
-            render();
-            resendAtMs_ = nowMs + 400;   // one redundant copy in case a frame was lost
-            nextRefreshMs_ = nowMs + 3000;
+            render();                    // laps always go out immediately
+            resendAtMs_ = peerAlive_ ? nowMs + 400 : 0;   // one redundant copy
+            nextRefreshMs_ = nowMs + (peerAlive_ ? 3000 : 5000);
         } else if (resendAtMs_ && (int32_t)(nowMs - resendAtMs_) >= 0) {
             resendAtMs_ = 0;
             render();
         } else if ((int32_t)(nowMs - nextRefreshMs_) >= 0) {
             // goggles switched on mid-race still get the screen
+            updatePeerAlive();
             render();
-            nextRefreshMs_ = nowMs + 3000;
+            nextRefreshMs_ = nowMs + (peerAlive_ ? 3000 : 5000);
         }
         return;
     }
@@ -416,7 +426,8 @@ void ElrsOsd::loop(uint32_t nowMs) {
         nextRefreshMs_ = nowMs;      // switch to the idle screen now
     }
     if ((int32_t)(nowMs - nextRefreshMs_) < 0) return;
-    nextRefreshMs_ = nowMs + 1000;
+    updatePeerAlive();
+    nextRefreshMs_ = nowMs + (peerAlive_ ? 1000 : 5000);
     if (idle_) {
         renderIdle();
     } else if (stopped || changed) {
@@ -452,7 +463,7 @@ const $=id=>document.getElementById(id);
 let filled=false;
 async function load(){const j=await (await fetch('/api/elrsosd')).json();
 if(!filled){filled=true;$('en').checked=j.enabled;$('phrase').value=j.phrase;$('row').value=j.row;$('col').value=j.col;$('layout').value=j.layout;$('clr').checked=j.clearOnStop;$('idle').checked=j.idle;}
-$('st').textContent='Status: '+(j.espnow?'ESP-NOW active':'inactive')+(j.wifiApMode?'':' (FPVGate is not in AP mode!)')+'\nReceiver: '+(j.rxOnline?'ok':'no link')+'   RSSI: '+j.rssi+' / enter '+j.enter+'\nUID: '+j.uid+'\nWi-Fi channel: '+j.channel+'\nDelivered (ACK): '+j.ackOk+'   Failed: '+j.ackFail;}
+$('st').textContent='Status: '+(j.espnow?'ESP-NOW active':'inactive')+(j.wifiApMode?'':' (FPVGate is not in AP mode!)')+'\nReceiver: '+(j.rxOnline?'ok':'no link')+'   RSSI: '+j.rssi+' / enter '+j.enter+'\nUID: '+j.uid+'\nWi-Fi channel: '+j.channel+'\nGoggles: '+(j.goggles?'responding':'not responding')+'\nDelivered (ACK): '+j.ackOk+'   Failed: '+j.ackFail;}
 async function save(){const b=new URLSearchParams({en:$('en').checked?1:0,phrase:$('phrase').value,row:$('row').value,col:$('col').value,layout:$('layout').value,clr:$('clr').checked?1:0,idle:$('idle').checked?1:0});
 const j=await (await fetch('/api/elrsosd',{method:'POST',body:b})).json();
 $('st').textContent=j.reboot?'Saved. Restarting FPVGate to apply Wi-Fi... reconnect in ~10 s.':'Saved.';if(!j.reboot)setTimeout(load,800);}
@@ -488,6 +499,7 @@ void ElrsOsd::registerRoutes(AsyncWebServer& server) {
         doc["channel"] = ch;
         doc["ackOk"] = (uint32_t)s_ackOk;
         doc["ackFail"] = (uint32_t)s_ackFail;
+        doc["goggles"] = peerAlive_;
         String out;
         serializeJson(doc, out);
         req->send(200, "application/json", out);
