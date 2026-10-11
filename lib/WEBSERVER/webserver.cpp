@@ -16,6 +16,8 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <lwip/priv/tcpip_priv.h>
+#include <lwip/tcp.h>
 #include <mbedtls/sha256.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
@@ -86,6 +88,38 @@ static volatile uint32_t heapLow = UINT32_MAX;
 static void sampleHeap(void *) {
     const uint32_t free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free < heapLow) heapLow = free;
+}
+
+// Requests refused because the heap was nearly gone (/api/system/info).
+static volatile uint32_t busyRefusals = 0;
+
+// A response is sent a TCP send buffer at a time (5760 bytes), and that much
+// is held three times over until acknowledged: the web server's buffer,
+// lwIP's copy, and over Wi-Fi the driver's frames. ~22 KB per file in
+// flight, so a browser's six parallel requests ran the XIAO out of heap.
+// Two segments keeps it to about half without slowing anything: a receiver
+// acknowledges every second segment at once, but waits (up to 200 ms on
+// Windows) to acknowledge a single one. Only sending is limited; uploads
+// (OTA, C5 firmware, events) are unaffected.
+struct SendBufferCap {
+    struct tcpip_api_call_data call;
+    AsyncClient *client;
+};
+
+static err_t applySendBufferCap(struct tcpip_api_call_data *data) {
+    // On lwIP's thread, where the connection can't change under us.
+    auto *cap = reinterpret_cast<SendBufferCap *>(data);
+    tcp_pcb *pcb = cap->client->pcb();
+    if (pcb && pcb->snd_buf > WEB_TCP_SEND_BUFFER) pcb->snd_buf = WEB_TCP_SEND_BUFFER;
+    return ERR_OK;
+}
+
+static void capSendBuffer(AsyncWebServerRequest *request) {
+    AsyncClient *client = request->client();
+    if (!client || !client->pcb()) return;
+    SendBufferCap cap = {};
+    cap.client = client;
+    tcpip_api_call(applySendBufferCap, &cap.call);
 }
 
 void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr) {
@@ -166,8 +200,17 @@ void Webserver::sendLapEvent(uint32_t lapTimeMs) {
     events.send(buf, "lap");
 }
 
+// Live RSSI and status are superseded within 50-200 ms. While a stream's
+// clients already have messages waiting (a busy network), skip them rather
+// than queue more: AsyncEventSource keeps up to 32 copies per client, and
+// three streams backed up behind page loads took the XIAO's heap to ~3 KB.
+// Passes, laps, race state and config notices always go out.
+static bool streamBusy(AsyncEventSource &stream) {
+    return stream.count() && stream.avgPacketsWaiting() > WEB_SSE_BACKLOG;
+}
+
 void Webserver::sendRssiEvent(uint8_t rssi) {
-    if (!servicesStarted) return;
+    if (!servicesStarted || streamBusy(events)) return;
     char buf[16];
     snprintf(buf, sizeof(buf), "%u", rssi);
     events.send(buf, "rssi");
@@ -402,6 +445,8 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
         sendRhPass(pass.slot, pass.us, pass.peak);
     }
     if ((currentTimeMs - rhRssiSentMs_) < WEB_RH_RSSI_SEND_MS) return;
+    // Before the peaks are taken: a skipped message's peaks go in the next.
+    if (streamBusy(rhEvents)) return;
     rhRssiSentMs_ = currentTimeMs;
     char body[160];
     int n = snprintf(body, sizeof(body), "{\"rssi\":[");
@@ -482,7 +527,9 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         (currentTimeMs - lastC5EventMs) >= WEB_C5_SEND_TIMEOUT_MS) {
         lastC5EventMs = currentTimeMs;
         // All 8 slots (frequency 0 = off), the filtered RSSI the lap
-        // detector uses, who is in the gate, and the link's state.
+        // detector uses, who is in the gate, and the link's state. Skipped
+        // while the stream is backed up; the laps below still go out.
+        if (!streamBusy(events)) {
         JsonDocument rssiDoc;
         JsonArray values = rssiDoc["rssi"].to<JsonArray>();
         JsonArray freqs = rssiDoc["freq"].to<JsonArray>();
@@ -521,6 +568,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                  (unsigned long)c5Link->readyToFirstSampleUs(),
                  (unsigned long)c5Link->tuneToFirstSampleUs());
         events.send(timingPayload, "c5Timing");
+        }
         C5LapEvent lap;
         while (c5MultiPilot->takeLap(lap)) {
             JsonDocument lapDoc;
@@ -528,9 +576,9 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             lapDoc["lap"] = lap.lap;   // 0 = Gate 1
             lapDoc["lapTimeMs"] = lap.lapTimeMs;
             lapDoc["racer"] = lap.racer;
-            payload = String();
-            serializeJson(lapDoc, payload);
-            events.send(payload.c_str(), "c5Lap");
+            String lapPayload;
+            serializeJson(lapDoc, lapPayload);
+            events.send(lapPayload.c_str(), "c5Lap");
         }
     }
     // A reboot asked for over HTTP. Deferred rather than immediate so the
@@ -564,7 +612,8 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
     if (sendRssi && conf->getReceiverRadio() == 2) {
         // RSSI debug popout on the C5: every slot's peak since the last frame
         // (0..1023) and who the race detector has in the gate, 25 a second.
-        if (c5MultiPilot && servicesStarted && (currentTimeMs - rssiSentMs) >= WEB_C5_FAST_SEND_MS) {
+        if (c5MultiPilot && servicesStarted && (currentTimeMs - rssiSentMs) >= WEB_C5_FAST_SEND_MS &&
+            !streamBusy(events)) {   // before the peaks are taken
             rssiSentMs = currentTimeMs;
             char buf[96];
             int n = snprintf(buf, sizeof(buf), "{\"v\":[");
@@ -893,6 +942,25 @@ void Webserver::startServices() {
     
     // Note: race history is already initialized in main.cpp
     // Do NOT re-initialize it here
+
+    // Every request, before its handler: keep what one response can hold
+    // small, and refuse new work when the heap is nearly gone (see
+    // capSendBuffer). Lap timing doesn't use this heap: the C5 and the pass
+    // detector run on the other core from buffers set aside at startup.
+    server.addMiddleware([](AsyncWebServerRequest *request, ArMiddlewareNext next) {
+        if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < WEB_LOW_HEAP_BYTES) {
+            ++busyRefusals;
+            AsyncWebServerResponse *busy = request->beginResponse(503, "text/plain", "Busy, try again");
+            busy->addHeader("Retry-After", "1");
+            request->send(busy);
+            return;
+        }
+        // Not on event streams: their messages are small, and slowed down
+        // they back up in AsyncEventSource's queue (up to 32 copies each),
+        // which costs more heap than the cap saves.
+        if (!request->url().endsWith("/events")) capSendBuffer(request);
+        next();
+    });
 
     server.on("/", handleRoot);
     server.on("/generate_204", handleRoot);  // handle Andriod phones doing shit to detect if there is 'real' internet and possibly dropping conn.
@@ -1377,6 +1445,7 @@ EEPROM:\n\
         doc["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         doc["heapLow"] = heapLow;
         doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        doc["busyRefusals"] = busyRefusals;
         if (request->hasParam("resetHeapLow")) heapLow = UINT32_MAX;
 #ifdef FPVGATE_ETH_W5500
         JsonObject ethernet = doc["ethernet"].to<JsonObject>();
