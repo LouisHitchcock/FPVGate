@@ -77,7 +77,23 @@ void Webserver::requestWifiStackReinit() {
     DEBUG("WiFi stack reinit requested\n");
 }
 
+// Lowest free internal heap since the last reset of this mark, sampled every
+// 2 ms. ESP.getMinFreeHeap() covers the whole uptime and can't be reset, so
+// it can't say which load took the heap down. /api/system/info reports it;
+// ?resetHeapLow starts a new measurement.
+static volatile uint32_t heapLow = UINT32_MAX;
+
+static void sampleHeap(void *) {
+    const uint32_t free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free < heapLow) heapLow = free;
+}
+
 void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr) {
+    esp_timer_create_args_t heapTimer = {};
+    heapTimer.callback = sampleHeap;
+    heapTimer.name = "heapLow";
+    esp_timer_handle_t heapTimerHandle = nullptr;
+    if (esp_timer_create(&heapTimer, &heapTimerHandle) == ESP_OK) esp_timer_start_periodic(heapTimerHandle, 2000);
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -1358,6 +1374,10 @@ EEPROM:\n\
         doc["chipRevision"] = ESP.getChipRevision();
         doc["flashSize"] = ESP.getFlashChipSize();
         doc["sdkVersion"] = ESP.getSdkVersion();
+        doc["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        doc["heapLow"] = heapLow;
+        doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (request->hasParam("resetHeapLow")) heapLow = UINT32_MAX;
 #ifdef FPVGATE_ETH_W5500
         JsonObject ethernet = doc["ethernet"].to<JsonObject>();
         char ethIp[16];
