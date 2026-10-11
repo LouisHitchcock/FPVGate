@@ -23,6 +23,7 @@
 #define WEB_TCP_SEND_BUFFER (2 * 1436)   // per connection: two segments (TCP_MSS 1436), see capSendBuffer()
 #define WEB_LOW_HEAP_BYTES 24576     // below this, new requests get 503 rather than run the heap out
 #define WEB_SSE_BACKLOG 4            // live RSSI/status skipped while a stream's clients have more waiting
+#define WEB_HEAP_SNAPSHOT_BYTES 20480   // a low below this records what was going on (/api/system/info lowHeap)
 #define EVENT_PATH "/event.json"     // race director event (SD if present, else LittleFS)
 #define EVENT_TMP_PATH "/event.tmp"
 #define EVENT_MAX_BYTES (512u * 1024u)

@@ -85,9 +85,30 @@ void Webserver::requestWifiStackReinit() {
 // ?resetHeapLow starts a new measurement.
 static volatile uint32_t heapLow = UINT32_MAX;
 
+// What was going on at the lowest point below WEB_HEAP_SNAPSHOT_BYTES: the
+// sampler flags a new low, and handleWebUpdate() fills the rest in a few ms
+// later (the stream counts take locks the timer task shouldn't wait on).
+struct LowHeapSnapshot {
+    uint32_t free = UINT32_MAX;   // at the low
+    uint32_t largest = 0;         // largest free block, just after
+    uint32_t atMs = 0;
+    int requests = 0;             // HTTP requests in progress (event streams included)
+    int files = 0;                // of those, not event streams or /api
+    size_t eventClients = 0, eventWaiting = 0;   // /events: clients, avg messages queued
+    size_t rhClients = 0, rhWaiting = 0;         // /api/rh/events
+    int wifiRssi = 0;
+};
+static LowHeapSnapshot lowHeap;
+static volatile uint32_t lowHeapPending = 0;   // the free value to record, 0 = none
+static volatile int activeRequests = 0;
+static volatile int activeFiles = 0;
+
 static void sampleHeap(void *) {
     const uint32_t free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free < heapLow) heapLow = free;
+    if (free < WEB_HEAP_SNAPSHOT_BYTES && free < lowHeap.free && (!lowHeapPending || free < lowHeapPending)) {
+        lowHeapPending = free;
+    }
 }
 
 // Requests refused because the heap was nearly gone (/api/system/info).
@@ -521,6 +542,21 @@ void Webserver::c5ImageChunk(uint8_t *data, size_t len, size_t index, size_t tot
 }
 
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
+    if (const uint32_t free = lowHeapPending) {
+        lowHeapPending = 0;
+        if (free < lowHeap.free) {
+            lowHeap.free = free;
+            lowHeap.largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            lowHeap.atMs = currentTimeMs;
+            lowHeap.requests = activeRequests;
+            lowHeap.files = activeFiles;
+            lowHeap.eventClients = events.count();
+            lowHeap.eventWaiting = events.avgPacketsWaiting();
+            lowHeap.rhClients = rhEvents.count();
+            lowHeap.rhWaiting = rhEvents.avgPacketsWaiting();
+            lowHeap.wifiRssi = WiFi.RSSI();
+        }
+    }
     sendRhUpdates(currentTimeMs);
     static uint32_t lastC5EventMs = 0;
     if (c5Link && c5MultiPilot && servicesStarted && conf->getReceiverRadio() == 2 &&
@@ -958,7 +994,16 @@ void Webserver::startServices() {
         // Not on event streams: their messages are small, and slowed down
         // they back up in AsyncEventSource's queue (up to 32 copies each),
         // which costs more heap than the cap saves.
-        if (!request->url().endsWith("/events")) capSendBuffer(request);
+        const bool stream = request->url().endsWith("/events");
+        if (!stream) capSendBuffer(request);
+        // Counted for the low-heap snapshot.
+        const bool file = !stream && !request->url().startsWith("/api/");
+        ++activeRequests;
+        if (file) ++activeFiles;
+        request->onDisconnect([file]() {
+            --activeRequests;
+            if (file) --activeFiles;
+        });
         next();
     });
 
@@ -1446,7 +1491,24 @@ EEPROM:\n\
         doc["heapLow"] = heapLow;
         doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         doc["busyRefusals"] = busyRefusals;
-        if (request->hasParam("resetHeapLow")) heapLow = UINT32_MAX;
+        doc["requestsNow"] = activeRequests;
+        if (lowHeap.free != UINT32_MAX) {
+            JsonObject low = doc["lowHeap"].to<JsonObject>();
+            low["free"] = lowHeap.free;
+            low["largest"] = lowHeap.largest;
+            low["agoMs"] = millis() - lowHeap.atMs;
+            low["requests"] = lowHeap.requests;
+            low["files"] = lowHeap.files;
+            low["eventClients"] = lowHeap.eventClients;
+            low["eventWaiting"] = lowHeap.eventWaiting;
+            low["rhClients"] = lowHeap.rhClients;
+            low["rhWaiting"] = lowHeap.rhWaiting;
+            low["wifiRssi"] = lowHeap.wifiRssi;
+        }
+        if (request->hasParam("resetHeapLow")) {
+            heapLow = UINT32_MAX;
+            lowHeap = LowHeapSnapshot();
+        }
 #ifdef FPVGATE_ETH_W5500
         JsonObject ethernet = doc["ethernet"].to<JsonObject>();
         char ethIp[16];
