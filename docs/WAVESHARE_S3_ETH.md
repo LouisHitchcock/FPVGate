@@ -1,16 +1,12 @@
 # Waveshare ESP32-S3-ETH
 
-> **UNTESTED.** This build compiles but has never been run on the board. It may
-> not boot, Ethernet may not work, and the pin choices below may change. Keep a
-> USB cable handy to reflash, and please report what you find.
-
 The [Waveshare ESP32-S3-ETH](https://www.waveshare.com/wiki/ESP32-S3-ETH) runs
 FPVGate with wired Ethernet as well as Wi-Fi and USB. It has an ESP32-S3R8
 (8MB PSRAM), 16MB flash, a W5500 10/100 Ethernet port, a microSD slot and an
 RGB LED, and can be powered over Ethernet with Waveshare's PoE module.
 
-Firmware: the `WaveshareS3ETH` build. In the web flasher it is listed under
-expert boards as **Waveshare ESP32-S3-ETH (16MB, Ethernet)**.
+Firmware: the `WaveshareS3ETH` build, from 1.9.0-Multi-Alpha-2. In the web
+flasher it is **Waveshare ESP32-S3-ETH (16MB, Ethernet)**.
 
 ## Wiring
 
@@ -56,4 +52,7 @@ gate's Ethernet address in the FPVGate plugin's settings.
 
 ## Status
 
-Built from the same source as the other boards. Not yet tested on the hardware.
+Tested from 1.9.0-Multi-Alpha-3 with an ESP32-C5 receiver over Ethernet: OTA
+updates, C5 firmware updates through the gate, and an overnight run alongside
+RotorHazard. Use Alpha-3 or later: earlier builds receive at about 10 KB/s over
+Ethernet, too slow for OTA updates.

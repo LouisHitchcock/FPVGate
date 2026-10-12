@@ -1,12 +1,50 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
-## [Unreleased]
+## [1.9.0-Multi-Alpha-3] - 2026-10-12
+
+Third Multi-Pilot alpha: the Waveshare ESP32-S3-ETH is tested and fixed, the
+C5 receiver can be updated through the gate, the race director, and a set of
+stability fixes from overnight testing.
+
+### Fixed
+- Ethernet (Waveshare S3-ETH): uploads, OTA updates included, ran at about
+  10 KB/s and timed out. The Ethernet chip's receive buffer was being reset to
+  2 KB, one frame, by the order the drivers started in. It now gets its full
+  16 KB: uploads run at over 1 MB/s and a full OTA update takes about 10 s.
+- One fly-through counted as several passes: a dip in signal during a pass
+  ended it. A pass now ends only after 300 ms below Exit.
+- The C5 link lost data while the gate saved a race: the web server could hold
+  off the C5 reader for about a second. The web server now runs on the other
+  core, the C5 backlog is read in pieces, and the receive buffer is 16 KB.
+- A gate on Wi-Fi could run out of memory and freeze when several pages and
+  event streams loaded at once. Each connection now holds less, live RSSI
+  messages are skipped while a stream is backed up (passes and laps never
+  are), and file downloads are refused with "busy" before memory runs out.
+- Ethernet asks for an address again when the cable is replugged, and waits
+  45 s for DHCP before falling back to 192.168.8.1.
 
 ### Added
-- Full-resolution RSSI for the RotorHazard plugin: C5 gates also send RSSI and
-  pass peaks as 0-1023 (`raw`, `rawPeak`, `rawMax` in `/api/rh/info`), shown in
-  RotorHazard when the plugin's **Full-resolution RSSI** option is on.
+- Waveshare ESP32-S3-ETH: tested on hardware, and in the web flasher without
+  expert mode. USB networking switches off while Ethernet is connected, and
+  the header shows the Ethernet address.
+- C5 receiver firmware updates through the gate (Settings > System), from
+  FPVGateC5MK releases or a file, for C5s on C5MK 1.1.0 or later. The gate
+  checks the image is for that C5's board, and a C5 that can't reach the gate
+  after an update goes back to its old firmware.
+- Race director (Settings > User Interface > Event Mode, off by default):
+  pilots, groups, formats and a heat schedule, channel assignment within a
+  band, Elo and best-lap seeding, a Next Heat button, and import and export.
+- Manual +Lap for each C5 pilot on the race screen.
+- RotorHazard: RSSI 20 times a second with each pass's peak kept, so
+  RotorHazard's Marshal page works; full-resolution RSSI (0-1023) for the
+  plugin's **Full-resolution RSSI** option.
+- Diagnostics in `/api/system/info`: memory low-water mark and what was in
+  flight at the low, Ethernet link speed, duplex and counters.
+
+### Changed
+- Library versions are pinned, so a fresh build uses the same libraries as
+  the release.
 
 ### Removed
 - The version 1 **RotorHazard** role in Settings > Sync, where the gate posted
