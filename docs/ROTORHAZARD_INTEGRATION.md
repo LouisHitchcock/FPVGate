@@ -86,6 +86,7 @@ The plugin talks to the gate over HTTP:
 | `GET /api/rh/clock` | The gate's clock in microseconds since boot. Polled every 5 s; this also keeps the link alive |
 | `POST /api/rh/node` | `{"node", "frequency", "enter", "exit"}`: tune one node. Replies with the node as stored |
 | `GET /api/rh/events` | Server-sent events (needs `Accept: text/event-stream`): `rhPass` for each pass, `rhRssi` 20 times a second |
+| `POST /api/rh/testPass?node=n` | A pass on node `n` (0-based) now, sent to RotorHazard exactly as a real one, to check a setup (a split gate, say) without flying. Doesn't touch the gate's own race. Only while the plugin is linked (409 otherwise) |
 
 While the plugin has polled the clock in the last 15 seconds, the gate is linked: it reports every pass to RotorHazard, including outside the gate's own races, and RotorHazard applies its own race rules.
 

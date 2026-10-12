@@ -1910,6 +1910,29 @@ EEPROM:\n\
         request->send(200, "application/json", body);
     });
 
+    // ?node=n (0-based): a pass on node n now, sent to RotorHazard exactly as
+    // a real one, for checking a setup (a split gate, say) without flying.
+    // It doesn't touch the gate's own race. Only while the plugin is linked,
+    // as nothing else receives passes.
+    server.on("/api/rh/testPass", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const bool c5 = conf->getReceiverRadio() == 2;
+        const long node = request->hasParam("node") ? request->getParam("node")->value().toInt() : -1;
+        if (node < 0 || node >= (c5 ? C5Link::C5_MAX_PILOTS : 1)) {
+            request->send(400, "application/json", "{\"error\":\"no such node\"}");
+            return;
+        }
+        if (!rhLinked(millis())) {
+            request->send(409, "application/json", "{\"error\":\"RotorHazard plugin not connected\"}");
+            return;
+        }
+        const uint8_t peak = c5 ? conf->getC5EnterRssi((uint8_t)node) : conf->getEnterRssi();
+        portENTER_CRITICAL(&rhPassMux_);
+        const bool queued = rhPassCount_ < RH_PASS_QUEUE;
+        if (queued) rhPasses_[rhPassCount_++] = {(uint8_t)node, esp_timer_get_time(), peak};
+        portEXIT_CRITICAL(&rhPassMux_);
+        request->send(queued ? 200 : 503, "application/json", queued ? "{\"status\":\"OK\"}" : "{\"error\":\"busy\"}");
+    });
+
     // {"node": n, "frequency": MHz (0 = off), "enter": 0..255, "exit": 0..255};
     // any field may be left out. Replies with the slot as stored, so the
     // plugin sees a frequency the receiver can't tune come back as 0.

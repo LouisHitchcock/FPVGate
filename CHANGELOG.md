@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
+## [Unreleased]
+
+### Added
+- RotorHazard: `POST /api/rh/testPass?node=n` sends RotorHazard a pass on a
+  node as if a quad had flown through, to check a setup such as split gates
+  without flying.
+
 ## [1.9.0-Multi-Alpha-3] - 2026-10-12
 
 Third Multi-Pilot alpha: the Waveshare ESP32-S3-ETH is tested and fixed, the
