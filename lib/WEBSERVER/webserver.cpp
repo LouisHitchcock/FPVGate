@@ -984,7 +984,11 @@ void Webserver::startServices() {
     // capSendBuffer). Lap timing doesn't use this heap: the C5 and the pass
     // detector run on the other core from buffers set aside at startup.
     server.addMiddleware([](AsyncWebServerRequest *request, ArMiddlewareNext next) {
-        if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < WEB_LOW_HEAP_BYTES) {
+        // Only file downloads are refused: they hold the heap, while API
+        // calls (RotorHazard's clock polls, status checks) cost next to
+        // nothing and failing them would break the things using them.
+        const bool fileRequest = !request->url().startsWith("/api/") && !request->url().endsWith("/events");
+        if (fileRequest && heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < WEB_LOW_HEAP_BYTES) {
             ++busyRefusals;
             AsyncWebServerResponse *busy = request->beginResponse(503, "text/plain", "Busy, try again");
             busy->addHeader("Retry-After", "1");
