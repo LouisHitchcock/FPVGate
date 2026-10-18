@@ -1,17 +1,17 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
-## [1.9.0-Multi-Alpha-4] - 2026-10-18
+## [1.9.0-Alpha-4] - 2026-10-18
 
-Fourth Multi-Pilot alpha: race analysis for C5 races, and a fix for a crash
-when a browser disconnected.
+Fourth Multi-Pilot alpha, now named 1.9.0-Alpha-N: race analysis for C5
+races and a reworked race screen, and a fix for a crash when a browser
+disconnected.
 
 ### Fixed
 - Race analysis in a C5 race: Fastest Lap and Fastest 3 Consecutive said to
   complete a lap, and Best 3 Laps and Median Lap showed "--", however many laps
   were flown. They read the single-pilot lap list, which a C5 race leaves
-  empty. Fastest Lap and Fastest 3 Consecutive now show a box for each pilot,
-  and Best 3 Laps and Median Lap are the race leader's, as in race history.
+  empty.
 - A gate could reboot when a browser closed or lost its connection while a
   message was being sent to it (seen on a XIAO on Multi-Alpha-3). The event
   stream's connection is now cleared under its message lock and checked
@@ -21,6 +21,14 @@ when a browser disconnected.
 - RotorHazard: `POST /api/rh/testPass?node=n` sends RotorHazard a pass on a
   node as if a quad had flown through, to check a setup such as split gates
   without flying.
+
+### Changed
+- Race screen: Fastest Lap, Fastest 3 Consecutive, Best 3 Laps and Median Lap
+  are four boxes in a row, always shown. In a C5 race the first two are the
+  best of any pilot, with their name, and Best 3 and Median are the race
+  leader's, as in race history. The charts below are tabs for Consistency and
+  Lap Times, opening on Consistency, and Settings > User Interface > Race
+  Analytics Display turns those two on or off.
 
 ## [1.9.0-Multi-Alpha-3] - 2026-10-12
 
