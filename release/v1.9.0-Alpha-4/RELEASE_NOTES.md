@@ -6,7 +6,7 @@ Fourth alpha of Multi-Pilot support with an ESP32-C5 receiver, the one after v1.
 
 This release is built for two boards only: the **Seeed XIAO ESP32S3** and the **Waveshare ESP32-S3-ETH**. Owners of other boards should stay on v1.9.0-Multi-Alpha-2 for now.
 
-**What was tested for this release:** the race screen on a XIAO ESP32S3 with an ESP32-C5 receiver. This is a small release on top of Multi-Alpha-3, and has not had Multi-Alpha-3's overnight run.
+**What was tested for this release:** both boards, the Seeed XIAO ESP32S3 and the Waveshare ESP32-S3-ETH, each with an ESP32-C5 receiver. This is a small release on top of Multi-Alpha-3, and has not had Multi-Alpha-3's overnight run.
 
 ## What is new
 
@@ -20,7 +20,7 @@ Everything from v1.9.0-Multi-Alpha-3 is included. The full list is in the [chang
 
 ## Hardware and setup
 
-Multi-Pilot requires a separate ESP32-C5 running [FPVGate C5MK receiver firmware](https://github.com/LouisHitchcock/FPVGateC5MK). Use C5MK 1.1.0: earlier versions work for racing but can't be updated through the gate. Flash 1.1.0 over USB once from its [release folder](https://github.com/LouisHitchcock/FPVGateC5MK/tree/v1.1.0/release); after that, updates go through the gate.
+Multi-Pilot requires a separate ESP32-C5 running [FPVGate C5MK receiver firmware](https://github.com/LouisHitchcock/FPVGateC5MK). Use C5MK 1.2.1 or later. A C5 on 1.1.0 or later can be updated through the gate (Settings > System > C5 Receiver Firmware); one on an earlier version needs a single USB flash first, from the [C5 web flasher](https://fpvgate.xyz/c5.html) or the [C5MK releases](https://github.com/LouisHitchcock/FPVGateC5MK/releases).
 
 Wiring, S3 to C5 (3.3V logic, plus ground):
 
@@ -37,7 +37,6 @@ See the [C5 setup guide](https://github.com/LouisHitchcock/FPVGate/blob/v1.9.0-A
 
 ## Known limits
 
-- With an SD card fitted, Race History can show "No races saved yet", or come and go, even though races are being saved. This is being looked into.
 - Keep the web race page open. Race completion, heat timeout and some announcements and LED actions depend on the browser.
 - Each pilot is limited to 64 crossings. Physical eight-pilot race testing has not been completed.
 - In C5 mode, Master/Slave and daisy-chaining are unavailable, and RotorHazard needs plugin 2.
