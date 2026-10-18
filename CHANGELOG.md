@@ -1,7 +1,21 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
-## [Unreleased]
+## [1.9.0-Multi-Alpha-4] - 2026-10-18
+
+Fourth Multi-Pilot alpha: race analysis for C5 races, and a fix for a crash
+when a browser disconnected.
+
+### Fixed
+- Race analysis in a C5 race: Fastest Lap and Fastest 3 Consecutive said to
+  complete a lap, and Best 3 Laps and Median Lap showed "--", however many laps
+  were flown. They read the single-pilot lap list, which a C5 race leaves
+  empty. Fastest Lap and Fastest 3 Consecutive now show a box for each pilot,
+  and Best 3 Laps and Median Lap are the race leader's, as in race history.
+- A gate could reboot when a browser closed or lost its connection while a
+  message was being sent to it (seen on a XIAO on Multi-Alpha-3). The event
+  stream's connection is now cleared under its message lock and checked
+  before each send.
 
 ### Added
 - RotorHazard: `POST /api/rh/testPass?node=n` sends RotorHazard a pass on a
