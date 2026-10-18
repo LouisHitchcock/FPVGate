@@ -23,6 +23,7 @@
 #endif
 #include "trackmanager.h"
 #include "webhook.h"
+#include "elrs_osd.h"
 // DISABLED FOR NOW: #include "nodemode.h"
 #include <ElegantOTA.h>
 #include "esp_log.h"
@@ -471,6 +472,9 @@ void setup() {
             DEBUG("Loaded webhook: %s\n", ip);
         }
     }
+
+    // HDZero goggle OSD settings (NVS); must load before Wi-Fi starts
+    elrsOsd.begin();
     
 #ifdef HAS_BATTERY_MONITOR
     ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager);
@@ -605,6 +609,26 @@ void loop() {
 #endif
     uint32_t nowMs = millis();
     uint32_t currentTimeMs = nowMs;
+
+    // HDZero goggle OSD over ESP-NOW: receiver status for the pre-race screen
+    if (config.getReceiverRadio() == 2) {
+        // The race pilot from the settings (C5MultiPilot only fixes it at race start):
+        // the single slot that has a frequency and the "Race" switch on.
+        int8_t p = -1;
+        uint8_t racers = 0;
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            if (config.getC5Frequency(i) && ((config.getC5RaceMask() >> i) & 1)) {
+                if (p < 0) p = (int8_t)i;
+                racers++;
+            }
+        }
+        if (racers != 1) p = -1;
+        elrsOsd.setStatus(c5Link.online(nowMs), p >= 0, p >= 0 ? c5MultiPilot.rssi(p) : 0,
+                          p >= 0 ? (uint16_t)config.getC5EnterRssi(p) * 4u : 0, timer.isRaceRunning());
+    } else {
+        elrsOsd.setStatus(true, true, timer.getRssi(), config.getEnterRssi(), timer.isRaceRunning());
+    }
+    elrsOsd.loop(nowMs);
     
     // Debug: Periodic "alive" message every 5 seconds with detailed memory stats
     static uint32_t lastAliveMs = 0;
@@ -895,6 +919,7 @@ void loop() {
     if (timer.isLapAvailable()) {
         uint32_t lapTime = timer.getLapTime();
         transportManager.broadcastLapEvent(lapTime);
+        elrsOsd.onLap(lapTime);   // HDZero goggle OSD (ELRS backpack)
 
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
         if (g_lcdUi) {

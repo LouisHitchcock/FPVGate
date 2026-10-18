@@ -1,4 +1,5 @@
 #include "webserver.h"
+#include "elrs_osd.h"
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
@@ -725,6 +726,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             case WIFI_AP:
                 DEBUG("Changing to WiFi AP mode\n");
 
+                elrsOsd.stopEspNow();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -732,7 +734,9 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
 
                 wifiMode = WIFI_AP;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
-                WiFi.mode(effectiveWifiModeForRole(true, conf));
+                // ELRS OSD needs AP+STA (STA carries the bind-phrase MAC for ESP-NOW)
+                WiFi.mode(elrsOsd.enabled() ? (wifi_mode_t)elrsOsd.wifiModeForAp() : effectiveWifiModeForRole(true, conf));
+                elrsOsd.afterModeSet();
                 changeTimeMs = currentTimeMs;
 
                 // Power-saving settings for AP mode to prevent boot-looping
@@ -743,7 +747,8 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 DEBUG("Starting WiFi AP: %s with password: %s\n", wifi_ap_ssid.c_str(), wifi_ap_password);
                 
                 // Start AP with max 4 connections to limit power draw.
-                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, 6, 0, 4);
+                // Channel 1 when the ELRS OSD is on: the goggle backpack listens there.
+                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, elrsOsd.apChannel(6), 0, 4);
 
 #ifdef SEEED_XIAO_ESP32S3
                 // Disable WiFi power saving for faster responsiveness on XIAO
@@ -757,12 +762,15 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 esp_wifi_set_max_tx_power(44); // 11dBm in 0.25dBm units (44 * 0.25 = 11dBm)
                 
                 DEBUG("WiFi AP started. SSID: %s, Power: 11dBm, Max clients: 4\n", WiFi.softAPSSID().c_str());
+                elrsOsd.afterApStarted();
                 startServices();
                 buz->beep(1000);
                 led->on(1000);
                 break;
             case WIFI_STA:
                 DEBUG("Connecting to WiFi network\n");
+                // ELRS OSD only works in AP mode (needs Wi-Fi channel 1)
+                elrsOsd.stopEspNow();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -3120,6 +3128,9 @@ EEPROM:\n\
     // between the filesystem and the firmware, leaving it briefly running new
     // firmware against the old filesystem. A full update is two uploads, so the
     // UI decides when it is finished and calls /api/system/reboot itself.
+    // HDZero goggle OSD settings page (/elrsosd) and API
+    elrsOsd.registerRoutes(server);
+
     ElegantOTA.setAutoReboot(false);
     ElegantOTA.begin(&server);
 
