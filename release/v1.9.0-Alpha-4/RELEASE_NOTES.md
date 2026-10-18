@@ -12,6 +12,7 @@ This release is built for two boards only: the **Seeed XIAO ESP32S3** and the **
 
 - **Race analysis works in C5 races.** Fastest Lap and Fastest 3 Consecutive said to complete a lap, and Best 3 Laps and Median Lap showed "--", however many laps were flown.
 - **Reworked race screen.** Fastest Lap, Fastest 3 Consecutive, Best 3 Laps and Median Lap are four boxes in a row, always shown. In a C5 race the first two are the best of any pilot, with their name, and Best 3 and Median are the race leader's. Below them, Consistency and Lap Times charts, opening on Consistency; turn either off in Settings > User Interface > Race Analytics Display.
+- **A USB flash now starts the new firmware.** A gate last updated over the air kept starting its old firmware after a USB flash, from the web flasher or by hand. The web flasher now resets that, and manual flashing includes `boot_app0.bin`.
 - **No reboot when a browser disconnects.** A gate could crash and restart when a browser closed or lost its connection while a message was being sent to it.
 - **RotorHazard test pass:** `POST /api/rh/testPass?node=n` sends RotorHazard a pass on a node as if a quad had flown through, to check a setup such as split gates without flying.
 
@@ -51,7 +52,7 @@ Open the [web flasher](https://fpvgate.xyz/flasher.html), enable **Pre-Release M
 
 Devices on v1.9.0-Multi-Alpha-3, Alpha-2 or Alpha-1, v1.8.3 or the 1.8 release candidates can install the matching firmware and filesystem pair over the air. If upgrading from 1.7.x, use a full USB flash. A Waveshare ESP32-S3-ETH on Alpha-2 should update over USB or Wi-Fi, not over Ethernet: Alpha-2's Ethernet is too slow for the upload.
 
-For manual flashing, download your board's four binaries and its flash instructions. The filesystem offset is `0x410000` on the XIAO ESP32S3 and `0x610000` on the Waveshare ESP32-S3-ETH. After USB flashing, unplug and reconnect the board.
+For manual flashing, download your board's four binaries, `boot_app0.bin` and the board's flash instructions. `boot_app0.bin` is new: without it, a gate last updated over the air keeps starting its old firmware after a USB flash. The filesystem offset is `0x410000` on the XIAO ESP32S3 and `0x610000` on the Waveshare ESP32-S3-ETH. After USB flashing, unplug and reconnect the board.
 
 Existing 1.7.3 or 1.8.3 SD cards need no changes.
 

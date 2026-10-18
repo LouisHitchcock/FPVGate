@@ -12,6 +12,10 @@ disconnected.
   complete a lap, and Best 3 Laps and Median Lap showed "--", however many laps
   were flown. They read the single-pilot lap list, which a C5 race leaves
   empty.
+- A USB flash of a gate last updated over the air left it starting its old
+  firmware: the flash wrote the new one to the first app slot, but the gate
+  still chose the second. Releases now include `boot_app0.bin`, written at
+  0xe000 in the flash instructions, which chooses the first slot.
 - A gate could reboot when a browser closed or lost its connection while a
   message was being sent to it (seen on a XIAO on Multi-Alpha-3). The event
   stream's connection is now cleared under its message lock and checked

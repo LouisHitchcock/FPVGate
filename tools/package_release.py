@@ -45,19 +45,30 @@ PARTS = ["bootloader", "partitions", "firmware", "littlefs"]
 # at 0x0 on the S3, unlike the classic ESP32's 0x1000.
 OFFSETS = {"bootloader": "0x0", "partitions": "0x8000", "firmware": "0x10000"}
 
+# Arduino's otadata image choosing app0, at otadata (0xe000 in every FPVGate
+# partition table). Without it a board last updated over the air keeps booting
+# its old app from app1 after a wired flash writes the new one to app0.
+BOOT_APP0 = os.path.join(os.environ.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio")),
+                         "packages", "framework-arduinoespressif32", "tools", "partitions", "boot_app0.bin")
+OTADATA_OFFSET = "0xe000"
+
 FLASH_INSTRUCTIONS = """FPVGate {version} - {description}
 
-Flash all four files in one command. The filesystem offset differs per board,
+Flash all five files in one command. The filesystem offset differs per board,
 so use the value below rather than one from another board's instructions.
 
 esptool.py --chip esp32s3 --port <PORT> --baud 460800 write_flash -z \\
   0x0      {board}-bootloader.bin \\
   0x8000   {board}-partitions.bin \\
+  0xe000   boot_app0.bin \\
   0x10000  {board}-firmware.bin \\
   {fs_offset}  {board}-littlefs.bin
 
 Notes
 -----
+* boot_app0.bin makes the gate start the firmware just flashed. Leave it out
+  and a gate that was last updated over the air keeps starting its old
+  firmware.
 * Upgrading from 1.7.x MUST be a full wired flash like the one above. An
   over-the-air update replaces the application only and leaves the old
   partition table in place, which a 1.8 or newer filesystem image will not fit.
@@ -179,6 +190,12 @@ def main():
                                                    description=description,
                                                    board=environment,
                                                    fs_offset=offset))
+
+    if os.path.isfile(BOOT_APP0):
+        shutil.copy2(BOOT_APP0, os.path.join(root, "boot_app0.bin"))
+    else:
+        missing.append(BOOT_APP0)
+        print(f"  MISSING {BOOT_APP0}")
 
     with open(os.path.join(root, "Supported_Boards.txt"), "w") as handle:
         handle.write(f"FPVGate {args.version} - Supported Boards\n\n")
