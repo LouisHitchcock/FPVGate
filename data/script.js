@@ -4888,7 +4888,12 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
     </div>
   `;
 }
-function renderFastest3ConsecPanel(stats) {
+function renderFastest3ConsecPanel(stats, pilots) {
+  if (pilots) {
+    const withThree = pilots.filter((p) => p.stats.fastest3ConsecValue != null);
+    if (!withThree.length) return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
+    return renderPilotStatBoxes(withThree, (s) => s.fastest3ConsecValue, (s) => s.fastest3ConsecLaps);
+  }
   if (!stats || stats.fastest3ConsecValue == null) {
     return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
   }
@@ -5001,8 +5006,9 @@ function switchRaceAnalyticsTab(tabKey) {
   currentRaceAnalyticsTab = tabKey;
   updateRaceAnalysisView();
 }
-function computeRaceStats() {
-  const validLaps = lapTimes.slice(1);
+// laps: seconds, [0] = Gate 1. The single-pilot race's by default.
+function computeRaceStats(laps = lapTimes) {
+  const validLaps = laps.slice(1);
   if (validLaps.length === 0) {
     return null;
   }
@@ -5051,7 +5057,33 @@ function computeRaceStats() {
   };
 }
 
-function renderFastestLapPanel(stats) {
+// A C5 multi-pilot race's stats, one entry per racer with a lap; null
+// otherwise. Its laps are in c5Race, so the global lapTimes stays empty.
+function computeC5PilotStats() {
+  if (!c5MultiRaceView()) return null;
+  return collectAllPilotsData()
+    .map((p) => ({ name: p.name, color: p.color, stats: computeRaceStats(p.lapTimes) }))
+    .filter((p) => p.stats);
+}
+
+function renderPilotStatBoxes(pilots, value, sublabel) {
+  return `
+    <div class="stats-boxes" style="max-width: 720px; margin: 0 auto;">
+      ${pilots.map((p) => `
+      <div class="stat-box" style="border-top: 3px solid ${p.color};">
+        <div class="stat-label">${escapeHtml(p.name)}</div>
+        <div class="stat-value">${value(p.stats).toFixed(2)}s</div>
+        <div class="stat-sublabel">${sublabel(p.stats)}</div>
+      </div>`).join("")}
+    </div>
+  `;
+}
+
+function renderFastestLapPanel(stats, pilots) {
+  if (pilots) {
+    if (!pilots.length) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
+    return renderPilotStatBoxes(pilots, (s) => s.fastest, (s) => `Lap ${s.fastestIndex}`);
+  }
   if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
 
   return `
@@ -5070,7 +5102,10 @@ function updateRaceAnalysisView() {
   const contentContainer = document.getElementById("raceAnalysisContent");
   const emptyMessage = document.getElementById("raceAnalysisEmptyMessage");
   const enabledTabs = getEnabledRaceAnalyticsTabs();
-  const stats = computeRaceStats();
+  const pilotStats = computeC5PilotStats();
+  // Best 3 and median follow the leader in a C5 race, as its history entry does.
+  const leader = pilotStats && c5Race.active ? c5RaceLeader() : null;
+  const stats = pilotStats ? (leader ? computeRaceStats(leader.laps) : null) : computeRaceStats();
 
   renderAlwaysOnRaceStats(stats);
 
@@ -5091,11 +5126,11 @@ function updateRaceAnalysisView() {
     .map((tabKey) => `<button class="analysis-tab ${tabKey === currentRaceAnalyticsTab ? "active" : ""}" onclick="switchRaceAnalyticsTab('${tabKey}')">${getRaceAnalyticsTabLabel(tabKey)}</button>`)
     .join("");
   if (currentRaceAnalyticsTab === "fastestLap") {
-    contentContainer.innerHTML = renderFastestLapPanel(stats);
+    contentContainer.innerHTML = renderFastestLapPanel(stats, pilotStats);
     return;
   }
   if (currentRaceAnalyticsTab === "fastest3Consec") {
-    contentContainer.innerHTML = renderFastest3ConsecPanel(stats);
+    contentContainer.innerHTML = renderFastest3ConsecPanel(stats, pilotStats);
     return;
   }
 
