@@ -4888,53 +4888,47 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
     </div>
   `;
 }
-function renderFastest3ConsecPanel(stats, pilots) {
-  if (pilots) {
-    const withThree = pilots.filter((p) => p.stats.fastest3ConsecValue != null);
-    if (!withThree.length) return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
-    return renderPilotStatBoxes(withThree, (s) => s.fastest3ConsecValue, (s) => s.fastest3ConsecLaps);
-  }
-  if (!stats || stats.fastest3ConsecValue == null) {
-    return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
-  }
-  return `
-    <div class="stats-boxes" style="max-width: 420px; margin: 0 auto;">
-      <div class="stat-box">
-        <div class="stat-label">Fastest 3 Consecutive</div>
-        <div class="stat-value">${stats.fastest3ConsecValue.toFixed(2)}s</div>
-        <div class="stat-sublabel">${stats.fastest3ConsecLaps}</div>
-      </div>
-    </div>
-  `;
+function setRaceStatBox(id, seconds, sublabel) {
+  const valueEl = document.getElementById(id);
+  const subEl = document.getElementById(id + "Sub");
+  if (valueEl) valueEl.textContent = seconds == null ? "--" : `${seconds.toFixed(2)}s`;
+  if (subEl) subEl.textContent = seconds == null ? "" : sublabel;
 }
 
-function renderAlwaysOnRaceStats(stats) {
-  const best3El = document.getElementById("raceAlwaysBest3");
-  const medianEl = document.getElementById("raceAlwaysMedian");
-  if (!best3El || !medianEl) return;
-
-  if (!stats) {
-    best3El.textContent = "--";
-    medianEl.textContent = "--";
-    return;
+// The four boxes above the charts. stats: the single-pilot race's, or a C5
+// race leader's. pilots: a C5 race's per-pilot stats (computeC5PilotStats),
+// where fastest lap and fastest 3 consecutive are the best of any pilot.
+function renderAlwaysOnRaceStats(stats, pilots, leaderName) {
+  let fastest = stats ? { s: stats, name: "" } : null;
+  let consec = stats && stats.fastest3ConsecValue != null ? fastest : null;
+  if (pilots) {
+    fastest = consec = null;
+    for (const p of pilots) {
+      if (!fastest || p.stats.fastest < fastest.s.fastest) fastest = { s: p.stats, name: p.name };
+      if (p.stats.fastest3ConsecValue != null && (!consec || p.stats.fastest3ConsecValue < consec.s.fastest3ConsecValue)) {
+        consec = { s: p.stats, name: p.name };
+      }
+    }
   }
-
-  best3El.textContent = stats.best3Value == null ? "--" : `${stats.best3Value.toFixed(2)}s`;
-  medianEl.textContent = `${stats.median.toFixed(2)}s`;
+  const who = (name, detail) => (name ? `${name} · ${detail}` : detail);
+  setRaceStatBox("raceAlwaysFastest", fastest && fastest.s.fastest, fastest && who(fastest.name, `Lap ${fastest.s.fastestIndex}`));
+  setRaceStatBox("raceAlwaysFastest3Consec", consec && consec.s.fastest3ConsecValue, consec && who(consec.name, consec.s.fastest3ConsecLaps));
+  setRaceStatBox("raceAlwaysBest3", stats && stats.best3Value, stats && who(leaderName, stats.best3Laps));
+  setRaceStatBox("raceAlwaysMedian", stats && stats.median, leaderName || "");
 }
 
 // ============================================
 // Race Analysis (Multi-Pilot + Personal Tabbed Analytics)
 // ============================================
-const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsDisplaySettings";
+// A new key: the old one ("raceAnalyticsDisplaySettings") stored Consistency
+// off for anyone who had changed a panel, and it now opens first.
+const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsCharts";
 const RACE_ANALYTICS_DEFAULTS = {
-  fastestLap: true,
-  fastest3Consec: true,
+  consistency: true,
   lapTimes: true,
-  consistency: false,
 };
 let raceAnalyticsDisplaySettings = loadRaceAnalyticsDisplaySettings();
-let currentRaceAnalyticsTab = "fastestLap";
+let currentRaceAnalyticsTab = "consistency";
 
 // Pilot color palette for charts
 const pilotColors = [
@@ -4948,10 +4942,8 @@ function loadRaceAnalyticsDisplaySettings() {
     if (!raw) return { ...RACE_ANALYTICS_DEFAULTS };
     const parsed = JSON.parse(raw);
     return {
-      fastestLap: parsed.fastestLap !== false,
-      fastest3Consec: parsed.fastest3Consec !== false,
-      lapTimes: parsed.lapTimes !== false,
       consistency: parsed.consistency !== false,
+      lapTimes: parsed.lapTimes !== false,
     };
   } catch (err) {
     console.warn("[RaceAnalysis] Failed to parse display settings, using defaults:", err);
@@ -4964,23 +4956,17 @@ function saveRaceAnalyticsDisplaySettings() {
 }
 
 function getEnabledRaceAnalyticsTabs() {
-  const order = ["fastestLap", "fastest3Consec", "lapTimes", "consistency"];
+  const order = ["consistency", "lapTimes"];
   return order.filter((key) => !!raceAnalyticsDisplaySettings[key]);
 }
 
 function getRaceAnalyticsTabLabel(tabKey) {
-  if (tabKey === "fastestLap") return "Fastest Lap";
-  if (tabKey === "fastest3Consec") return "Fastest 3 Consecutive";
   if (tabKey === "lapTimes") return "Lap Times";
   if (tabKey === "consistency") return "Consistency";
   return tabKey;
 }
 
 function syncRaceAnalyticsToggleUI() {
-  const fastestLapToggle = document.getElementById("raceAnalyticsToggleFastestLap");
-  if (fastestLapToggle) fastestLapToggle.checked = !!raceAnalyticsDisplaySettings.fastestLap;
-  const fastest3ConsecToggle = document.getElementById("raceAnalyticsToggleFastest3Consec");
-  if (fastest3ConsecToggle) fastest3ConsecToggle.checked = !!raceAnalyticsDisplaySettings.fastest3Consec;
   const lapToggle = document.getElementById("raceAnalyticsToggleLapTimes");
   if (lapToggle) lapToggle.checked = !!raceAnalyticsDisplaySettings.lapTimes;
   const consistencyToggle = document.getElementById("raceAnalyticsToggleConsistency");
@@ -4993,7 +4979,7 @@ function toggleRaceAnalyticsPanel(panelKey, enabled) {
   raceAnalyticsDisplaySettings[panelKey] = enabled;
   if (!raceAnalyticsDisplaySettings[currentRaceAnalyticsTab]) {
     const fallback = getEnabledRaceAnalyticsTabs()[0];
-    currentRaceAnalyticsTab = fallback || "fastestLap";
+    currentRaceAnalyticsTab = fallback || "consistency";
   }
   saveRaceAnalyticsDisplaySettings();
   syncRaceAnalyticsToggleUI();
@@ -5066,37 +5052,6 @@ function computeC5PilotStats() {
     .filter((p) => p.stats);
 }
 
-function renderPilotStatBoxes(pilots, value, sublabel) {
-  return `
-    <div class="stats-boxes" style="max-width: 720px; margin: 0 auto;">
-      ${pilots.map((p) => `
-      <div class="stat-box" style="border-top: 3px solid ${p.color};">
-        <div class="stat-label">${escapeHtml(p.name)}</div>
-        <div class="stat-value">${value(p.stats).toFixed(2)}s</div>
-        <div class="stat-sublabel">${sublabel(p.stats)}</div>
-      </div>`).join("")}
-    </div>
-  `;
-}
-
-function renderFastestLapPanel(stats, pilots) {
-  if (pilots) {
-    if (!pilots.length) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
-    return renderPilotStatBoxes(pilots, (s) => s.fastest, (s) => `Lap ${s.fastestIndex}`);
-  }
-  if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
-
-  return `
-    <div class="stats-boxes" style="max-width: 360px; margin: 0 auto;">
-      <div class="stat-box">
-        <div class="stat-label">Fastest Lap</div>
-        <div class="stat-value">${stats.fastest.toFixed(2)}s</div>
-        <div class="stat-sublabel">Lap ${stats.fastestIndex}</div>
-      </div>
-    </div>
-  `;
-}
-
 function updateRaceAnalysisView() {
   const tabsContainer = document.getElementById("raceAnalyticsTabs");
   const contentContainer = document.getElementById("raceAnalysisContent");
@@ -5106,15 +5061,17 @@ function updateRaceAnalysisView() {
   // Best 3 and median follow the leader in a C5 race, as its history entry does.
   const leader = pilotStats && c5Race.active ? c5RaceLeader() : null;
   const stats = pilotStats ? (leader ? computeRaceStats(leader.laps) : null) : computeRaceStats();
+  // Name the leader only when there is more than one pilot to tell apart.
+  const leaderName = leader && pilotStats.length > 1 ? leader.racer.label : "";
 
-  renderAlwaysOnRaceStats(stats);
+  renderAlwaysOnRaceStats(stats, pilotStats, leaderName);
 
   if (emptyMessage) emptyMessage.style.display = enabledTabs.length > 0 ? "none" : "block";
   if (!tabsContainer || !contentContainer) return;
 
+  contentContainer.style.display = enabledTabs.length ? "" : "none";
   if (enabledTabs.length === 0) {
     tabsContainer.innerHTML = "";
-    contentContainer.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
     return;
   }
 
@@ -5125,14 +5082,6 @@ function updateRaceAnalysisView() {
   tabsContainer.innerHTML = enabledTabs
     .map((tabKey) => `<button class="analysis-tab ${tabKey === currentRaceAnalyticsTab ? "active" : ""}" onclick="switchRaceAnalyticsTab('${tabKey}')">${getRaceAnalyticsTabLabel(tabKey)}</button>`)
     .join("");
-  if (currentRaceAnalyticsTab === "fastestLap") {
-    contentContainer.innerHTML = renderFastestLapPanel(stats, pilotStats);
-    return;
-  }
-  if (currentRaceAnalyticsTab === "fastest3Consec") {
-    contentContainer.innerHTML = renderFastest3ConsecPanel(stats, pilotStats);
-    return;
-  }
 
   const pilots = collectAllPilotsData();
   if (currentRaceAnalyticsTab === "lapTimes") {
@@ -5429,22 +5378,11 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
 function updateAnalysisSectionVisibility() {
   const lapAnalysis = document.getElementById("lapAnalysis");
   const raceAnalysis = document.getElementById("raceAnalysis");
-  const anyAnalyticsEnabled =
-    !!raceAnalyticsDisplaySettings.fastestLap ||
-    !!raceAnalyticsDisplaySettings.fastest3Consec ||
-    !!raceAnalyticsDisplaySettings.lapTimes ||
-    !!raceAnalyticsDisplaySettings.consistency;
-
-  if (anyAnalyticsEnabled) {
-    // Show Race Analysis panels selected via toggles in both personal and sync modes.
-    if (lapAnalysis) lapAnalysis.style.display = "none";
-    if (raceAnalysis) raceAnalysis.style.display = "block";
-    updateRaceAnalysisView();
-  } else {
-    // All toggles off => no analytics content shown.
-    if (lapAnalysis) lapAnalysis.style.display = "none";
-    if (raceAnalysis) raceAnalysis.style.display = "none";
-  }
+  // Race Analysis in every mode: its stat boxes always show, and the chart
+  // tabs say how to turn them on when both are off.
+  if (lapAnalysis) lapAnalysis.style.display = "none";
+  if (raceAnalysis) raceAnalysis.style.display = "block";
+  updateRaceAnalysisView();
 }
 
 // Race History Functions

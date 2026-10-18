@@ -288,16 +288,28 @@
           <div id="multiPilotRaceSummary" class="multi-pilot-standings"></div>
           <div class="stats-boxes" style="margin-bottom: 12px;">
             <div class="stat-box">
+              <div class="stat-label">Fastest Lap</div>
+              <div class="stat-value" id="raceAlwaysFastest">--</div>
+              <div class="stat-sublabel" id="raceAlwaysFastestSub"></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Fastest 3 Consecutive</div>
+              <div class="stat-value" id="raceAlwaysFastest3Consec">--</div>
+              <div class="stat-sublabel" id="raceAlwaysFastest3ConsecSub"></div>
+            </div>
+            <div class="stat-box">
               <div class="stat-label">Best 3 Laps</div>
               <div class="stat-value" id="raceAlwaysBest3">--</div>
+              <div class="stat-sublabel" id="raceAlwaysBest3Sub"></div>
             </div>
             <div class="stat-box">
               <div class="stat-label">Median Lap</div>
               <div class="stat-value" id="raceAlwaysMedian">--</div>
+              <div class="stat-sublabel" id="raceAlwaysMedianSub"></div>
             </div>
           </div>
           <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;">
-            Turn on at least one panel under Settings → User Interface → Race Analytics Display to see more race analytics.
+            Turn on Consistency or Lap Times under Settings → User Interface → Race Analytics Display to see race charts.
           </div>
           <div id="raceAnalyticsTabs" class="analysis-tabs" style="margin-top: 8px;"></div>
           <div id="raceAnalysisContent" class="analysis-content" style="min-height: 350px;">
@@ -1341,43 +1353,10 @@
 
               <h3>Race Analytics Display</h3>
               <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);">
-                Choose which race analytics panels to show on the Race tab. Each one you turn on gets a tab there.
+                Fastest lap, fastest 3 consecutive, best 3 laps and median lap are always shown on the Race tab. Choose which charts to show below them; each one you turn on gets a tab there.
               </div>
 
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleFastestLap" onchange="toggleRaceAnalyticsPanel('fastestLap', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest Lap</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show fastest lap time and lap number details</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleFastest3Consec" onchange="toggleRaceAnalyticsPanel('fastest3Consec', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest 3 Consecutive</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show best 3-lap consecutive block and lap range</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleLapTimes" onchange="toggleRaceAnalyticsPanel('lapTimes', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
                 <label class="switch" style="flex-shrink: 0;">
                   <input type="checkbox" id="raceAnalyticsToggleConsistency" onchange="toggleRaceAnalyticsPanel('consistency', this.checked)" />
                   <span class="slider"></span>
@@ -1385,6 +1364,17 @@
                 <div>
                   <div style="font-weight: bold; font-size: 14px;">Consistency</div>
                   <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show distribution and spread of lap times</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleLapTimes" onchange="toggleRaceAnalyticsPanel('lapTimes', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
                 </div>
               </div>
 
