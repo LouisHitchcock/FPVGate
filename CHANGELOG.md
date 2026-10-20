@@ -3,6 +3,24 @@
 All notable changes to FPVGate will be documented in this file.
 ## [Unreleased]
 
+## [1.8.4] - 2026-10-20
+
+A hotfix for USB networking. 1.8.3 plus one fix; nothing else changed.
+
+### Fixed
+- **USB networking and the USB serial port stopped responding under load**
+  until the gate was power-cycled. Windows still listed the serial port but
+  could not open it, and `http://192.168.7.1` stopped answering. A busy web
+  UI, such as several open tabs or running the self test over USB, was
+  enough to set it off. The cause was two bugs in the USB controller driver
+  Arduino-ESP32 2.0.17 ships for the ESP32-S3: an unlocked update of an
+  interrupt mask shared by every endpoint, which could leave the send pipe
+  stalled for good, and a local USB reset on an undocumented interrupt bit
+  that the host never saw. The driver is now built from a fixed copy in
+  `lib/USBNET/tinyusb/`, with watchdogs for both failures as a backup.
+  Affects the ESP32-S3 DevKitC-1, FPVGate AIO, FPVGate Solo and Seeed XIAO
+  ESP32S3; the XIAO ESP32S3 Plus has no USB networking and is unchanged.
+
 ## [1.8.3] - 2026-10-07
 
 USB networking, over-the-air updates, the Visual Marshal and a faster web UI.

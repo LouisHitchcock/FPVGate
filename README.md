@@ -256,14 +256,17 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Version:** v1.8.3
+**Current Version:** v1.8.4
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Stable - actively maintained
 
 ### Recent Updates
 
-**v1.8.3 (Latest Release - October 7, 2026)**
+**v1.8.4 (Latest Release - October 20, 2026)**
+- **USB Networking Fix** — USB networking and serial no longer stop responding under load until a power cycle
+
+**v1.8.3 (October 7, 2026)**
 - **USB Networking** — Full web UI over USB-C at `http://192.168.7.1`, no WiFi needed (Windows and Linux)
 - **Over-the-Air Updates** — Install from a file or straight from fpvgate.xyz, from the settings screen
 - **Visual Marshal** — Review and correct laps on each race's recorded RSSI graph
