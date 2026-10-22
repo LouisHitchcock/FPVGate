@@ -18,7 +18,7 @@ void C5MultiPilot::start(uint32_t raceStartMs) {
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         inside_[i] = false;
         belowUs_[i] = 0;
-        peak_[i] = 0;
+        peak_[i] = {};
         lapCount_[i] = 0;
         capturePeak_[i] = 0;
     }
@@ -31,8 +31,9 @@ void C5MultiPilot::start(uint32_t raceStartMs) {
 void C5MultiPilot::stop() { running_ = false; }
 
 // A pass is Enter -> Exit (with hysteresis), ending once the RSSI has stayed
-// below Exit for PASS_MERGE_MS; it is timed at its highest filtered sample,
-// as RotorHazard and LapTimer do. Each sample carries the C5's dump time
+// below Exit for PASS_MERGE_MS; it is timed at the middle of the first and
+// last samples at its highest filtered value, as RotorHazard's nodes and its
+// Marshal recalculation do. Each sample carries the C5's dump time
 // mapped to micros(), so the peak time is exact to the sample (~1 ms per
 // pilot in scan mode).
 void C5MultiPilot::update(uint32_t nowMs) {
@@ -64,25 +65,22 @@ void C5MultiPilot::update(uint32_t nowMs) {
         while (link_->takeSample(i, value, sampleUs)) {
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
             if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
-            if (filtered_[i] > rhPeak_[i]) rhPeak_[i] = filtered_[i];
             portENTER_CRITICAL(&lapMux_);
+            rhPeak_[i].add(filtered_[i], sampleUs);
             if (filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
             portEXIT_CRITICAL(&lapMux_);
+            lastSampleUs_[i] = sampleUs;
             if (!running_ && !passStream_) continue;
             const uint16_t f = filtered_[i];
             if (!inside_[i]) {
                 if (f >= enterHi) {
                     inside_[i] = true;
-                    peak_[i] = f;
-                    peakUs_[i] = sampleUs;
+                    peak_[i].start(f, sampleUs);
                     belowUs_[i] = 0;
                 }
                 continue;
             }
-            if (f > peak_[i]) {
-                peak_[i] = f;
-                peakUs_[i] = sampleUs;
-            }
+            peak_[i].add(f, sampleUs);
             if (belowUs_[i]) {
                 if (f >= enterHi) belowUs_[i] = 0;   // back above Enter: the same pass
                 else if (sampleUs - belowUs_[i] >= PASS_MERGE_MS * 1000u) endPass(i);
@@ -101,10 +99,11 @@ void C5MultiPilot::endPass(uint8_t pilot) {
     belowUs_[pilot] = 0;
     if (passStream_) {
         portENTER_CRITICAL(&lapMux_);
-        if (passCount_ < PASS_QUEUE) passes_[passCount_++] = {pilot, peakUs_[pilot], peak_[pilot]};
+        if (passCount_ < PASS_QUEUE)
+            passes_[passCount_++] = {pilot, peak_[pilot].middleUs(), peak_[pilot].levelMiddleUs(), peak_[pilot].value};
         portEXIT_CRITICAL(&lapMux_);
     }
-    if (running_) crossing(pilot, peakUs_[pilot]);
+    if (running_) crossing(pilot, peak_[pilot].middleUs());
 }
 
 // LapTimer's rules for every slot: the first pass after the start is Gate 1
@@ -172,11 +171,15 @@ uint16_t C5MultiPilot::takePeakHold(uint8_t pilot) {
     return v;
 }
 
-uint16_t C5MultiPilot::takeRhPeak(uint8_t pilot) {
-    if (pilot >= C5Link::C5_MAX_PILOTS) return 0;
-    const uint16_t v = rhPeak_[pilot];
-    rhPeak_[pilot] = filtered_[pilot];
-    return v;
+// Read and restart from the latest sample, under the lock so a value and its
+// times always belong together.
+C5Peak C5MultiPilot::takeRhPeak(uint8_t pilot) {
+    if (pilot >= C5Link::C5_MAX_PILOTS) return {};
+    portENTER_CRITICAL(&lapMux_);
+    const C5Peak p = rhPeak_[pilot];
+    rhPeak_[pilot].start(filtered_[pilot], lastSampleUs_[pilot]);
+    portEXIT_CRITICAL(&lapMux_);
+    return p;
 }
 
 bool C5MultiPilot::takeRaceCrossing(uint32_t &crossingUs) {

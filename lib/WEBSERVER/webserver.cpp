@@ -423,10 +423,11 @@ void Webserver::queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak) {
     portEXIT_CRITICAL(&rhPassMux_);
 }
 
-void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak) {
-    char body[96];
+void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak, int64_t levelUs) {
+    char body[128];
     int n = snprintf(body, sizeof(body), "{\"node\":%u,\"us\":%lld,\"peak\":%u", slot, (long long)us, peak);
     if (rawPeak >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"rawPeak\":%d", rawPeak);
+    if (levelUs >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"levelUs\":%lld", (long long)levelUs);
     snprintf(body + n, sizeof(body) - n, "}");
     rhEvents.send(body, "rhPass");
 }
@@ -435,6 +436,11 @@ void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak) 
 // RotorHazard plugin is linked. C5 RSSI is 0..1023; "rssi" and "peak" are
 // 0..255, the scale of the enter and exit levels, and "raw" and "rawPeak"
 // carry the full 0..1023 for plugins that show it (rawMax in /api/rh/info).
+// A C5 pass's "us" is the middle of its peak at 0..1023 and "levelUs" at
+// 0..255; each RSSI message's "us" is when it was taken, and "peakAge" and
+// "levelPeakAge" hold, per node, how many us before that the first and last
+// samples at its value were, so RotorHazard's history (and Marshal
+// recalculation) has each peak at its sample time.
 void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     const bool linked = servicesStarted && rhLinked(currentTimeMs);
     const bool c5 = c5MultiPilot && conf->getReceiverRadio() == 2;
@@ -449,7 +455,8 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
         C5Pass pass;
         while (c5MultiPilot->takePass(pass)) {
             const int64_t now = esp_timer_get_time();
-            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4, pass.peak);
+            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4, pass.peak,
+                       now - (int64_t)(uint32_t)((uint32_t)now - pass.levelUs));
         }
     }
     RhPass pass;
@@ -469,21 +476,33 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     // Before the peaks are taken: a skipped message's peaks go in the next.
     if (streamBusy(rhEvents)) return;
     rhRssiSentMs_ = currentTimeMs;
-    char body[160];
+    // Worst case ~500 bytes: 32 ten-digit ages for slots not sampled lately.
+    // Static: only parallelTask (8 KB stack) sends these.
+    static char body[768];
     int n = snprintf(body, sizeof(body), "{\"rssi\":[");
     uint8_t inside = 0;
     if (c5) {
         // The highest value since the last message, so RotorHazard's RSSI
-        // history (and its Marshal page) has every pass's peak.
-        uint16_t raw[C5Link::C5_MAX_PILOTS];
+        // history (and its Marshal page) has every pass's peak, and when it was.
+        C5Peak peaks[C5Link::C5_MAX_PILOTS];
+        const int64_t now = esp_timer_get_time();
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
-            raw[i] = c5MultiPilot->takeRhPeak(i);
-            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i] / 4);
+            peaks[i] = c5MultiPilot->takeRhPeak(i);
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].level);
             if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
         }
         n += snprintf(body + n, sizeof(body) - n, "],\"raw\":[");
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
-            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", raw[i]);
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].value);
+        const uint32_t nowUs = (uint32_t)now;
+        n += snprintf(body + n, sizeof(body) - n, "],\"us\":%lld,\"peakAge\":[", (long long)now);
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%lu,%lu" : "%lu,%lu",
+                          (unsigned long)(nowUs - peaks[i].firstUs), (unsigned long)(nowUs - peaks[i].lastUs));
+        n += snprintf(body + n, sizeof(body) - n, "],\"levelPeakAge\":[");
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%lu,%lu" : "%lu,%lu",
+                          (unsigned long)(nowUs - peaks[i].levelFirstUs), (unsigned long)(nowUs - peaks[i].levelLastUs));
     } else if (timer) {
         n += snprintf(body + n, sizeof(body) - n, "%u", timer->getRssi());
     }

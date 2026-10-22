@@ -142,7 +142,7 @@ class Webserver : public TransportInterface {
     uint8_t rhPassCount_ = 0;
     portMUX_TYPE rhPassMux_ = portMUX_INITIALIZER_UNLOCKED;
     // rawPeak: the C5's 0..1023 peak, or -1 for RX5808 passes (no raw scale).
-    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1);
+    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1, int64_t levelUs = -1);
     void sendRhUpdates(uint32_t currentTimeMs);
 
     // Race director event (/api/event): written to EVENT_TMP_PATH as it

@@ -15,8 +15,35 @@ struct C5LapEvent {
 // lap rules), for the RotorHazard plugin: RotorHazard applies its own.
 struct C5Pass {
     uint8_t pilot;
-    uint32_t crossingUs;   // micros() at the pass's RSSI peak
+    uint32_t crossingUs;   // micros() at the middle of the pass's RSSI peak
+    uint32_t levelUs;      // the same at RotorHazard's 0..255 scale (peak / 4)
     uint16_t peak;         // filtered peak, 0..1023
+};
+
+// The highest filtered value over a stretch of samples and the micros() of
+// the first and last sample at it, at full scale (0..1023) and at
+// RotorHazard's 0..255 (value / 4). RotorHazard's Marshal times a pass at the
+// middle of the first and last history points at its peak, so its history
+// needs these sample times, not the time the reading was sent.
+struct C5Peak {
+    uint16_t value;
+    uint32_t firstUs, lastUs;
+    uint8_t level;
+    uint32_t levelFirstUs, levelLastUs;
+    void start(uint16_t v, uint32_t us) {
+        value = v;
+        level = (uint8_t)(v / 4);
+        firstUs = lastUs = levelFirstUs = levelLastUs = us;
+    }
+    void add(uint16_t v, uint32_t us) {
+        if (v > value) { value = v; firstUs = lastUs = us; }
+        else if (v == value) lastUs = us;
+        const uint8_t l = (uint8_t)(v / 4);
+        if (l > level) { level = l; levelFirstUs = levelLastUs = us; }
+        else if (l == level) levelLastUs = us;
+    }
+    uint32_t middleUs() const { return firstUs + (lastUs - firstUs) / 2; }
+    uint32_t levelMiddleUs() const { return levelFirstUs + (levelLastUs - levelFirstUs) / 2; }
 };
 
 class C5MultiPilot {
@@ -46,8 +73,9 @@ public:
     // between frames.
     uint16_t takePeakHold(uint8_t pilot);
     // The same for the RotorHazard RSSI stream, held separately so the two
-    // readers don't take each other's peaks.
-    uint16_t takeRhPeak(uint8_t pilot);
+    // readers don't take each other's peaks, with the sample times of the
+    // peak (see C5Peak). Safe from another task.
+    C5Peak takeRhPeak(uint8_t pilot);
     void takeCaptureFrame(uint8_t* values);
 
     // Slots that have a frequency and race (Calibration tab "Race" switch).
@@ -76,11 +104,11 @@ private:
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
     volatile uint16_t peakHold_[C5Link::C5_MAX_PILOTS] = {};
-    volatile uint16_t rhPeak_[C5Link::C5_MAX_PILOTS] = {};
+    C5Peak rhPeak_[C5Link::C5_MAX_PILOTS] = {};          // under lapMux_
+    uint32_t lastSampleUs_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t capturePeak_[C5Link::C5_MAX_PILOTS] = {};
-    // Highest filtered value inside the gate and when it was first reached.
-    uint16_t peak_[C5Link::C5_MAX_PILOTS] = {};
-    uint32_t peakUs_[C5Link::C5_MAX_PILOTS] = {};
+    // Highest filtered value inside the gate, with its sample times.
+    C5Peak peak_[C5Link::C5_MAX_PILOTS] = {};
     // While a pass waits to end: when the RSSI went below Exit (0 = above it).
     uint32_t belowUs_[C5Link::C5_MAX_PILOTS] = {};
     uint32_t lastCrossingUs_[C5Link::C5_MAX_PILOTS] = {};
