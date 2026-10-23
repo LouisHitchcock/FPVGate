@@ -1,4 +1,7 @@
 #include "c5multipilot.h"
+#ifdef C5_TIMING_TRACE
+#include <esp_heap_caps.h>
+#endif
 
 void C5MultiPilot::begin(Config *config, C5Link *link) {
     config_ = config;
@@ -66,6 +69,16 @@ void C5MultiPilot::update(uint32_t nowMs) {
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
             if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
             portENTER_CRITICAL(&lapMux_);
+#ifdef C5_TIMING_TRACE
+            if (traceActive_ && i == tracePilot_) {
+                if (!traceCount_) traceFirstUs_ = sampleUs;
+                const uint32_t elapsed = sampleUs - traceFirstUs_;
+                if (elapsed >= traceDurationUs_) traceActive_ = false;
+                else if (traceCount_ < TRACE_CAPACITY)
+                    trace_[traceCount_++] = {elapsed, filtered_[i], value};
+                else { traceFull_ = true; traceActive_ = false; }
+            }
+#endif
             rhPeak_[i].add(filtered_[i], sampleUs);
             if (filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
             portEXIT_CRITICAL(&lapMux_);
@@ -220,3 +233,56 @@ bool C5MultiPilot::requestManualLap(uint8_t pilot) {
     portEXIT_CRITICAL(&lapMux_);
     return true;
 }
+
+#ifdef C5_TIMING_TRACE
+bool C5MultiPilot::startTrace(uint8_t pilot, uint32_t durationMs) {
+    if (pilot >= C5Link::C5_MAX_PILOTS || !durationMs || durationMs > 180000) return false;
+    portENTER_CRITICAL(&lapMux_);
+    if (traceActive_ || traceReading_ || traceAllocating_) { portEXIT_CRITICAL(&lapMux_); return false; }
+    traceAllocating_ = true;
+    portEXIT_CRITICAL(&lapMux_);
+    if (!trace_) trace_ = static_cast<TraceSample*>(heap_caps_malloc(
+        TRACE_CAPACITY * sizeof(TraceSample), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    portENTER_CRITICAL(&lapMux_);
+    traceAllocating_ = false;
+    if (!trace_) { portEXIT_CRITICAL(&lapMux_); return false; }
+    tracePilot_ = pilot;
+    traceDurationUs_ = durationMs * 1000u;
+    traceCount_ = traceFirstUs_ = 0;
+    traceFull_ = false;
+    traceActive_ = true;
+    portEXIT_CRITICAL(&lapMux_);
+    return true;
+}
+
+void C5MultiPilot::stopTrace() {
+    portENTER_CRITICAL(&lapMux_);
+    traceActive_ = false;
+    portEXIT_CRITICAL(&lapMux_);
+}
+
+C5MultiPilot::TraceInfo C5MultiPilot::traceInfo() {
+    portENTER_CRITICAL(&lapMux_);
+    const TraceInfo info = {traceActive_, traceFull_, traceCount_, traceFirstUs_, tracePilot_};
+    portEXIT_CRITICAL(&lapMux_);
+    return info;
+}
+
+const C5MultiPilot::TraceSample* C5MultiPilot::beginTraceRead(size_t& bytes) {
+    portENTER_CRITICAL(&lapMux_);
+    if (traceActive_ || traceAllocating_ || traceReading_ || !traceCount_) {
+        portEXIT_CRITICAL(&lapMux_);
+        return nullptr;
+    }
+    traceReading_ = true;
+    bytes = traceCount_ * sizeof(TraceSample);
+    portEXIT_CRITICAL(&lapMux_);
+    return trace_;
+}
+
+void C5MultiPilot::endTraceRead() {
+    portENTER_CRITICAL(&lapMux_);
+    traceReading_ = false;
+    portEXIT_CRITICAL(&lapMux_);
+}
+#endif

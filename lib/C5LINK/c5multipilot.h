@@ -78,6 +78,17 @@ public:
     C5Peak takeRhPeak(uint8_t pilot);
     void takeCaptureFrame(uint8_t* values);
 
+#ifdef C5_TIMING_TRACE
+    // Bench-only bounded PSRAM trace; absent from normal firmware builds.
+    struct TraceSample { uint32_t us; uint16_t filtered, input; };
+    struct TraceInfo { bool active, full; uint32_t count, firstUs; uint8_t pilot; };
+    bool startTrace(uint8_t pilot, uint32_t durationMs);
+    void stopTrace();
+    TraceInfo traceInfo();
+    const TraceSample* beginTraceRead(size_t& bytes);
+    void endTraceRead();
+#endif
+
     // Slots that have a frequency and race (Calibration tab "Race" switch).
     uint8_t racerMask() const { return racerMask_; }
     // Two or more racers: a multi-pilot race. One racer: a single-pilot race
@@ -131,6 +142,14 @@ private:
     C5Pass passes_[PASS_QUEUE] = {};
     uint8_t passCount_ = 0;
     uint8_t manualMask_ = 0;   // bit i: a manual lap waits for slot i (under lapMux_)
+
+#ifdef C5_TIMING_TRACE
+    static constexpr uint32_t TRACE_CAPACITY = 200000;
+    TraceSample* trace_ = nullptr;
+    uint32_t traceCount_ = 0, traceFirstUs_ = 0, traceDurationUs_ = 0;
+    uint8_t tracePilot_ = 0;
+    bool traceActive_ = false, traceFull_ = false, traceReading_ = false, traceAllocating_ = false;
+#endif
 
     void crossing(uint8_t pilot, uint32_t crossingUs, bool manual = false);
     void endPass(uint8_t pilot);

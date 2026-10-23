@@ -1422,6 +1422,43 @@ EEPROM:\n\
         request->send(200, "application/json", out);
     });
 
+#ifdef C5_TIMING_TRACE
+    server.on("/api/c5/trace", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const int pilot = request->hasParam("node") ? request->getParam("node")->value().toInt() : 0;
+        const int duration = request->hasParam("ms") ? request->getParam("ms")->value().toInt() : 140000;
+        if (!c5MultiPilot || pilot < 0 || pilot >= 8 || duration < 1 || duration > 180000 ||
+            !c5MultiPilot->startTrace(pilot, duration)) {
+            request->send(409, "text/plain", "Trace busy, invalid, or no PSRAM");
+            return;
+        }
+        request->send(200, "text/plain", "Armed");
+    });
+    server.on("/api/c5/trace", HTTP_DELETE, [this](AsyncWebServerRequest *request) {
+        if (c5MultiPilot) c5MultiPilot->stopTrace();
+        request->send(200, "text/plain", "Stopped");
+    });
+    server.on("/api/c5/trace", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot) { request->send(404); return; }
+        const auto info = c5MultiPilot->traceInfo();
+        JsonDocument doc;
+        doc["active"] = info.active; doc["full"] = info.full;
+        doc["count"] = info.count; doc["firstUs"] = info.firstUs; doc["pilot"] = info.pilot;
+        doc["recordBytes"] = sizeof(C5MultiPilot::TraceSample);
+        String body; serializeJson(doc, body);
+        request->send(200, "application/json", body);
+    });
+    server.on("/api/c5/trace.bin", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        size_t bytes = 0;
+        const auto samples = c5MultiPilot ? c5MultiPilot->beginTraceRead(bytes) : nullptr;
+        if (!samples) { request->send(409, "text/plain", "Stop the trace first, or no samples"); return; }
+        request->onDisconnect([this]() { c5MultiPilot->endTraceRead(); });
+        auto response = request->beginResponse(200, "application/octet-stream",
+            reinterpret_cast<const uint8_t*>(samples), bytes);
+        response->addHeader("Connection", "close");
+        request->send(response);
+    });
+#endif
+
     // Manual lap for one C5 slot in the running race (?pilot=0..7). It goes
     // out as a normal "c5Lap" event and counts in the race like a pass.
     server.on("/api/c5/addLap", HTTP_POST, [this](AsyncWebServerRequest *request) {
