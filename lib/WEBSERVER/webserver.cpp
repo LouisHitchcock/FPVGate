@@ -485,7 +485,6 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
         // The highest value since the last message, so RotorHazard's RSSI
         // history (and its Marshal page) has every pass's peak, and when it was.
         C5Peak peaks[C5Link::C5_MAX_PILOTS];
-        const int64_t now = esp_timer_get_time();
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
             peaks[i] = c5MultiPilot->takeRhPeak(i);
             n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].level);
@@ -494,6 +493,10 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
         n += snprintf(body + n, sizeof(body) - n, "],\"raw\":[");
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
             n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].value);
+        // update() may collect newer samples while these snapshots are taken.
+        // Read the clock afterwards so none of their unsigned ages wrap and
+        // make the plugin fall back to message time instead of sample time.
+        const int64_t now = esp_timer_get_time();
         const uint32_t nowUs = (uint32_t)now;
         n += snprintf(body + n, sizeof(body) - n, "],\"us\":%lld,\"peakAge\":[", (long long)now);
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
