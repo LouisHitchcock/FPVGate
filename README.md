@@ -255,6 +255,11 @@ Exit  ├/──────────\─
 
 **Current Build:** v1.9.0-alpha-5 (testing pre-release)
 
+The dedicated **FPVGate C5MK AIO** is available in the web flasher's
+Pre-Release Firmware mode under Alpha 5. It is a separate target from the
+older RX5808 FPVGate AIO and defaults to the C5 receiver. This flashes the
+S3 timer; the AIO's XIAO C5 receiver is updated separately.
+
 The stable release is [v1.8.4](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.8.4).
 The Multi-Pilot alpha requires a separate ESP32-C5 receiver. See the
 [release notes](release/v1.9.0-alpha-5/RELEASE_NOTES.md) and

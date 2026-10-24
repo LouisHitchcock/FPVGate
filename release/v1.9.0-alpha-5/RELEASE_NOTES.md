@@ -29,6 +29,28 @@ is not enabled in these binaries. Existing Alpha-4 limitations still apply.
 
 - **Seeed XIAO ESP32S3**: files prefixed `SeeedXIAOESP32S3-`, 8MB flash.
 - **Waveshare ESP32-S3-ETH**: files prefixed `WaveshareS3ETH-`, 16MB flash.
+- **FPVGate C5MK AIO**: additional dedicated board build, files prefixed
+  `FPVGateC5MKAIO-`, 8MB flash. Not the older RX5808 FPVGate AIO.
+
+### Additional C5MK AIO build
+
+The additional AIO target uses the AIO LED, buzzer and SD pin map, reports
+board ID `FPVGateC5MKAIO`, and fixes the receiver to ESP32-C5 on fresh boot,
+saved-config load and setting changes. Its C5 UART is S3 GPIO4 TX / GPIO5 RX.
+Temporary bring-up pin-test and full-rate debug trace endpoints are not shipped.
+
+Source for this additional board is
+[commit 0ed9a5b](https://github.com/LouisHitchcock/FPVGate/commit/0ed9a5b09bd3fad48706f588c79ce32b26dc4224).
+The original Alpha 5 tag and XIAO S3/S3-ETH images remain unchanged; this is
+an additive board package, not another alpha or release series.
+
+In the timer flasher, enable **Pre-Release Firmware**, choose **FPVGate C5MK
+AIO (ESP32-S3 + ESP32-C5)** and **v1.9.0-alpha-5**. This flashes the S3 timer
+only. The integrated XIAO ESP32-C5 receiver has separate firmware: choose
+**Seeed XIAO ESP32-C5** in the [C5 flasher](https://fpvgate.xyz/c5.html#flasher),
+or use the gate's receiver updater for an already compatible receiver. Do not
+select the C5-Zero image for the AIO's XIAO C5. C5MK 1.2.4-rc.1 is the new
+USB timing RC; it is separate from this S3 build.
 
 Choose the board matching your hardware. This is the S3 gate firmware, not
 firmware for the separate ESP32-C5 receiver. An already working Alpha-4 C5
@@ -55,7 +77,7 @@ website prerelease channel: enable Pre-Release Mode in the
 
 For a full wired flash, download your board's four binaries, `boot_app0.bin`,
 and its `-FLASH_INSTRUCTIONS.txt`. Follow that file's five-image command.
-The filesystem offset is `0x410000` for XIAO S3 and `0x610000` for S3-ETH.
+The filesystem offset is `0x410000` for XIAO S3/C5MK AIO and `0x610000` for S3-ETH.
 `boot_app0.bin` is written at `0xe000` so the new app is selected after a
 previous OTA update. Unplug and reconnect after flashing.
 
@@ -76,8 +98,9 @@ Existing SD card contents need no changes.
 
 ## Validation status
 
-Firmware and filesystem builds pass for both supported boards. All 58 frontend
-tests pass, and the matching plugin passes 16 timing/tuning regressions against
+Firmware and filesystem builds pass for all three supported boards. All 61
+frontend/config tests pass (including native C++ tests of the AIO pin map and
+production Config methods), and the matching plugin passes 16 timing/tuning regressions against
 RH 4.4.0 with the real gate detector simulator. Packaged image checks cover the
 version, flash headers, partition sizes/offsets and matching web assets.
 These release images have not yet been flashed for a new hardware qualification

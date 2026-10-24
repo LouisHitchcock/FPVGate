@@ -4,7 +4,12 @@ All notable changes to FPVGate will be documented in this file.
 ## [1.9.0-alpha-5] - 2026-10-24
 
 Fifth Multi-Pilot alpha, with RotorHazard timing fixes paired with FPVGate RH plugin v2.3.2-rc.1.
-Built for Seeed XIAO ESP32S3 and Waveshare ESP32-S3-ETH.
+Built for Seeed XIAO ESP32S3 and Waveshare ESP32-S3-ETH, with an additional dedicated FPVGate C5MK AIO build.
+
+### Added
+- Dedicated C5MK AIO board identity, AIO outputs/SD pin map and forced C5 receiver
+  on defaults, saved-config load and receiver changes. Published as an additional
+  Alpha 5 board build; the original two board images and release tag are unchanged.
 
 ### Fixed
 - C5 passes and RotorHazard RSSI history now use the timestamps of the peak
