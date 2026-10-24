@@ -129,7 +129,7 @@ test("every-lap and beep modes are unchanged", () => {
   expect(b.spoken).toEqual(["BEEP", "BEEP"]);
 });
 
-function c5RaceSandbox(mode, maxLaps = 0) {
+function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false) {
   const spoken = [];
   const stops = [];
   const pending = [];
@@ -138,6 +138,7 @@ function c5RaceSandbox(mode, maxLaps = 0) {
   const stubs = {
     announcerSelect: { selectedIndex: 0, options: [{ value: mode }] },
     c5Race: state,
+    c5GateManaged: gateManaged,
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
     i18n: { t: (k, p) => p ? `${k}:${p.n}` : k },
@@ -206,6 +207,19 @@ test.each([
   r.pass(3, 0, 1.2);
   r.pass(3, 1, 10);
   expect(r.spoken).toEqual(expected);
+});
+
+test.each(["none", "", "beep", "1lap", "2lap", "3lap"])("gate-managed C5 %p announces without scheduling a browser stop", (mode) => {
+  const r = c5RaceSandbox(mode, 3, true);
+  for (let idx = 0; idx <= 3; idx++) {
+    r.pass(3, idx, idx ? 10 : 1);
+    r.pass(5, idx, idx ? 20 : 2);
+  }
+  r.flush();
+  expect(r.state.finished).toEqual({ 3: true, 5: true });
+  expect(r.stops).toEqual([]);
+  if (mode === '2lap') expect(r.spoken).toContain('Bea 2 laps 20.00');
+  if (mode === '3lap') expect(r.spoken).toContain('Cal 3 laps 60.00');
 });
 
 test("C5 replayed announcements only use laps up to the event index", () => {

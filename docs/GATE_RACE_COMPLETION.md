@@ -1,7 +1,8 @@
 # C5 race completion on the gate
 
-Implemented on `feature/gate-race-completion`, based on Alpha-4.
-Hardware validation and release integration are still required.
+Merged from `feature/gate-race-completion` into the refreshed Alpha 5 release,
+together with the consecutive-lap announcer fixes and six board packages.
+Hardware validation of the integrated images is still required.
 
 ## Behaviour
 
