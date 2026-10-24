@@ -11,26 +11,30 @@ with up to eight pilots.
 
 ## What you need
 
-- An FPVGate on a Seeed XIAO ESP32-S3.
-- An ESP32-C5 board flashed with the FPVGate C5 receiver firmware,
-  [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK) (version 2 or
-  later for the full 1 kHz-per-pilot mode). Its README covers building and
-  flashing it, and its docs explain how the receiver works.
-- Four wires between them:
+- An FPVGate S3 timer on one of the six Alpha 5 targets: XIAO S3, S3-ETH,
+  DevKitC-1 (8MB), FPVGate AIO, Solo or C5MK AIO.
+- An ESP32-C5 board flashed with
+  [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK) 1.2.1 or later.
+  The C5MK AIO has a separate integrated XIAO C5 receiver; use XIAO C5 firmware.
+- Four wires for a separate receiver, joining TX to RX and sharing ground:
 
-| XIAO S3 | ESP32-C5 | Purpose |
+| S3 timer | Host TX -> C5 RX | Host RX <- C5 TX |
 |---|---|---|
-| D3 / GPIO4 | GPIO4 | Link: S3 → C5 |
-| D4 / GPIO5 | GPIO5 | Link: C5 → S3 |
-| 5V | 5V (VUSB) | Power |
-| GND | GND | Ground |
+| XIAO S3 / FPVGate AIO / Solo / C5MK AIO | GPIO4 (D3) | GPIO5 (D4) |
+| ESP32-S3 DevKitC-1 (8MB) / S3-ETH | GPIO43 | GPIO44 |
 
-The link uses the pins the RX5808 used. **Power the C5 from the 5V pin, not
-from the S3's 3V3 pin.** The C5's radio draws a burst of current as it
-starts, which the S3's 3.3 V supply can't provide alongside the S3's own
-Wi-Fi: wired 3V3 to 3V3, the C5 never finishes booting and FPVGate shows it
-offline. 5V goes only to the C5's 5V (VUSB) power pin; the link pins are
-3.3 V logic, so never connect 5 V to any other C5 pin.
+| C5 receiver | C5 RX <- S3 TX | C5 TX -> S3 RX |
+|---|---|---|
+| Seeed XIAO ESP32-C5 | GPIO23 (D4) | GPIO24 (D5) |
+| Waveshare C5-Zero | GPIO4 | GPIO5 |
+
+For example, XIAO S3 D3 connects to XIAO C5 D4, and S3 D4 connects to C5 D5.
+The D-labels on the two boards do not mean the same GPIO numbers.
+
+**Power the C5 from 5V/VUSB, not the S3's 3V3 regulator.** Join grounds;
+signal pins are 3.3V logic only. Never connect 5V to a signal pin.
+With separate USB supplies, share ground and leave the 5V link disconnected.
+Disconnect power before changing wiring.
 
 ## Setting it up
 
@@ -136,6 +140,19 @@ Start, stop and clear races from the Race tab as usual. The pilots in a race
 are fixed when it starts. Stop the race before changing pilot participation,
 receiver tuning, or calibration.
 
+### Gate-managed completion in refreshed Alpha 5
+
+In C5 mode, max-lap and heat-time stopping and history saving run on the S3,
+even with every browser closed. Reconnect to view the saved race; do not post
+another history record. Failed saves keep the race in memory and block Start
+and Clear until Stop retries successfully. More than 63 real laps is rejected;
+Gate 1 uses the remaining crossing slot. A DNS racer never reaches max laps,
+so configure a heat limit or use manual Stop.
+
+Events result recording/next heat and browser speech still need an open page.
+Other receiver modes keep their previous browser stopping/saving behavior.
+These integrated builds still need physical closed-browser/storage testing.
+
 ### Timing rules (every pilot)
 
 - **Gate 1**: the time from the start to the pilot's first pass.
@@ -150,8 +167,10 @@ receiver tuning, or calibration.
 - The **announcer** says the pilot's name and the time ("Louis, 12.34"), or
   "Louis, Gate 1 …". It uses **Spoken as** if set, then the name, then
   "Pilot 5". The Beep and None announcer settings still apply; the 2-lap and
-  3-lap modes announce every lap in multi-pilot races.
-- **Gate LEDs** flash in the colour of the pilot who just lapped.
+  3-lap modes now announce that pilot's rolling 2-/3-lap total once enough real
+  laps exist, excluding Gate 1.
+- **Internal gate-crossing LED flashes** are still work in progress for C5.
+  The external LED API remains available for compatible modules.
 - **Max laps**: each pilot hears "*name* finished" when they complete the
   maximum, and the race stops when every pilot has finished. Heat time and
   Stop end the race at any time.

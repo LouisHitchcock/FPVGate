@@ -4,20 +4,26 @@ All notable changes to FPVGate will be documented in this file.
 ## [1.9.0-alpha-5] - 2026-10-24
 
 Fifth Multi-Pilot alpha, with RotorHazard timing fixes paired with FPVGate RH plugin v2.3.2-rc.1.
-Built for Seeed XIAO ESP32S3 and Waveshare ESP32-S3-ETH, with an additional dedicated FPVGate C5MK AIO build.
+Refreshed in place with the announcer and gate-race-completion branches, for all six boards:
+Seeed XIAO ESP32S3, Waveshare ESP32-S3-ETH, ESP32-S3 DevKitC-1 (8MB), FPVGate AIO, Solo and C5MK AIO.
 
 ### Added
 - Dedicated C5MK AIO board identity, AIO outputs/SD pin map and forced C5 receiver
-  on defaults, saved-config load and receiver changes. Published as an additional
-  Alpha 5 board build; the original two board images and release tag are unchanged.
+  on defaults, saved-config load and receiver changes.
+- C5 gate-managed max-lap/heat-time stopping and one saved multi-pilot history
+  record, without an open browser. Failed saves can be retried without duplication.
 
 ### Fixed
+- Restored 2-/3-consecutive-lap totals and max-lap stopping after the announcer.
+- C5 announcements use the selected consecutive mode independently per pilot.
 - C5 passes and RotorHazard RSSI history now use the timestamps of the peak
   samples, including separate peak midpoints for the two RSSI resolutions.
 - The reference clock is read after peak snapshots so a newer sample cannot
   produce a wrapped age and fall back to message-arrival timing.
 
 ### Testing
+- Events results/next heat and non-C5 completion still need a browser.
+- Six-board physical qualification, real storage recovery and soak remain pending.
 - Use the matching plugin for live-versus-Marshal timestamp comparisons.
 - Full-rate timing traces remain opt-in development instrumentation and are
   not enabled in the distributed binaries.

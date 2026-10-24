@@ -255,6 +255,12 @@ Exit  ├/──────────\─
 
 **Current Build:** v1.9.0-alpha-5 (testing pre-release)
 
+The refreshed Alpha 5 integrates consecutive-lap announcement fixes and C5
+gate-side stopping/history saving, with images for all six planned boards.
+Install both firmware and filesystem even when already running Alpha 5.
+Events results/next heat and non-C5 completion still need the browser;
+physical qualification of the refreshed images remains pending.
+
 The dedicated **FPVGate C5MK AIO** is available in the web flasher's
 Pre-Release Firmware mode under Alpha 5. It is a separate target from the
 older RX5808 FPVGate AIO and defaults to the C5 receiver. This flashes the
@@ -274,7 +280,9 @@ The Multi-Pilot alpha requires a separate ESP32-C5 receiver. See the
 
 - RotorHazard passes and RSSI history use matching peak sample timestamps.
 - Use RH plugin v2.3.2-rc.1 for the matching clock-correction fix.
-- Images for XIAO S3 and S3-ETH; available through the normal prerelease flasher.
+- Fixed 2-/3-lap rolling announcements, including separate C5 pilot totals.
+- C5 races stop on max laps/heat time and save history on the gate.
+- All six boards: XIAO S3, S3-ETH, DevKitC-1, AIO, Solo and C5MK AIO.
 - Camera and physical multi-transmitter race validation remain pending.
 
 **v1.9.0-Multi-Alpha-2 (October 9, 2026)**

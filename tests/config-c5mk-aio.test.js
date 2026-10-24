@@ -20,10 +20,13 @@ const helpers = source.slice(0, source.indexOf('void Config::init(void)'))
     .replace(/^#include .*$/gm, '');
 
 test.each([
-    ['FPVGATE_C5MK_AIO', 2],
-    ['SEEED_XIAO_ESP32S3', 0],
-    ['FPVGATE_AIO', 0]
-])('%s preserves the correct receiver defaults, saved settings and setter behavior', (board, defaultRadio) => {
+    ['FPVGATE_C5MK_AIO', 2, 'FPVGateC5MKAIO', 4, 5],
+    ['SEEED_XIAO_ESP32S3', 0, 'SeeedXIAOESP32S3', 4, 5],
+    ['FPVGATE_AIO', 0, 'FPVGateAIO', 4, 5],
+    ['FPVGATE_SOLO', 0, 'FPVGateSolo', 4, 5],
+    ['ESP32S3', 0, 'ESP32S3', 43, 44],
+    ['WAVESHARE_S3_ETH', 0, 'WaveshareS3ETH', 43, 44]
+])('%s preserves the correct receiver defaults, saved settings and setter behavior', (board, defaultRadio, boardId, tx, rx) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpvgate-config-'));
     const exe = path.join(dir, 'config-test.exe');
     const cpp = `
@@ -50,6 +53,8 @@ ${method('void Config::setReceiverRadio(uint8_t radio)')}
 void Config::write() { EEPROM.image = conf; modified = false; }
 bool Config::loadFromSD() { return false; }
 int main() {
+    assert(strcmp(FPVGATE_BOARD_ID, "${boardId}") == 0);
+    static_assert(C5_UART_TX_PIN == ${tx} && C5_UART_RX_PIN == ${rx}, "C5 wiring must match the board's documentation");
 #ifdef FPVGATE_C5MK_AIO
     static_assert(C5_UART_TX_PIN == 4 && C5_UART_RX_PIN == 5, "AIO C5 UART pins");
     static_assert(PIN_RGB_LED == 44 && NUM_LEDS == 3 && PIN_BUZZER == 43, "AIO outputs");
