@@ -73,4 +73,13 @@ Existing SD card contents need no changes.
 - The camera recording, with a fixed crossing line and a visible timing
   reference. A 120fps recording has about 8.3ms between frames.
 
+## Validation status
+
+Firmware and filesystem builds pass for both supported boards. All 58 frontend
+tests pass, and the matching plugin passes 16 timing/tuning regressions against
+RH 4.4.0 with the real gate detector simulator. Packaged image checks cover the
+version, flash headers, partition sizes/offsets and matching web assets.
+These release images have not yet been flashed for a new hardware qualification
+run; the prerelease is for that testing.
+
 SHA-256 checksums for the individual flash images are in `SHA256SUMS.txt`.

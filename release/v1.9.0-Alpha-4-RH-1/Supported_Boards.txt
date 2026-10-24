@@ -1,0 +1,7 @@
+FPVGate v1.9.0-Alpha-4-RH-1 - Supported Boards
+
+  - Seeed Studio XIAO ESP32S3 (8MB)
+  - Waveshare ESP32-S3-ETH (16MB, Ethernet)
+
+USB networking (http://192.168.7.1 over USB-C) is available on all of
+these. Windows and Linux only; macOS does not support RNDIS.
