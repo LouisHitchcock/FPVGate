@@ -119,6 +119,20 @@ python tools/package_release.py --version vX.Y.Z
 Add `--skip-build` to repackage binaries already in `.pio/build`, or
 `--only ESP32S3 FPVGateAIO` to limit it to specific boards.
 
+For the refreshed Alpha 5, update `release/v1.9.0-alpha-5/BUILD_INFO.json`
+to the integrated source revision, regenerate all flash-image checksums,
+then verify the actual packaged filesystems as well as the binaries:
+
+```bash
+node tools/verify_alpha5_release.mjs --website ../FPVGate-Website
+```
+
+This extracts each LittleFS image into a fresh temporary directory and
+compares its script/event assets to source, catching a new firmware paired
+with old announcer or history-saving page code. Same-version Alpha 5 refreshes
+must replace both firmware and filesystem; keep the existing release/tag name
+and move its source tag and verified downloads together.
+
 **On Windows, run this from PowerShell, not Git Bash.** PlatformIO refuses to
 install its esptool package under MSys and the filesystem build fails with
 "MSys/Mingw is not supported".
