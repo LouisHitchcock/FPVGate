@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 
-# Every board a release ships. Keep in step with the matrix in
+# The six boards in the 1.9.0 release scope. Keep in step with the matrix in
 # .github/workflows/manual-release-build.yml.
 BOARDS = [
     ("ESP32S3", "8MB", "ESP32-S3 DevKitC-1 (8MB Flash)"),
@@ -36,7 +36,6 @@ BOARDS = [
     ("FPVGateC5MKAIO", "8MB", "FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5, 8MB)"),
     ("FPVGateSolo", "8MB", "FPVGate Solo (XIAO ESP32S3, 8MB)"),
     ("SeeedXIAOESP32S3", "8MB", "Seeed Studio XIAO ESP32S3 (8MB)"),
-    ("XIAOS3Plus", "16MB", "XIAO ESP32S3 Plus (16MB Flash)"),
     ("WaveshareS3ETH", "16MB", "Waveshare ESP32-S3-ETH (16MB, Ethernet)"),
 ]
 

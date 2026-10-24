@@ -31,12 +31,14 @@ release/vX.Y.Z/
 | `FPVGateC5MKAIO` | 8MB | FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5, C5-only) |
 | `FPVGateSolo` | 8MB | FPVGate Solo (XIAO ESP32S3) |
 | `SeeedXIAOESP32S3` | 8MB | Seeed Studio XIAO ESP32S3 |
-| `XIAOS3Plus` | 16MB | XIAO ESP32S3 Plus |
 | `WaveshareS3ETH` | 16MB | Waveshare ESP32-S3-ETH |
 
 This list lives in three places that must agree, or a board silently ships
 nothing: the `BOARDS` table in `tools/package_release.py`, the `matrix` in
 `.github/workflows/manual-release-build.yml`, and this table.
+
+For 1.9.0 this is the six-board shipping scope. The XIAO ESP32S3 Plus target
+remains in the source for custom/older builds but is not packaged for 1.9.0.
 
 ## Why Two Sets of Binaries?
 
@@ -106,7 +108,7 @@ If the automated process fails, follow these steps:
 
 ### 1. Build and package every board
 
-One command builds all five boards, writes both naming conventions, generates
+One command builds all six boards, writes both naming conventions, generates
 per-board flash instructions with the correct filesystem offset read from that
 board's partition CSV, and writes `Supported_Boards.txt`:
 

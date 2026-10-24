@@ -23,7 +23,6 @@ jobs:
           - FPVGateC5MKAIO     # XIAO ESP32S3 + XIAO C5, 8MB, C5-only receiver
           - FPVGateSolo        # XIAO ESP32S3, 8MB
           - SeeedXIAOESP32S3   # 8MB
-          - XIAOS3Plus         # 16MB
           - WaveshareS3ETH     # 16MB, W5500 Ethernet
     
     steps:
