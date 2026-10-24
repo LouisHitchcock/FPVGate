@@ -1,8 +1,8 @@
-# FPVGate v1.9.0-Alpha-4-RH-1
+# FPVGate-v1.9.0-alpha-5
 
 24 October 2026
 
-RotorHazard timing test prerelease based on Alpha-4. Install it together with
+Fifth Multi-Pilot alpha, following Alpha-4, with RotorHazard timing fixes. Install it together with
 [FPVGate RH plugin v2.3.2-rc.1](https://github.com/LouisHitchcock/fpvgate-rh-plugin/releases/tag/v2.3.2-rc.1).
 Both parts are needed to test the timestamp fixes.
 
@@ -39,7 +39,7 @@ receiver does not need updating for this timing test (C5MK 1.2.1 or later).
 1. Back up the gate configuration and RotorHazard database.
 2. Download your board's `-firmware.bin` and `-littlefs.bin` from this release.
 3. In the gate's update screen, install the firmware first and the filesystem
-   second. Reconnect and confirm `/version` reports `1.9.0-Alpha-4-RH-1`.
+   second. Reconnect and confirm `/version` reports `1.9.0-alpha-5`.
 4. Install plugin v2.3.2-rc.1 using its release instructions, replacing the
    existing plugin folder, then restart RotorHazard.
 
@@ -47,8 +47,9 @@ Keep the existing frequencies, thresholds and Full-resolution RSSI setting for
 the first comparison. Use a second run if you want to compare RSSI resolutions;
 restart RotorHazard after changing that option.
 
-The downloads are available directly from this GitHub prerelease. Website
-flasher/online-update listing is not part of this release.
+The downloads are available from this GitHub prerelease and through the normal
+website prerelease channel: enable Pre-Release Mode in the
+[web flasher](https://fpvgate.xyz/flasher.html) and select `v1.9.0-alpha-5`.
 
 ## Wired flashing
 

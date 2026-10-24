@@ -1,4 +1,4 @@
-FPVGate v1.9.0-Alpha-4-RH-1 - Supported Boards
+FPVGate v1.9.0-alpha-5 - Supported Boards
 
   - Seeed Studio XIAO ESP32S3 (8MB)
   - Waveshare ESP32-S3-ETH (16MB, Ethernet)

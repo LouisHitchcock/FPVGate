@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
-## [1.9.0-Alpha-4-RH-1] - 2026-10-24
+## [1.9.0-alpha-5] - 2026-10-24
 
-RotorHazard timing test prerelease, paired with FPVGate RH plugin v2.3.2-rc.1.
+Fifth Multi-Pilot alpha, with RotorHazard timing fixes paired with FPVGate RH plugin v2.3.2-rc.1.
 Built for Seeed XIAO ESP32S3 and Waveshare ESP32-S3-ETH.
 
 ### Fixed

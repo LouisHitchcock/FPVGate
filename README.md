@@ -253,17 +253,24 @@ Exit  ├/──────────\─
 
 ## Project Status
 
-**Current Build:** v1.9.0-Multi-Alpha-2 (testing pre-release)
+**Current Build:** v1.9.0-alpha-5 (testing pre-release)
 
-The stable release is [v1.8.3](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.8.3).
+The stable release is [v1.8.4](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.8.4).
 The Multi-Pilot alpha requires a separate ESP32-C5 receiver. See the
-[release notes](release/v1.9.0-Multi-Alpha-2/RELEASE_NOTES.md) and
+[release notes](release/v1.9.0-alpha-5/RELEASE_NOTES.md) and
 [setup guide](docs/C5_MULTI_PILOT.md) before installing it.
 **Platform:** [ESP32-S3 DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html), [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/), [FPVGate AIO](https://fpvgate.xyz/shop.html)
 **License:** CC BY-NC-SA 4.0  
 **Status:** Multi-Pilot alpha testing
 
 ### Recent Updates
+
+**v1.9.0-alpha-5 (October 24, 2026)**
+
+- RotorHazard passes and RSSI history use matching peak sample timestamps.
+- Use RH plugin v2.3.2-rc.1 for the matching clock-correction fix.
+- Images for XIAO S3 and S3-ETH; available through the normal prerelease flasher.
+- Camera and physical multi-transmitter race validation remain pending.
 
 **v1.9.0-Multi-Alpha-2 (October 9, 2026)**
 
