@@ -1,109 +1,113 @@
 # FPVGate-v1.9.0-alpha-5
 
-24 October 2026
+24 October 2026 — refreshed integrated build, using the existing Alpha 5 release.
 
-Fifth Multi-Pilot alpha, following Alpha-4, with RotorHazard timing fixes. Install it together with
-[FPVGate RH plugin v2.3.2-rc.1](https://github.com/LouisHitchcock/fpvgate-rh-plugin/releases/tag/v2.3.2-rc.1).
-Both parts are needed to test the timestamp fixes.
+This refresh merges the consecutive-lap announcer fix and gate-side C5 race
+completion with the existing RH timing fixes and C5MK AIO support. It now
+ships all six planned S3 timer boards. It replaces the earlier Alpha 5
+downloads; the reported version remains `1.9.0-alpha-5`.
 
-## What changed
+**Already running Alpha 5? Install both the new firmware and filesystem.**
+The same version label does not mean you already have these merged changes.
+Back up configuration, SD/race data and your RH database before updating.
+`BUILD_INFO.json` identifies the source revision and board set.
 
-- C5 gate passes use the midpoint of the first and last sample at the RSSI peak.
-- RotorHazard receives the actual peak sample times for its RSSI history,
-  rather than assigning those samples their network arrival times.
-- Both RSSI resolutions have matching pass/history timestamps.
-- Taking the reference clock after all peak snapshots prevents a newer sample
-  from wrapping its age and losing its sample timestamp.
-- The matching plugin adopts clock corrections between crossings, keeping a
-  crossing and its history on the same clock mapping.
+## Included changes
 
-These fixes address differences between live timing and Marshal recalculation.
-Agreement between those two does not establish RF timing accuracy; the camera
-comparison and physical multi-transmitter testing are still needed.
+- Fixed 2-/3-consecutive-lap announcements: rolling totals exclude Gate 1,
+  wait for enough real laps, and no longer throw before the max-laps check.
+- C5 multi-pilot announcements honor the selected consecutive-lap mode
+  independently for each pilot, retaining pilot names.
+- In C5 mode the gate now owns race stopping and history saving. Each racer
+  finishes at their own max-lap limit; the race stops when all finish or the
+  configured heat time expires, even with no browser open.
+- C5 stops save one record containing every racer's laps and finalize the
+  RSSI capture. Repeated stops do not duplicate history. Failed saves retain
+  the race in memory, block Start/Clear and can be retried with Stop.
+- Browser reconnect restores the gate's race/saved ID rather than saving
+  another copy. Older browser pages are prevented from posting duplicate
+  history for the current gate-managed session.
+- RH's raw pass stream continues after the local gate race reaches its own
+  limit; RotorHazard still applies its own race and lap rules.
+- Existing RH fixes remain: pass/history peak sample timestamps at both
+  RSSI resolutions, reference clock read after snapshots, and the paired
+  plugin's clock corrections adopted between crossings.
+- Dedicated C5MK AIO board identity and AIO LED/buzzer/SD pin map, with its
+  receiver fixed to C5 on defaults, saved-config load and setting changes.
 
-This build contains the RH timing changes only on top of Alpha-4. The separate
-gate-side race completion work is not included. Full-rate debug trace capture
-is not enabled in these binaries. Existing Alpha-4 limitations still apply.
+## All six timer boards
 
-## Supported boards
+| Flasher selection | File prefix / board ID | Flash | Filesystem offset |
+|---|---|---|---|
+| Seeed XIAO ESP32S3 | `SeeedXIAOESP32S3` | 8MB | `0x410000` |
+| Waveshare ESP32-S3-ETH | `WaveshareS3ETH` | 16MB | `0x610000` |
+| ESP32-S3 DevKitC-1 | `ESP32S3` | 8MB | `0x410000` |
+| FPVGate AIO | `FPVGateAIO` | 8MB | `0x410000` |
+| FPVGate Solo | `FPVGateSolo` | 8MB | `0x410000` |
+| FPVGate C5MK AIO | `FPVGateC5MKAIO` | 8MB | `0x410000` |
 
-- **Seeed XIAO ESP32S3**: files prefixed `SeeedXIAOESP32S3-`, 8MB flash.
-- **Waveshare ESP32-S3-ETH**: files prefixed `WaveshareS3ETH-`, 16MB flash.
-- **FPVGate C5MK AIO**: additional dedicated board build, files prefixed
-  `FPVGateC5MKAIO-`, 8MB flash. Not the older RX5808 FPVGate AIO.
+Choose the exact board, not a different AIO or a different DevKit flash size.
+The XIAO ESP32S3 Plus is not in the six-board 1.9.0 scope.
 
-### Additional C5MK AIO build
+These are S3 timer images, not C5 receiver firmware. The C5MK AIO's separate
+XIAO C5 uses **XIAO ESP32-C5** receiver firmware, not the C5-Zero image.
+Existing working C5 receivers on C5MK 1.2.1+ do not need an update solely for
+the S3 changes. C5MK 1.2.4-rc.1 is separately available for native RH USB tests.
 
-The additional AIO target uses the AIO LED, buzzer and SD pin map, reports
-board ID `FPVGateC5MKAIO`, and fixes the receiver to ESP32-C5 on fresh boot,
-saved-config load and setting changes. Its C5 UART is S3 GPIO4 TX / GPIO5 RX.
-Temporary bring-up pin-test and full-rate debug trace endpoints are not shipped.
+## Install
 
-Source for this additional board is
-[commit 0ed9a5b](https://github.com/LouisHitchcock/FPVGate/commit/0ed9a5b09bd3fad48706f588c79ce32b26dc4224).
-The original Alpha 5 tag and XIAO S3/S3-ETH images remain unchanged; this is
-an additive board package, not another alpha or release series.
+In the [timer flasher](https://fpvgate.xyz/flasher.html), enable
+**Pre-Release Firmware**, choose your board and **v1.9.0-alpha-5**.
 
-In the timer flasher, enable **Pre-Release Firmware**, choose **FPVGate C5MK
-AIO (ESP32-S3 + ESP32-C5)** and **v1.9.0-alpha-5**. This flashes the S3 timer
-only. The integrated XIAO ESP32-C5 receiver has separate firmware: choose
-**Seeed XIAO ESP32-C5** in the [C5 flasher](https://fpvgate.xyz/c5.html#flasher),
-or use the gate's receiver updater for an already compatible receiver. Do not
-select the C5-Zero image for the AIO's XIAO C5. C5MK 1.2.4-rc.1 is the new
-USB timing RC; it is separate from this S3 build.
+For a complete wired flash use the board's four images plus `boot_app0.bin`:
+bootloader at `0x0`, partitions at `0x8000`, boot_app0 at `0xe000`,
+firmware at `0x10000`, and littlefs at the offset in the table.
+Each board has a matching `-FLASH_INSTRUCTIONS.txt`. The OTA selector ensures
+the gate starts the newly flashed app rather than an old app1 slot.
 
-Choose the board matching your hardware. This is the S3 gate firmware, not
-firmware for the separate ESP32-C5 receiver. An already working Alpha-4 C5
-receiver does not need updating for this timing test (C5MK 1.2.1 or later).
+Existing compatible 1.8/1.9 installations can install the matching firmware
+first and filesystem second using the gate updater. Upgrading from 1.7.x
+requires a complete wired flash because the partition layout changed.
+Reconnect/reload the page after both components are installed. Update every
+open browser tab; don't mix old cached page code with the refreshed firmware.
 
-## Upgrade from Alpha-4
+For RH through FPVGate, also install
+[plugin v2.3.2-rc.1](https://github.com/LouisHitchcock/fpvgate-rh-plugin/releases/tag/v2.3.2-rc.1)
+and restart RH. Native C5 USB to RH uses the C5 firmware directly and needs
+neither the S3 nor that plugin.
 
-1. Back up the gate configuration and RotorHazard database.
-2. Download your board's `-firmware.bin` and `-littlefs.bin` from this release.
-3. In the gate's update screen, install the firmware first and the filesystem
-   second. Reconnect and confirm `/version` reports `1.9.0-alpha-5`.
-4. Install plugin v2.3.2-rc.1 using its release instructions, replacing the
-   existing plugin folder, then restart RotorHazard.
+## Limits still open
 
-Keep the existing frequencies, thresholds and Full-resolution RSSI setting for
-the first comparison. Use a second run if you want to compare RSSI resolutions;
-restart RotorHazard after changing that option.
+- Browser-free stopping/saving applies to **C5 races only**. RX5808/other
+  receiver stopping and saving still use the existing browser behavior.
+- Events result recording and next-heat advancement still need an open page.
+  This release does not complete the entire browser-free racing milestone.
+- Max laps excludes Gate 1. A DNS racer remains unfinished: use a heat limit
+  or manual Stop. More than 63 real laps is rejected due to the existing
+  64-crossing storage capacity. A failed unsaved race does not survive power loss.
+- Internal C5 crossing LED flashes, the separately reported practice-mode
+  announcements, and multi-pilot onboard speech/LCD/OSD work are not claimed fixed.
+- Temporary pin-test and full-rate debug trace endpoints are not enabled.
+- Camera accuracy, physical multi-transmitter racing, six-board hardware
+  checks, reconnect/two-tab/closed-browser trials, real SD save-failure recovery
+  and overnight soak qualification remain outstanding.
 
-The downloads are available from this GitHub prerelease and through the normal
-website prerelease channel: enable Pre-Release Mode in the
-[web flasher](https://fpvgate.xyz/flasher.html) and select `v1.9.0-alpha-5`.
+## Verification and priority test
 
-## Wired flashing
+118 frontend/config tests pass, including the real announcement functions,
+gate-managed browser behavior and native pin/configuration checks for all six boards.
+The native race-control simulation passes Gate 1, one/eight racers, observers,
+frozen limits, min-lap filtering, heat-time rollover, saves/retries and duplicate
+prevention. The matching plugin's 16 timing/tuning regressions pass against
+RH 4.4.0 with the merged real gate detector simulator.
 
-For a full wired flash, download your board's four binaries, `boot_app0.bin`,
-and its `-FLASH_INSTRUCTIONS.txt`. Follow that file's five-image command.
-The filesystem offset is `0x410000` for XIAO S3/C5MK AIO and `0x610000` for S3-ETH.
-`boot_app0.bin` is written at `0xe000` so the new app is selected after a
-previous OTA update. Unplug and reconnect after flashing.
+All six firmware/filesystem pairs pass builds and image/partition checks.
+SHA-256 hashes are in `SHA256SUMS.txt`.
+Build/tests are not physical-device qualification of these images.
 
-Upgrading from 1.7.x requires a full wired flash because the partition layout
-changed. Existing Alpha-4 devices can use the firmware/filesystem OTA pair.
-Existing SD card contents need no changes.
-
-## What to collect
-
-- The original saved RH race database before Marshal recalculation, plus
-  the recalculated result if used.
-- Live and recalculated crossing timestamps relative to race start, including
-  Gate 1 and node/pilot identifiers; preserve these as separate datasets.
-- Firmware/plugin/RH versions, frequencies, thresholds, RSSI resolution and
-  connection type.
-- The camera recording, with a fixed crossing line and a visible timing
-  reference. A 120fps recording has about 8.3ms between frames.
-
-## Validation status
-
-Firmware and filesystem builds pass for all three supported boards. All 61
-frontend/config tests pass (including native C++ tests of the AIO pin map and
-production Config methods), and the matching plugin passes 16 timing/tuning regressions against
-RH 4.4.0 with the real gate detector simulator. Packaged image checks cover the
-version, flash headers, partition sizes/offsets and matching web assets.
-These release images have not yet been flashed for a new hardware qualification
-run; the prerelease is for that testing.
-
-SHA-256 checksums for the individual flash images are in `SHA256SUMS.txt`.
+For Hazard's accuracy comparison, prioritize native C5 USB beside RX5808
+and a fixed-line camera reference, then repeat through the UART/S3/plugin
+path. Preserve individual race-relative crossing timestamps (including the
+first), original and recalculated databases, node/pilot IDs, versions,
+thresholds, frequencies, RSSI resolution and transport. Live/Marshal agreement
+is not proof of RF accuracy; 120 fps gives an 8.33 ms frame interval.
