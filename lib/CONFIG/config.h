@@ -136,6 +136,31 @@
 #define PIN_SD_MOSI 8          // D9 (GPIO8)
 #define PIN_SD_MISO 9          // D10 (GPIO9)
 
+// FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5). The C5 takes the RX5808's
+// place: S3 D3 -> C5 D4 (C5 RX), S3 D4 -> C5 D5 (C5 TX), so there is no RX5808
+// and the receiver is fixed to the C5 (FIXED_RECEIVER_RADIO).
+#elif defined(FPVGATE_C5MK_AIO)
+#define PIN_LED 21             // XIAO onboard user LED
+#define PIN_RGB_LED 44         // D7 - NeoPixel signal
+#define NUM_LEDS 3
+#define PIN_VBAT 1             // D0 - BATSENSE
+#define VBAT_SCALE 2
+#define VBAT_ADD 2
+#define PIN_RX5808_RSSI 3      // D2 (no RX5808 fitted)
+#define PIN_RX5808_DATA 5      // D4 (C5 link, unused for the RX5808)
+#define PIN_RX5808_SELECT 6    // D5 (no RX5808 fitted)
+#define PIN_RX5808_CLOCK 4     // D3 (C5 link, unused for the RX5808)
+#define PIN_BUZZER 43          // D6
+#define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 D4 (GPIO23, RX)
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 D5 (GPIO24, TX)
+#define FIXED_RECEIVER_RADIO 2 // ESP32-C5 only
+// SD Card SPI pins
+#define PIN_SD_CS 2            // D1
+#define PIN_SD_SCK 7           // D8
+#define PIN_SD_MOSI 8          // D9 (GPIO8)
+#define PIN_SD_MISO 9          // D10 (GPIO9)
+
 // FPVGate Solo (based on XIAO ESP32S3)
 #elif defined(FPVGATE_SOLO)
 
@@ -298,6 +323,8 @@
 
 #if defined(FPVGATE_AIO)
     #define FPVGATE_BOARD_ID "FPVGateAIO"
+#elif defined(FPVGATE_C5MK_AIO)
+    #define FPVGATE_BOARD_ID "FPVGateC5MKAIO"
 #elif defined(FPVGATE_SOLO)
     #define FPVGATE_BOARD_ID "FPVGateSolo"
 #elif defined(ESP32S3_SUPERMINI)
@@ -326,7 +353,7 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS) || defined(WAVESHARE_S3_ETH)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_C5MK_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS) || defined(WAVESHARE_S3_ETH)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif

@@ -405,6 +405,13 @@ void Config::load(void) {
         conf.receiverRadio = 0;
         modified = true;
     }
+#ifdef FIXED_RECEIVER_RADIO
+    // Boards with only one receiver fitted (the C5MK AIO has no RX5808).
+    if (conf.receiverRadio != FIXED_RECEIVER_RADIO) {
+        conf.receiverRadio = FIXED_RECEIVER_RADIO;
+        modified = true;
+    }
+#endif
     if (conf.c5Gain > 89) {
         conf.c5Gain = 30;
         modified = true;
@@ -1595,6 +1602,9 @@ uint8_t Config::getReceiverRadio() {
 }
 
 void Config::setReceiverRadio(uint8_t radio) {
+#ifdef FIXED_RECEIVER_RADIO
+    radio = FIXED_RECEIVER_RADIO;
+#endif
     if (radio <= 2 && conf.receiverRadio != radio) {
         conf.receiverRadio = radio;
         modified = true;
@@ -1757,7 +1767,11 @@ void Config::setDefaults(void) {
     strlcpy(conf.masterHostname, "", sizeof(conf.masterHostname));  // Empty master hostname
     conf.autoThresholdEnabled = 0;  // Manual threshold mode by default
     conf.autoThresholdOffset = 65;  // Default baseline RSSI (ambient floor)
+#ifdef FIXED_RECEIVER_RADIO
+    conf.receiverRadio = FIXED_RECEIVER_RADIO;
+#else
     conf.receiverRadio = 0;  // Default to RX5808
+#endif
     conf.c5PilotCount = 1;
     conf.c5Frequencies[0] = conf.frequency;
     conf.c5EnterRssi[0] = conf.enterRssi;

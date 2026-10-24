@@ -33,6 +33,7 @@ import sys
 BOARDS = [
     ("ESP32S3", "8MB", "ESP32-S3 DevKitC-1 (8MB Flash)"),
     ("FPVGateAIO", "8MB", "FPVGate AIO V3 (XIAO ESP32S3, 8MB)"),
+    ("FPVGateC5MKAIO", "8MB", "FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5, 8MB)"),
     ("FPVGateSolo", "8MB", "FPVGate Solo (XIAO ESP32S3, 8MB)"),
     ("SeeedXIAOESP32S3", "8MB", "Seeed Studio XIAO ESP32S3 (8MB)"),
     ("XIAOS3Plus", "16MB", "XIAO ESP32S3 Plus (16MB Flash)"),
