@@ -11,6 +11,7 @@
 #include "webhook.h"
 #include "c5link.h"
 #include "c5multipilot.h"
+#include "c5racecontrol.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -36,6 +37,11 @@ class Webserver : public TransportInterface {
     void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr);
     void setTransportManager(TransportManager *tm);
     void setC5Receiver(C5Link *link, C5MultiPilot *multiPilot);
+    void setC5RaceControl(C5RaceControl* control) { c5RaceControl = control; }
+    void notifyGateRaceState(const char* state) {
+        pendingRaceState = state;
+        if (strcmp(state, "stopped") == 0) setPendingLcdEvent(PendingLcdEvent::ShowFinish);
+    }
     void recheckWifiMode();  // Re-evaluate WiFi mode after config changes
     /** Disconnect and re-apply AP/STA Wi-Fi mode (public so LCD/UI callers can force a radio reinit). */
     void requestWifiStackReinit();
@@ -99,6 +105,7 @@ class Webserver : public TransportInterface {
     TransportManager *transportMgr;
     C5Link *c5Link = nullptr;
     C5MultiPilot *c5MultiPilot = nullptr;
+    C5RaceControl* c5RaceControl = nullptr;
 
     wifi_mode_t wifiMode = WIFI_OFF;
     wl_status_t lastStatus = WL_IDLE_STATUS;

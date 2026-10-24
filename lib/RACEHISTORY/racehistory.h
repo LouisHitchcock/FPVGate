@@ -69,6 +69,7 @@ class RaceHistory {
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
     bool getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const;
+    uint32_t latestTimestamp() const;
 
    private:
     std::vector<RaceSession> races;

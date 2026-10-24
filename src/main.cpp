@@ -99,6 +99,7 @@ AudioAnnouncer* g_audioAnnouncer = &audioAnnouncer;
 void* g_audioAnnouncer = nullptr;
 #endif
 static LapTimer timer;
+static C5RaceControl c5RaceControl;
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
 static Qmi8658 g_qmi8658;
 static FpvLcdUI* g_lcdUi = nullptr;
@@ -204,8 +205,6 @@ static void c5Task(void *) {
             bool more;
             do {
                 more = c5Link.poll(nowMs);
-                if (timer.isRaceRunning() && !c5MultiPilot.running()) c5MultiPilot.start(timer.getRaceStartMs());
-                if (!timer.isRaceRunning() && c5MultiPilot.running()) c5MultiPilot.stop();
                 c5MultiPilot.update(nowMs);
             } while (more);
         }
@@ -541,6 +540,8 @@ void setup() {
     usbnet_boot_mark(USBNET_BOOT_SETUP_COMPLETE);
 #endif
     ws.setC5Receiver(&c5Link, &c5MultiPilot);
+    c5RaceControl.begin(&config, &timer, &c5MultiPilot, &raceHistory);
+    ws.setC5RaceControl(&c5RaceControl);
 
     // Start the C5 UART last so no later peripheral initialization can reclaim
     // its pins. XIAO D3/D4 are also the legacy RX5808 clock/data pins.
@@ -605,6 +606,8 @@ void loop() {
 #endif
     uint32_t nowMs = millis();
     uint32_t currentTimeMs = nowMs;
+    c5RaceControl.update();
+    if (const char* state = c5RaceControl.takeStateEvent()) ws.notifyGateRaceState(state);
     
     // Debug: Periodic "alive" message every 5 seconds with detailed memory stats
     static uint32_t lastAliveMs = 0;
@@ -710,7 +713,7 @@ void loop() {
             // so we don't hold shared SPI mutex during stop transition (avoids crash/use-after-free)
             std::vector<uint32_t> laps;
             timer.getLapTimesForSave(laps);
-            if (!laps.empty()) {
+            if (config.getReceiverRadio() != 2 && !laps.empty()) {
                 s_pendingLcdRaceSave = {};
                 s_pendingLcdRaceSave.timestamp = (uint32_t)time(nullptr);
                 s_pendingLcdRaceSave.lapTimes = laps;

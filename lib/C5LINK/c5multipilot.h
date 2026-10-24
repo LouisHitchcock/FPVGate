@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "c5link.h"
+#include "freertos/semphr.h"
 
 // One lap of one C5 slot. lap 0 is Gate 1 (race start to the first pass).
 struct C5LapEvent {
@@ -31,8 +32,11 @@ public:
     // raceStartMs: millis() when the race started (LapTimer::getRaceStartMs).
     void start(uint32_t raceStartMs);
     void stop();
+    void clear();
     void update(uint32_t nowMs);
     bool running() const { return running_; }
+    bool allFinished();
+    uint8_t finishedMask();
     uint16_t rssi(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? filtered_[pilot] : 0; }
     // Above the enter threshold and not yet below exit (only while a race runs).
     bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
@@ -73,6 +77,11 @@ private:
     C5Link *link_ = nullptr;
     volatile bool running_ = false;
     uint32_t raceStartUs_ = 0;
+    uint8_t maxLaps_ = 0;
+    uint32_t minLapMs_ = 0;
+    uint8_t finishedMask_ = 0;
+    // Lifecycle changes wait for the current sample batch, never for SD IO.
+    SemaphoreHandle_t updateMutex_ = nullptr;
     bool inside_[C5Link::C5_MAX_PILOTS] = {};
     uint16_t filtered_[C5Link::C5_MAX_PILOTS] = {};
     volatile uint16_t peakHold_[C5Link::C5_MAX_PILOTS] = {};
