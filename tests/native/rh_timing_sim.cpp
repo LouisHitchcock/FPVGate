@@ -15,6 +15,11 @@ uint64_t g_nowUs = 0;
 
 int main() {
     Config config;
+    config.enter = 140;
+    config.exit = 110;
+    config.minLap = 3000;
+    config.raceMask = 1;
+    config.frequencies[1] = 0;
     C5Link link;
     C5MultiPilot multi;
     multi.begin(&config, &link);
@@ -26,7 +31,7 @@ int main() {
         if (!strcmp(cmd, "sample")) {
             unsigned pilot, raw;
             if (scanf("%u %u", &pilot, &raw) != 2) return 2;
-            link.queue[pilot].push_back({(uint16_t)raw, (uint32_t)us});
+            link.samples[pilot].push_back({(uint16_t)raw, (uint32_t)us});
             multi.update((uint32_t)(us / 1000));
             continue;
         }

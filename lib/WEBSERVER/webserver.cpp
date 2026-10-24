@@ -356,18 +356,30 @@ static void sendSyncCommand(Config* config, const char* endpoint) {
 // Timer actions happen immediately; SSE broadcast is deferred to core 0
 // via pendingRaceState, which handleWebUpdate() picks up.
 void Webserver::triggerStart() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->requestStart();
+        return;
+    }
     sendSyncCommand(conf, "/timer/start");
     timer->start();
     pendingRaceState = "started";
 }
 
 void Webserver::triggerStop() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->requestStop();
+        return;
+    }
     sendSyncCommand(conf, "/timer/stop");
     timer->stop();
     pendingRaceState = "stopped";
 }
 
 void Webserver::triggerClearLaps() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->requestClear();
+        return;
+    }
     sendSyncCommand(conf, "/timer/clearLaps");
     pendingRaceState = "cleared";
 }
@@ -1126,6 +1138,14 @@ EEPROM:\n\
     });
     
     server.on("/timer/start", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const uint32_t timestamp = request->hasParam("timestamp") ? request->getParam("timestamp")->value().toInt() : 0;
+            const bool accepted = c5RaceControl->requestStart(timestamp);
+            request->send(accepted ? 202 : 409, "application/json", accepted
+                ? "{\"status\":\"OK\",\"gateManaged\":true}"
+                : "{\"status\":\"ERROR\",\"message\":\"Race busy, unsaved, no racers, or lap limit exceeds 63\"}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/start");
         // Start local timer
@@ -1150,6 +1170,11 @@ EEPROM:\n\
     });
 
     server.on("/timer/stop", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            c5RaceControl->requestStop();
+            request->send(202, "application/json", "{\"status\":\"OK\",\"gateManaged\":true}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/stop");
         // Stop local timer
@@ -1265,6 +1290,12 @@ EEPROM:\n\
     });
     
     server.on("/timer/clearLaps", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const bool accepted = c5RaceControl->requestClear();
+            request->send(accepted ? 202 : 409, "application/json", accepted
+                ? "{\"status\":\"OK\"}" : "{\"status\":\"ERROR\",\"message\":\"Stop and save the race before clearing laps\"}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/clearLaps");
         // Broadcast clearLaps event to all connected clients (including OSD)
@@ -1407,6 +1438,17 @@ EEPROM:\n\
         doc["running"] = c5MultiPilot->running();
         doc["racers"] = c5MultiPilot->racerMask();
         doc["multi"] = c5MultiPilot->multiRace();
+        if (c5RaceControl) {
+            const auto state = c5RaceControl->status();
+            doc["gateManaged"] = true;
+            doc["running"] = state.running;
+            doc["busy"] = state.busy;
+            doc["timestamp"] = state.timestamp;
+            doc["savedTimestamp"] = state.savedTimestamp;
+            doc["saveFailed"] = state.saveFailed;
+            doc["stopReason"] = state.reason;
+            doc["finished"] = c5MultiPilot->finishedMask();
+        }
         JsonArray pilots = doc["pilots"].to<JsonArray>();
         uint32_t laps[C5MultiPilot::MAX_RACE_LAPS];
         for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
@@ -2222,6 +2264,19 @@ EEPROM:\n\
     });
 
     AsyncCallbackJsonWebHandler *raceSaveHandler = new AsyncCallbackJsonWebHandler("/races/save", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        // Current C5 races have exactly one writer: the gate. This also
+        // prevents older browser tabs from saving a second copy on stop.
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const auto state = c5RaceControl->status();
+            JsonDocument reply;
+            reply["status"] = state.savedTimestamp ? "OK" : "ERROR";
+            reply["gateManaged"] = true;
+            reply["timestamp"] = state.savedTimestamp;
+            String body;
+            serializeJson(reply, body);
+            request->send(state.savedTimestamp ? 200 : 409, "application/json", body);
+            return;
+        }
         JsonObject jsonObj = json.as<JsonObject>();
         
         RaceSession race;
@@ -2372,9 +2427,8 @@ EEPROM:\n\
             uint32_t timestamp = request->getParam("timestamp")->value().toInt();
             
             // Find the race
-            const auto& races = history->getRaces();
-            for (const auto& race : races) {
-                if (race.timestamp == timestamp) {
+            RaceSession race;
+            if (history->getRaceByTimestamp(timestamp, race)) {
                     // Create JSON for single race
                     JsonDocument doc;  // Increased for multi-pilot
                     JsonArray racesArray = doc["races"].to<JsonArray>();
@@ -2430,7 +2484,6 @@ EEPROM:\n\
                     led->on(200);
                     return;
                 }
-            }
             request->send(404, "application/json", "{\"status\": \"ERROR\", \"message\": \"Race not found\"}");
         } else {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing timestamp\"}");

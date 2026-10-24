@@ -476,6 +476,7 @@ function setupWiFiEvents() {
       function (e) {
         console.log("[SSE] Connection OPEN - readyState:", eventSource.readyState);
         eventSourceReconnectAttempts = 0; // Reset counter on successful connect
+        if (c5ReceiverSelected()) c5RaceResync();
         updateConnectionStatus("WiFi", true);
         window.lastSSEEvent = Date.now();
 
@@ -614,17 +615,20 @@ function handleRaceStateEvent(state) {
   console.log("[Sync] Handling race state:", state);
   
   if (state === "started") {
+    currentRaceSessionTimestamp = null;
     // Race started (from master or local)
     if (!c5Race.active || c5HasRaceLaps()) {
       c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
       renderUnifiedRaceView();
     }
     raceRunning = true;
+    c5RaceLabel = typeof RaceEvent !== "undefined" ? RaceEvent.raceLabel(c5Race.racers) : {};
     lapTimerStartMs = Date.now();
     startRaceTimer();
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race started via SSE");
+    if (c5ReceiverSelected()) c5RaceResync().then((d) => { if (d && d.timestamp) c5ObservedTimestamp = d.timestamp; });
   } else if (state === "stopped") {
     // Race stopped (e.g. from LCD) – stop timer and reset displays like stopRace()
     raceRunning = false;
@@ -637,6 +641,9 @@ function handleRaceStateEvent(state) {
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race stopped via SSE");
+    if (c5ReceiverSelected()) {
+      completeC5RaceInBrowser().catch((err) => { console.error("[C5] Save status:", err); alert(err.message); });
+    }
   } else if (state === "cleared") {
     // Laps cleared - reset UI
     raceRunning = false;
@@ -803,6 +810,12 @@ function getLocalPilotInfo() {
 let c5Race = { active: false, racers: [], laps: {}, finished: {} };
 let c5RaceResyncing = false;
 let c5RaceRequest = null;
+let c5GateManaged = false;
+let c5ObservedTimestamp = 0;
+let c5CompletedTimestamp = 0;
+let c5CompletionPromise = null;
+let c5RaceLabel = {};
+let c5StopReason = "";
 
 function c5ReceiverSelected() {
   const sel = document.getElementById("receiverRadio");
@@ -882,7 +895,8 @@ function c5RaceResync() {
   c5RaceRequest = fetch("/api/c5/race")
     .then((r) => r.json())
     .then((d) => {
-      if (c5Race !== targetRace) return;
+      if (c5Race !== targetRace || !c5ReceiverSelected()) return d;
+      c5GateManaged = d.gateManaged === true;
       if (!c5Race.active) c5RaceReset(true);
       for (const p of d.pilots || []) {
         if (!((d.racers >> p.slot) & 1)) continue;
@@ -890,10 +904,76 @@ function c5RaceResync() {
       }
       renderUnifiedRaceView();
       updateAnalysisSectionVisibility();
+      if (c5GateManaged) {
+        currentRaceSessionTimestamp = d.savedTimestamp || null;
+        c5StopReason = d.stopReason || "";
+        const wasRunning = raceRunning;
+        raceRunning = !!d.running;
+        if (d.running) c5ObservedTimestamp = d.timestamp;
+        if (raceRunning && !wasRunning) startRaceTimer();
+        if (!raceRunning) stopRaceTimer();
+        updateRaceButtons();
+        if (d.busy || d.saveFailed) {
+          startRaceButton.disabled = true;
+          stopRaceButton.disabled = !d.saveFailed;
+        }
+        if (!raceRunning) {
+          timer.innerHTML = i18n.t("race.timer_default");
+          currentLapStartMs = 0;
+          stopDistancePolling();
+        }
+      }
+      return d;
     })
     .catch((e) => console.warn("[C5] race resync failed", e))
     .finally(() => { c5RaceResyncing = false; c5RaceRequest = null; });
   return c5RaceRequest;
+}
+
+async function waitForC5RaceSave() {
+  // A stop is queued to loop(); SD writes can outlive the HTTP response.
+  for (let attempt = 0; attempt < 100; ++attempt) {
+    const state = await c5RaceResync();
+    if (!state) throw new Error("Cannot read C5 race status");
+    if (!state.gateManaged) return null; // older firmware keeps browser saving
+    if (!state.busy && !state.running) {
+      if (state.saveFailed) throw new Error("Gate could not save race; press Stop to retry before starting another race");
+      return state.savedTimestamp || null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Gate is still finishing the race; refresh to check saved history");
+}
+
+function completeC5RaceInBrowser() {
+  if (c5CompletionPromise) return c5CompletionPromise;
+  c5CompletionPromise = (async () => {
+    const timestamp = await waitForC5RaceSave();
+    if (!timestamp || timestamp === c5CompletedTimestamp) return timestamp;
+    const races = await loadRaceHistory();
+    const saved = (races || []).find((r) => r.timestamp === timestamp);
+    if (!saved) throw new Error("Race is saved on the gate, but history could not be loaded. Retry Stop to refresh it.");
+    // Keep the existing browser Events integration until results move onto
+    // the gate. A page opened after a race must not assign it to a new heat.
+    if (saved && timestamp === c5ObservedTimestamp) {
+      const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
+      if (notes || c5RaceLabel.name || c5RaceLabel.tag) {
+        const form = new URLSearchParams({ timestamp: String(timestamp),
+          name: c5RaceLabel.name || saved.name || "", tag: c5RaceLabel.tag || saved.tag || "", notes: notes || saved.notes || "" });
+        const response = await fetch("/races/update", { method: "POST", body: form });
+        const result = await response.json();
+        if (!response.ok || result.status !== "OK") throw new Error("Could not update race notes");
+        await loadRaceHistory();
+      }
+      if (typeof RaceEvent !== "undefined") RaceEvent.recordRace(saved);
+    }
+    c5CompletedTimestamp = timestamp;
+    if (timestamp === c5ObservedTimestamp && (c5StopReason === "maxLaps" || c5StopReason === "heatTime"))
+      queueSpeak(`<p>${i18n.t("settings.tts.race_complete")}</p>`);
+    if (openRaceNotesOnRaceEnd && timestamp === c5ObservedTimestamp) openRaceNotesModal();
+    return timestamp;
+  })().finally(() => { c5CompletionPromise = null; });
+  return c5CompletionPromise;
 }
 
 function handleC5RaceLap(d) {
@@ -923,7 +1003,7 @@ function handleC5RaceLap(d) {
   if (maxLaps > 0 && idx >= maxLaps && !c5Race.finished[racer.slot]) {
     c5Race.finished[racer.slot] = true;
     queueSpeak(`<p>${racer.spoken} finished</p>`);
-    if (c5Race.racers.every((r) => c5Race.finished[r.slot])) {
+    if (!c5GateManaged && c5Race.racers.every((r) => c5Race.finished[r.slot])) {
       setTimeout(function () {
         if (!stopRaceButton.disabled) {
           stopRace();
@@ -1635,6 +1715,7 @@ onload = async function (e) {
     }
     loadEventMode(configData.eventMode);
     loadC5Profiles(configData.c5Pilots || [], configData.c5Gain);
+    if (c5ReceiverSelected()) c5RaceResync();
     toggleNovaFilterSection();
 
     // Load Novacore filter settings
@@ -3125,14 +3206,17 @@ function startTimer() {
     updateCurrentLapTimer();
   }, 10);
 
-  fetch("/timer/start", {
+  return fetch("/timer/start?timestamp=" + Math.floor(Date.now() / 1000), {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
   })
-    .then((response) => response.json())
+    .then((response) => {
+      if (!response.ok) throw new Error("Race start rejected by gate");
+      return response.json();
+    })
     .then((response) => console.log("/timer/start:" + JSON.stringify(response)));
 }
 
@@ -3594,9 +3678,20 @@ function openRssiDebugPopout(event) {
 }
 
 async function startRace() {
+  if (c5CompletionPromise) {
+    try { await c5CompletionPromise; }
+    catch (err) { alert(err.message); return; }
+  }
   if (c5ReceiverSelected() && (!c5RacePilotsNow().length || /^(pending|saving|error)$/.test(C5UI.saveState()))) {
     alert("Enable at least one pilot for Race and wait for the calibration settings to save.");
     return;
+  }
+  if (c5ReceiverSelected()) {
+    const state = await c5RaceResync();
+    if (!state || state.busy || state.running || state.saveFailed) {
+      alert("The gate is busy or has an unsaved race. Stop/retry the save before starting another race.");
+      return;
+    }
   }
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
@@ -3686,7 +3781,15 @@ async function startRace() {
     navigator.vibrate(500); // 500ms vibration
   }
 
-  startTimer();
+  try {
+    await startTimer();
+  } catch (err) {
+    clearInterval(timerInterval);
+    handleRaceStateEvent("stopped");
+    startRaceButton.classList.remove("active");
+    alert(err.message);
+    return;
+  }
   startRaceButton.classList.remove("active");
   stopRaceButton.disabled = false;
   addLapButton.disabled = false;
@@ -3706,7 +3809,7 @@ async function startRace() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  if (maxHeatTime30s > 0) {
+  if (maxHeatTime30s > 0 && (!c5ReceiverSelected() || !c5GateManaged)) {
     const heatMs = maxHeatTime30s * 30 * 1000;
     console.log(`[Race] Heat time limit ${maxHeatTime30s * 30}s - scheduling auto-stop in ${heatMs} ms`);
     heatTimeoutId = setTimeout(function () {
@@ -3756,6 +3859,10 @@ function stopRace() {
   const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
   const afterStop = async () => {
     if (c5ReceiverSelected()) await c5RaceResync();
+    if (c5ReceiverSelected() && c5GateManaged) {
+      currentRaceSessionTimestamp = await completeC5RaceInBrowser();
+      return;
+    }
     // Auto-save after stop so the device can finalize its RSSI capture before
     // saveCurrentRace attaches the sidecar to the race.
     if (hasRaceLaps()) {
@@ -3771,7 +3878,7 @@ function stopRace() {
     return Promise.resolve();
   };
 
-  fetch("/timer/stop", {
+  return fetch("/timer/stop", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -3785,7 +3892,8 @@ function stopRace() {
     })
     .catch((err) => {
       console.error("Failed to stop timer:", err);
-      return afterStop();
+      if (c5ReceiverSelected()) c5RaceResync();
+      alert(err.message);
     });
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
@@ -3800,7 +3908,14 @@ function stopRace() {
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
 
-function clearLaps() {
+async function clearLaps() {
+  if (c5ReceiverSelected()) {
+    const state = await c5RaceResync();
+    if (!state || (state.gateManaged && (state.running || state.busy || state.saveFailed))) {
+      alert("Stop and save the race before clearing laps.");
+      return;
+    }
+  }
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
@@ -5400,6 +5515,12 @@ function escapeHtml(input) {
 
 function saveCurrentRace(options = {}) {
   const { setAsCurrentSession = true } = options;
+  if (c5ReceiverSelected() && c5GateManaged) {
+    return waitForC5RaceSave().then((timestamp) => {
+      if (setAsCurrentSession) currentRaceSessionTimestamp = timestamp;
+      return timestamp;
+    });
+  }
   // A C5 multi-pilot race saves every racer in pilots[]; the legacy
   // single-pilot fields hold the leader's laps.
   const c5Multi = c5Race.active && c5HasRaceLaps();

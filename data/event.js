@@ -595,6 +595,7 @@ const RaceEvent = (() => {
   // the next heat and, with auto on, load it.
   function recordRace(raceData) {
     const group = enabled && activeGroup();
+    if (doc && doc.races.some(r => r.timestamp === raceData.timestamp)) return;
     const pilots = raceData.pilots || [];
     if (!group || !pilots.length || !pilots.every(p => doc.active.seats[p.slot] != null)) return;
     syncFromSlots();

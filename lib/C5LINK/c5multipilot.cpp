@@ -6,15 +6,19 @@
 void C5MultiPilot::begin(Config *config, C5Link *link) {
     config_ = config;
     link_ = link;
+    if (!updateMutex_) updateMutex_ = xSemaphoreCreateMutex();
     pendingCount_ = 0;
 }
 
 void C5MultiPilot::start(uint32_t raceStartMs) {
+    xSemaphoreTake(updateMutex_, portMAX_DELAY);
     uint8_t mask = 0;
     for (uint8_t i = 0; i < 8; ++i)
         if (config_->getC5Frequency(i) && ((config_->getC5RaceMask() >> i) & 1)) mask |= 1u << i;
     racerMask_ = mask;
     racerCount_ = __builtin_popcount(mask);
+    maxLaps_ = config_->getMaxLaps();
+    minLapMs_ = config_->getMinLapMs();
     // The race clock is millis(); samples are stamped in micros().
     raceStartUs_ = micros() - (millis() - raceStartMs) * 1000u;
     portENTER_CRITICAL(&lapMux_);
@@ -27,11 +31,39 @@ void C5MultiPilot::start(uint32_t raceStartMs) {
     }
     crossingCount_ = 0;
     pendingCount_ = 0;
+    manualMask_ = 0;
+    finishedMask_ = 0;
     portEXIT_CRITICAL(&lapMux_);
     running_ = true;
+    xSemaphoreGive(updateMutex_);
 }
 
-void C5MultiPilot::stop() { running_ = false; }
+void C5MultiPilot::stop() {
+    xSemaphoreTake(updateMutex_, portMAX_DELAY);
+    running_ = false;
+    xSemaphoreGive(updateMutex_);
+}
+
+void C5MultiPilot::clear() {
+    xSemaphoreTake(updateMutex_, portMAX_DELAY);
+    portENTER_CRITICAL(&lapMux_);
+    memset(lapCount_, 0, sizeof(lapCount_));
+    racerMask_ = racerCount_ = finishedMask_ = 0;
+    pendingCount_ = crossingCount_ = manualMask_ = 0;
+    portEXIT_CRITICAL(&lapMux_);
+    xSemaphoreGive(updateMutex_);
+}
+
+uint8_t C5MultiPilot::finishedMask() {
+    portENTER_CRITICAL(&lapMux_);
+    const uint8_t mask = finishedMask_;
+    portEXIT_CRITICAL(&lapMux_);
+    return mask;
+}
+
+bool C5MultiPilot::allFinished() {
+    return racerMask_ && (finishedMask() & racerMask_) == racerMask_;
+}
 
 // A pass is Enter -> Exit (with hysteresis), ending once the RSSI has stayed
 // below Exit for PASS_MERGE_MS; it is timed at the middle of the first and
@@ -42,6 +74,7 @@ void C5MultiPilot::stop() { running_ = false; }
 void C5MultiPilot::update(uint32_t nowMs) {
     (void)nowMs;
     if (!config_ || !link_) return;
+    xSemaphoreTake(updateMutex_, portMAX_DELAY);
     // The race roster is frozen by start(), including after stop for history.
 
     portENTER_CRITICAL(&lapMux_);
@@ -104,6 +137,7 @@ void C5MultiPilot::update(uint32_t nowMs) {
         // Samples stopped (slot retuned, link dropped): finish a pass that was waiting to end.
         if (inside_[i] && belowUs_[i] && micros() - belowUs_[i] >= PASS_MERGE_MS * 1000u) endPass(i);
     }
+    xSemaphoreGive(updateMutex_);
 }
 
 // The pass is over: report it, timed at its peak.
@@ -124,19 +158,20 @@ void C5MultiPilot::endPass(uint8_t pilot) {
 // minimum lap time (except a manual lap: the race director meant it).
 void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs, bool manual) {
     const bool racer = (racerMask_ >> pilot) & 1;
+    if (racer && ((finishedMask_ >> pilot) & 1)) return;
+    if ((int32_t)(crossingUs - raceStartUs_) <= 0) return;   // from before the start
     if (racer && racerCount_ == 1) {
         portENTER_CRITICAL(&lapMux_);
         if (crossingCount_ < CROSSING_QUEUE) crossings_[crossingCount_++] = crossingUs;
         portEXIT_CRITICAL(&lapMux_);
     }
-    if ((int32_t)(crossingUs - raceStartUs_) <= 0) return;   // from before the start
     const uint8_t n = lapCount_[pilot];
     uint32_t lapUs;
     if (n == 0) {
         lapUs = crossingUs - raceStartUs_;
     } else {
         lapUs = crossingUs - lastCrossingUs_[pilot];
-        if (!manual && lapUs <= config_->getMinLapMs() * 1000u) return;
+        if (!manual && lapUs <= minLapMs_ * 1000u) return;
     }
     lastCrossingUs_[pilot] = crossingUs;
     const C5LapEvent lap = {pilot, n, (lapUs + 500u) / 1000u, racer};
@@ -146,6 +181,7 @@ void C5MultiPilot::crossing(uint8_t pilot, uint32_t crossingUs, bool manual) {
         lapCount_[pilot] = n + 1;
     }
     if (pendingCount_ < LAP_QUEUE) pending_[pendingCount_++] = lap;
+    if (racer && maxLaps_ > 0 && n >= maxLaps_) finishedMask_ |= 1u << pilot;
     portEXIT_CRITICAL(&lapMux_);
 }
 
@@ -229,6 +265,10 @@ uint8_t C5MultiPilot::copyLaps(uint8_t pilot, uint32_t *out, uint8_t max) {
 bool C5MultiPilot::requestManualLap(uint8_t pilot) {
     if (pilot >= C5Link::C5_MAX_PILOTS || !running_ || !((racerMask_ >> pilot) & 1)) return false;
     portENTER_CRITICAL(&lapMux_);
+    if ((finishedMask_ >> pilot) & 1) {
+        portEXIT_CRITICAL(&lapMux_);
+        return false;
+    }
     manualMask_ |= (uint8_t)(1u << pilot);
     portEXIT_CRITICAL(&lapMux_);
     return true;

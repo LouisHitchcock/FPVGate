@@ -2,11 +2,23 @@
 #include <algorithm>
 #include <time.h>
 #include "debug.h"
+#include "freertos/semphr.h"
+
+namespace {
+SemaphoreHandle_t historyMutex = nullptr;
+// HTTP reads on core 0 while loop() saves on core 1. Never hold a spinlock
+// across filesystem operations or JSON allocation.
+struct HistoryLock {
+    HistoryLock() { if (historyMutex) xSemaphoreTakeRecursive(historyMutex, portMAX_DELAY); }
+    ~HistoryLock() { if (historyMutex) xSemaphoreGiveRecursive(historyMutex); }
+};
+}
 
 RaceHistory::RaceHistory() : storage(nullptr), rssiRecorder(nullptr) {
 }
 
 bool RaceHistory::init(Storage* storageBackend) {
+    if (!historyMutex) historyMutex = xSemaphoreCreateRecursiveMutex();
     storage = storageBackend;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null!\n");
@@ -137,6 +149,7 @@ void RaceHistory::deleteSidecar(const RaceSession& race) {
 }
 
 bool RaceHistory::saveRace(const RaceSession& raceIn) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in saveRace!\n");
         return false;
@@ -151,6 +164,12 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
         if (rssiRecorder->attachToRace(race.timestamp, meta)) {
             race.rssiMeta = meta;
         }
+    }
+    // A previous JSON write may have failed after the sidecar was renamed.
+    // Preserve it when the controller retries that same race.
+    if (!race.rssiMeta.hasHistory) {
+        RaceRssiRecorder::readMetaFromFile(storage,
+            RaceRssiRecorder::sidecarPathForTimestamp(race.timestamp), race.rssiMeta);
     }
 
     bool success = writeRaceFile(race);
@@ -174,6 +193,7 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
 }
 
 bool RaceHistory::loadRaces() {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null!\n");
         return false;
@@ -297,6 +317,7 @@ bool RaceHistory::loadRaces() {
 }
 
 bool RaceHistory::deleteRace(uint32_t timestamp) {
+    HistoryLock lock;
     String filepath = raceFilePathForTimestamp(timestamp);
     bool fileDeleted = storage->deleteFile(filepath);
 
@@ -327,6 +348,7 @@ bool RaceHistory::deleteRace(uint32_t timestamp) {
 }
 
 bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance, const String& notes) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in updateRace!\n");
         return false;
@@ -353,6 +375,7 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
 }
 
 bool RaceHistory::updatePilotLaps(uint32_t timestamp, const std::vector<std::vector<uint32_t>>& laps) {
+    HistoryLock lock;
     for (auto& race : races) {
         if (race.timestamp != timestamp) continue;
         if (laps.size() != race.pilots.size() || laps.empty() || laps.size() > MAX_PILOTS) return false;
@@ -387,6 +410,7 @@ bool RaceHistory::updatePilotLaps(uint32_t timestamp, const std::vector<std::vec
 }
 
 bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in updateLaps!\n");
         return false;
@@ -439,6 +463,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
 }
 
 bool RaceHistory::clearAll() {
+    HistoryLock lock;
     std::vector<String> files;
     if (storage->listDir(RACES_DIR, files)) {
         for (const String& filename : files) {
@@ -457,7 +482,15 @@ const std::vector<RaceSession>& RaceHistory::getRaces() {
     return races;
 }
 
+uint32_t RaceHistory::latestTimestamp() const {
+    HistoryLock lock;
+    uint32_t latest = 0;
+    for (const auto& race : races) latest = std::max(latest, race.timestamp);
+    return latest;
+}
+
 bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const {
+    HistoryLock lock;
     for (const auto& race : races) {
         if (race.timestamp == timestamp) {
             out = race;
@@ -468,6 +501,7 @@ bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const
 }
 
 String RaceHistory::toJsonString() {
+    HistoryLock lock;
     JsonDocument doc;
     JsonArray racesArray = doc["races"].to<JsonArray>();
 
@@ -483,6 +517,7 @@ String RaceHistory::toJsonString() {
 }
 
 bool RaceHistory::fromJsonString(const String& json) {
+    HistoryLock lock;
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
 
