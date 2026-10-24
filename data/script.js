@@ -944,7 +944,7 @@ function addC5ManualLap(slot, button) {
     .finally(() => { if (button) setTimeout(() => { button.disabled = !raceRunning; }, 400); });
 }
 
-// Always "pilot, time": with several pilots the name is what matters.
+// Always include the pilot name when speaking multi-pilot lap times or totals.
 function announceC5RaceLap(racer, idx, seconds) {
   const mode = announcerSelect.options[announcerSelect.selectedIndex].value;
   if (mode === "beep") {
@@ -953,9 +953,18 @@ function announceC5RaceLap(racer, idx, seconds) {
   }
   if (mode === "none" || mode === "") return;
   const t = seconds.toFixed(2);
-  queueSpeak(idx === 0
-    ? `<p>${racer.spoken} ${i18n.t("settings.tts.gate1", { n: t })}</p>`
-    : `<p>${racer.spoken}, ${t}</p>`);
+  if (idx === 0) {
+    queueSpeak(`<p>${racer.spoken} ${i18n.t("settings.tts.gate1", { n: t })}</p>`);
+    return;
+  }
+  // 2- and 3-lap modes: this pilot's last 2 or 3 laps, once they have that many.
+  const count = mode === "2lap" ? 2 : mode === "3lap" ? 3 : 0;
+  if (count) {
+    const total = lastLapsTotal((c5Race.laps[racer.slot] || []).slice(0, idx + 1), count);
+    if (total) queueSpeak(`<p>${racer.spoken} ${count} laps ${total}</p>`);
+    return;
+  }
+  queueSpeak(`<p>${racer.spoken}, ${t}</p>`);
 }
 
 // Render the race view - switches between personal (single) and multi-pilot view
@@ -2989,6 +2998,14 @@ function playBeepTone(duration, frequency, type) {
   }, duration);
 }
 
+// The total of the last `count` laps, Gate 1 ([0]) excluded, to 2 decimals;
+// "" until there are that many. laps: seconds, [0] = Gate 1.
+function lastLapsTotal(laps, count) {
+  const real = laps.slice(1);
+  if (real.length < count) return "";
+  return real.slice(-count).reduce((sum, t) => sum + t, 0).toFixed(2);
+}
+
 function addLap(lapStr) {
   // Use phonetic name for TTS if available, otherwise use regular pilot name
   const phoneticInput = document.getElementById("pphonetic");
@@ -2997,6 +3014,11 @@ function addLap(lapStr) {
   const newLap = parseFloat(lapStr);
   lapNo += 1;
   lapTimes.push(newLap);
+  // For the 2- and 3-lap announcers. Their declarations went with the old lap
+  // table in v1.1.0, so reading them threw and ended addLap: no announcement,
+  // and no max-laps stop, after Gate 1.
+  const last2lapStr = lastLapsTotal(lapTimes, 2);
+  const last3lapStr = lastLapsTotal(lapTimes, 3);
 
   // Track lap timing for distance estimation
   lastCompletedLapTime = newLap * 1000; // Convert to milliseconds
