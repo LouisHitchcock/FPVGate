@@ -196,5 +196,19 @@ int main() {
         assert(!f.control.status().running && writes == 1); // millis rollover
         g_nowUs = 1000000;
     }
-    std::cout << "PASS: C5 gate completion, heat limits, history, retries and idempotency\n";
+    {
+        Fixture f(1, 0, 1);
+        f.detector.setPassStream(true); // RH owns its own race/limits.
+        f.start();
+        f.rfPass(0, 1000); // Gate 1
+        f.rfPass(0, 5000); // completes the local gate race
+        assert(!f.control.status().running && writes == 1);
+        f.rfPass(0, 5000); // RH must still get passes after local completion
+        C5Pass pass;
+        unsigned count = 0;
+        while (f.detector.takePass(pass)) { assert(pass.pilot == 0); ++count; }
+        assert(count == 3);
+        assert(writes == 1); // no extra local history record
+    }
+    std::cout << "PASS: C5 gate completion, heat limits, history, retries, idempotency and continued RH passes\n";
 }
