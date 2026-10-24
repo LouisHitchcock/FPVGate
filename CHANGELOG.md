@@ -1,6 +1,23 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
+## [1.9.0-Alpha-4-RH-1] - 2026-10-24
+
+RotorHazard timing test prerelease, paired with FPVGate RH plugin v2.3.2-rc.1.
+Built for Seeed XIAO ESP32S3 and Waveshare ESP32-S3-ETH.
+
+### Fixed
+- C5 passes and RotorHazard RSSI history now use the timestamps of the peak
+  samples, including separate peak midpoints for the two RSSI resolutions.
+- The reference clock is read after peak snapshots so a newer sample cannot
+  produce a wrapped age and fall back to message-arrival timing.
+
+### Testing
+- Use the matching plugin for live-versus-Marshal timestamp comparisons.
+- Full-rate timing traces remain opt-in development instrumentation and are
+  not enabled in the distributed binaries.
+- Camera validation and physical multi-transmitter race testing remain pending.
+
 ## [1.9.0-Alpha-4] - 2026-10-18
 
 Fourth Multi-Pilot alpha, now named 1.9.0-Alpha-N: race analysis for C5
