@@ -62,7 +62,9 @@ for (const board of boards) {
     }
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'fpvgate-alpha5-'));
     try {
-        execFileSync(mkfs, ['-b', '4096', '-p', '256', '-s', String(storage.size), '-u', temp, path.join(dir, 'littlefs.bin')], { stdio: 'pipe' });
+        // The older Windows mklittlefs prefixes the extraction path with ./;
+        // use its working directory rather than a drive-letter output path.
+        execFileSync(mkfs, ['-b', '4096', '-p', '256', '-s', String(storage.size), '-u', '.', path.resolve(dir, 'littlefs.bin')], { cwd: temp, stdio: 'pipe' });
         for (const asset of ['script.js', 'event.js']) {
             const actual = gunzipSync(fs.readFileSync(path.join(temp, asset + '.gz')));
             assert(actual.equals(fs.readFileSync(path.join('data', asset))), `${board}: filesystem contains stale ${asset}`);
