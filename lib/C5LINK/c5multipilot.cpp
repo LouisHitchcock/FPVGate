@@ -99,7 +99,13 @@ void C5MultiPilot::update(uint32_t nowMs) {
         uint16_t value = 0;
         uint32_t sampleUs = 0;
         while (link_->takeSample(i, value, sampleUs)) {
+#ifdef C5_TIMING_DIAGNOSTIC_NO_S3_EMA
+            // Bench-only isolation of the S3's additional smoothing stage.
+            // Never enabled by a shipping target.
+            filtered_[i] = value;
+#else
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
+#endif
             if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
             portENTER_CRITICAL(&lapMux_);
 #ifdef C5_TIMING_TRACE

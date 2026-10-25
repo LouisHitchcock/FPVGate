@@ -3,7 +3,11 @@
 
 // FPVGate Firmware Version
 #define FPVGATE_VERSION "1.9.0"
+#ifdef C5_TIMING_DIAGNOSTIC_NO_S3_EMA
+#define FPVGATE_VERSION_STAGE "alpha-5-ema-probe"
+#else
 #define FPVGATE_VERSION_STAGE "alpha-5"
+#endif
 
 // Build version string helper
 #define FPVGATE_VERSION_STRING() \
