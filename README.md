@@ -16,9 +16,9 @@
 **[Docs](#documentation)** ·
 **[FAQ](#faq)**
 
-FPVGate is low-cost, scalable FPV race timing, from solo practice to 8-pilot
+FPVGate is affordable, scalable FPV race timing, from solo practice to 8-pilot
 club events. It times 5.8 GHz drone laps from the video signal each quad
-already transmits, using inexpensive ESP32 boards. Start with one pilot on a
+already transmits, using ESP32-S3 hardware. Start with one pilot on a
 single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
 events with heats and seeding, or a RotorHazard race. No transponders, no
 Raspberry Pi: open the gate in any browser and fly.
@@ -28,7 +28,7 @@ Raspberry Pi: open the gate in any browser and fly.
 | | |
 |---|---|
 | **Industry-leading timing accuracy** | On average, FPVGate's maximum lap-time deviation is 20 ms lower than an 8-node RX5808 timer's. Every pass is timed at the peak of the signal, and the ESP32-C5 timestamps each pilot's readings about 1000 times a second. |
-| **Low cost** | Built on inexpensive ESP32 boards and receivers, with free firmware you flash from your browser. Or buy a ready-made gate from the [shop](https://fpvgate.xyz/shop.html). |
+| **Affordable** | Built on ESP32-S3 boards and off-the-shelf receivers, with free firmware you flash from your browser. Or buy a ready-made gate from the [shop](https://fpvgate.xyz/shop.html). |
 | **Scales with your group** | One pilot on an RX5808 gate, up to eight from one ESP32-C5, Event Mode for club days, and RotorHazard for bigger events. |
 | **Event Mode** | Pilot roster, groups, race formats, heat scheduling, and Elo or lap-time seeding, saved on the gate. |
 | **Spoken lap times** | Lap times read out by pre-recorded ElevenLabs voices in English, German, Spanish and French, with phonetic pilot names. |
