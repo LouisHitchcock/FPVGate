@@ -8,6 +8,13 @@ on the PC with stub Arduino, `Config` and `C5Link` headers, and prints the
 bash tests/native/build_rh_timing_sim.sh   # prints the path of the built .exe
 ```
 
+For bench isolation only, `bash tests/native/build_rh_timing_sim.sh --no-s3-ema`
+builds a separate `rh_timing_sim_no_ema.exe` without replacing the default
+simulator. The corresponding hardware environment is
+`FPVGateC5MKAIO_EMAProbe`, labelled `1.9.0-alpha-5-ema-probe`. It bypasses the
+additional S3 EMA throughout the C5 detector/UI pipeline; it is not a shipping
+target or an established accuracy fix. Restore released firmware after testing.
+
 The fpvgate-rh-plugin repo's `tests/test_history_timing.py` uses it to check that
 RotorHazard's Marshal recalculation lands on the live pass times
 (`GATE_RH_SIM=<that path>`).
