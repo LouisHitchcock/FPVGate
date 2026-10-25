@@ -57,7 +57,7 @@ even with no browser open.
 |:---:|:---:|
 | ![Event Mode with a 12-pilot roster, three groups, a rotating heat order and Elo ratings](screenshots/v1.9.0/event-mode.png) | ![A saved four-pilot race with its timeline, lap table and fastest laps](screenshots/v1.9.0/race-history.png) |
 | **Calibration** | **Settings** |
-| ![Live RSSI graph with three passes crossing the Enter and Exit thresholds](screenshots/v1.9.0/calibration.png) | ![Lap and announcer settings](screenshots/v1.9.0/settings.png) |
+| ![Multi-pilot calibration: four pilots' live signals with passes, the selected pilot's Enter and Exit lines, and a card per pilot](screenshots/v1.9.0/calibration.png) | ![Lap and announcer settings](screenshots/v1.9.0/settings.png) |
 
 <details>
 <summary><b>Single-pilot race and phone view</b></summary>
