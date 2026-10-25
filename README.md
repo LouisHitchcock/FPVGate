@@ -1,12 +1,6 @@
 ﻿# FPVGate
 
-**Scalable FPV race timing, from solo practice to 8-pilot club events.**
-
-FPVGate times 5.8 GHz drone laps from the video signal each quad already
-transmits. Start with one pilot on a single gate, then grow to eight pilots
-from one ESP32-C5 receiver, full club events with heats and seeding, or a
-RotorHazard race. No transponders, no Raspberry Pi: open the gate in any
-browser and fly.
+![FPVGate: scalable FPV race timing, from solo practice to 8-pilot club events](docs/banner.png)
 
 [![Latest release](https://img.shields.io/github/v/release/LouisHitchcock/FPVGate?label=release&color=009688)](https://github.com/LouisHitchcock/FPVGate/releases/latest)
 [![Stars](https://img.shields.io/github/stars/LouisHitchcock/FPVGate?style=flat&color=yellow)](https://github.com/LouisHitchcock/FPVGate/stargazers)
@@ -22,16 +16,22 @@ browser and fly.
 **[Docs](#documentation)** ·
 **[FAQ](#faq)**
 
-![FPVGate race screen timing six pilots from one ESP32-C5 receiver, with lap times, gaps and live standings](screenshots/v1.9.0/race-multi-pilot.png)
+FPVGate is low-cost, scalable FPV race timing, from solo practice to 8-pilot
+club events. It times 5.8 GHz drone laps from the video signal each quad
+already transmits, using inexpensive ESP32 boards. Start with one pilot on a
+single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
+events with heats and seeding, or a RotorHazard race. No transponders, no
+Raspberry Pi: open the gate in any browser and fly.
 
 ## Why FPVGate
 
 | | |
 |---|---|
 | **Industry-leading timing accuracy** | On average, FPVGate's maximum lap-time deviation is 20 ms lower than an 8-node RX5808 timer's. Every pass is timed at the peak of the signal, and the ESP32-C5 timestamps each pilot's readings about 1000 times a second. |
+| **Low cost** | Built on inexpensive ESP32 boards and receivers, with free firmware you flash from your browser. Or buy a ready-made gate from the [shop](https://fpvgate.xyz/shop.html). |
 | **Scales with your group** | One pilot on an RX5808 gate, up to eight from one ESP32-C5, Event Mode for club days, and RotorHazard for bigger events. |
 | **Event Mode** | Pilot roster, groups, race formats, heat scheduling, and Elo or lap-time seeding, saved on the gate. |
-| **Natural voice calls** | Lap times read out by pre-recorded ElevenLabs voices in English, German, Spanish and French, with phonetic pilot names. |
+| **Spoken lap times** | Lap times read out by pre-recorded ElevenLabs voices in English, German, Spanish and French, with phonetic pilot names. |
 | **Race analysis** | Live standings, gaps, fastest lap, fastest 3 consecutive (RaceGOW), lap and consistency charts, race history and notes. |
 | **Visual Marshal** | Review any race on its recorded RSSI graph and correct its laps. |
 | **Plug in and fly** | The gate makes its own Wi-Fi network for any phone or laptop, with USB-C networking (Windows and Linux) and wired Ethernet on the Waveshare S3-ETH. |
@@ -52,6 +52,8 @@ and the race stops and saves when everyone is done or the heat time runs out,
 even with no browser open.
 
 ## Screenshots
+
+![FPVGate race screen timing six pilots from one ESP32-C5 receiver, with lap times, gaps and live standings](screenshots/v1.9.0/race-multi-pilot.png)
 
 | Event Mode | Race history |
 |:---:|:---:|
@@ -274,7 +276,7 @@ analog bands. It measures signal strength rather than decoding the video.
 
 **How is FPVGate related to PhobosLT?**
 FPVGate began as a fork of [PhobosLT](https://github.com/phobos-/PhobosLT)
-and has since added multi-pilot timing, Event Mode, voice calls, race
+and has since added multi-pilot timing, Event Mode, spoken lap times, race
 analysis, the Visual Marshal, USB networking, over-the-air updates and
 RotorHazard integration.
 
