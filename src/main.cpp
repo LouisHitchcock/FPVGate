@@ -212,6 +212,16 @@ static void c5Task(void *) {
     }
 }
 
+// Created once the C5 receiver is selected (at boot or later from the UI),
+// so a gate that never uses one keeps the task's stack for the web server.
+static TaskHandle_t c5TaskHandle = nullptr;
+
+static void startC5Task() {
+    if (c5TaskHandle) return;
+    // loop() runs at priority 1 on core 1.
+    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, 3, &c5TaskHandle, 1);
+}
+
 static void onSdCardReady() {
     // Ensure SD has required directories (they were created on LittleFS at boot, before SD mounted)
     DEBUG("Creating SD folders: /races, /tracks, /tracks/images\n");
@@ -548,9 +558,8 @@ void setup() {
     if (config.getReceiverRadio() == 2) {
         c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
         c5MultiPilot.begin(&config, &c5Link);
+        startC5Task();
     }
-    // loop() runs at priority 1 on core 1.
-    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, 3, NULL, 1);
 }
 
 #ifdef ENABLE_POWER_SWITCH
@@ -606,6 +615,7 @@ void loop() {
 #endif
     uint32_t nowMs = millis();
     uint32_t currentTimeMs = nowMs;
+    if (config.getReceiverRadio() == 2) startC5Task();
     c5RaceControl.update();
     if (const char* state = c5RaceControl.takeStateEvent()) ws.notifyGateRaceState(state);
     

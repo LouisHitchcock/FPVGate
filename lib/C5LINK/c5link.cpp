@@ -21,6 +21,13 @@ static uint8_t crc8(const uint8_t *p, size_t n) {
 void C5Link::begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t txPin) {
     config_ = config;
     if (!port || rxPin < 0 || txPin < 0) return;
+    if (!sampleQueue_) {
+        sampleQueue_ = static_cast<Sample (*)[SAMPLE_QUEUE_DEPTH]>(calloc(C5_MAX_PILOTS, sizeof(*sampleQueue_)));
+        if (!sampleQueue_) {
+            DEBUG("C5 link: no memory for the sample queues\n");
+            return;
+        }
+    }
     // Start the UART even with no pilot set, so the C5's status shows up and
     // pilots added later are picked up by poll().
     port_ = port;

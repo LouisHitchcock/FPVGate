@@ -120,7 +120,9 @@ private:
         uint16_t value;
         uint32_t timestampUs;
     };
-    Sample sampleQueue_[C5_MAX_PILOTS][SAMPLE_QUEUE_DEPTH] = {};
+    // 8 KB, allocated by begin(): a board without PSRAM that never uses a
+    // C5 needs that heap to serve the web UI.
+    Sample (*sampleQueue_)[SAMPLE_QUEUE_DEPTH] = nullptr;
     uint8_t sampleHead_[C5_MAX_PILOTS] = {};
     uint8_t sampleTail_[C5_MAX_PILOTS] = {};
     uint16_t rssi_[C5_MAX_PILOTS] = {};
