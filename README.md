@@ -1,6 +1,6 @@
 ﻿# FPVGate
 
-![FPVGate: scalable FPV race timing, from solo practice to 8-pilot club events](docs/banner.png)
+![FPVGate: scalable FPV race timing, from solo practice to 8-pilot club events](images/banner.png)
 
 [![Latest release](https://img.shields.io/github/v/release/LouisHitchcock/FPVGate?label=release&color=009688)](https://github.com/LouisHitchcock/FPVGate/releases/latest)
 [![Stars](https://img.shields.io/github/stars/LouisHitchcock/FPVGate?style=flat&color=yellow)](https://github.com/LouisHitchcock/FPVGate/stargazers)
@@ -53,21 +53,21 @@ even with no browser open.
 
 ## Screenshots
 
-![FPVGate race screen timing six pilots from one ESP32-C5 receiver, with lap times, gaps and live standings](screenshots/v1.9.0/race-multi-pilot.png)
+![FPVGate race screen timing six pilots from one ESP32-C5 receiver, with lap times, gaps and live standings](images/screenshots/v1.9.0/race-multi-pilot.png)
 
 | Event Mode | Race history |
 |:---:|:---:|
-| ![Event Mode with a 12-pilot roster, three groups, a rotating heat order and Elo ratings](screenshots/v1.9.0/event-mode.png) | ![A saved four-pilot race with its timeline, lap table and fastest laps](screenshots/v1.9.0/race-history.png) |
+| ![Event Mode with a 12-pilot roster, three groups, a rotating heat order and Elo ratings](images/screenshots/v1.9.0/event-mode.png) | ![A saved four-pilot race with its timeline, lap table and fastest laps](images/screenshots/v1.9.0/race-history.png) |
 | **Calibration** | **Settings** |
-| ![Multi-pilot calibration: four pilots' live signals with passes, the selected pilot's Enter and Exit lines, and a card per pilot](screenshots/v1.9.0/calibration.png) | ![Lap and announcer settings](screenshots/v1.9.0/settings.png) |
+| ![Multi-pilot calibration: four pilots' live signals with passes, the selected pilot's Enter and Exit lines, and a card per pilot](images/screenshots/v1.9.0/calibration.png) | ![Lap and announcer settings](images/screenshots/v1.9.0/settings.png) |
 
 <details>
 <summary><b>Single-pilot race and phone view</b></summary>
 <br>
 
 <p>
-  <img src="screenshots/v1.9.0/race-single-pilot.png" alt="Single-pilot race with lap times, gaps and race analysis" width="620">
-  <img src="screenshots/v1.9.0/phone.png" alt="Two-pilot race on a phone" width="200">
+  <img src="images/screenshots/v1.9.0/race-single-pilot.png" alt="Single-pilot race with lap times, gaps and race analysis" width="620">
+  <img src="images/screenshots/v1.9.0/phone.png" alt="Two-pilot race on a phone" width="200">
 </p>
 
 </details>
@@ -76,7 +76,7 @@ Screenshots use demo race data.
 
 ### Themes
 
-![The same race in six of FPVGate's themes: Material Oceanic, Dracula, Synthwave, Solarized Light, Forest and Night Owl](screenshots/v1.9.0/themes.png)
+![The same race in six of FPVGate's themes: Material Oceanic, Dracula, Synthwave, Solarized Light, Forest and Night Owl](images/screenshots/v1.9.0/themes.png)
 
 Choose from 23 built-in themes, including Material, Dracula, Monokai, One
 Dark, Solarized, Night Owl and Synthwave, or set your own colours, under
@@ -295,6 +295,7 @@ RotorHazard integration.
 | [Waveshare ESP32-S3-ETH](docs/WAVESHARE_S3_ETH.md) | The wired Ethernet board |
 | [Voice generation](docs/VOICE_GENERATION_README.md), [multi-voice setup](docs/MULTI_VOICE_SETUP.md) | Custom and multiple voices |
 | [Development](docs/DEVELOPMENT.md) | Building from source and contributing |
+| [Repository layout](docs/REPOSITORY_LAYOUT.md) | Source, build configuration, images and integrations |
 | [Changelog](CHANGELOG.md) | Every release |
 
 ## What's new in 1.9.0

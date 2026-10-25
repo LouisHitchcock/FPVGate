@@ -13,11 +13,10 @@ Guide for building, modifying, and contributing to FPVGate.
 3. [Project Structure](#project-structure)
 4. [Firmware Development](#firmware-development)
 5. [Web Interface Development](#web-interface-development)
-6. [Electron App Development](#electron-app-development)
-7. [Testing](#testing)
-8. [Contributing](#contributing)
-9. [Release Process](#release-process)
-10. [Troubleshooting Build Issues](#troubleshooting-build-issues)
+6. [Testing](#testing)
+7. [Contributing](#contributing)
+8. [Release Process](#release-process)
+9. [Troubleshooting Build Issues](#troubleshooting-build-issues)
 
 ---
 
@@ -31,7 +30,7 @@ Guide for building, modifying, and contributing to FPVGate.
 |------|---------|---------|
 | **PlatformIO** | Latest | ESP32 firmware compilation |
 | **Python** | 3.7+ | Build scripts, TTS generation |
-| **Node.js** | 14+ | Electron app (optional) |
+| **Node.js** | 18+ | Frontend tests (optional) |
 | **Git** | 2.0+ | Version control |
 | **VS Code** | Latest | Recommended IDE |
 
@@ -218,10 +217,11 @@ FPVGate/
 │   ├── tts_generator.py
 │   ├── upload_to_sd.py
 │   └── ...
-├── electron/                     # Desktop app
-│   ├── main.js
-│   ├── preload.js
-│   └── package.json
+├── images/                       # Screenshots, banner and source logos
+├── integrations/                 # Standalone external services
+├── targets/                      # Board environments and partitions/
+├── scripts/                      # PlatformIO build hooks
+├── tests/                        # Frontend tests
 ├── platformio.ini                # PlatformIO config
 └── README.md
 ```
@@ -563,124 +563,22 @@ const themes = [
 
 ---
 
-## Electron App Development
-
-### Setup
-
-```bash
-cd electron/
-npm install
-```
-
-### Development Mode
-
-**Run with hot reload:**
-
-```bash
-npm start
-```
-
-**File Watcher:**
-
-```bash
-# In separate terminal
-npm run watch
-```
-
-### Building Distributable
-
-**Windows:**
-```bash
-npm run build:win
-```
-
-**macOS:**
-```bash
-npm run build:mac
-```
-
-**Linux:**
-```bash
-npm run build:linux
-```
-
-**Output:** `electron/dist/`
-
-### Electron Main Process
-
-**electron/main.js:**
-
-```javascript
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true
-    }
-  });
-
-  // Load web interface
-  win.loadFile('../data/index.html');
-}
-
-app.whenReady().then(createWindow);
-```
-
-### USB Serial Integration
-
-**electron/preload.js:**
-
-```javascript
-const { contextBridge } = require('electron');
-const { SerialPort } = require('serialport');
-
-contextBridge.exposeInMainWorld('electronAPI', {
-  // List available ports
-  listPorts: async () => {
-    return await SerialPort.list();
-  },
-  
-  // Open serial connection
-  openPort: (path, baudRate) => {
-    return new SerialPort({ path, baudRate });
-  }
-});
-```
-
-**Usage in Renderer:**
-
-```javascript
-// Get available COM ports
-const ports = await window.electronAPI.listPorts();
-
-// Connect to selected port
-const port = window.electronAPI.openPort('COM12', 115200);
-
-port.on('data', (data) => {
-  // Handle incoming events
-  if (data.startsWith('EVENT:')) {
-    const event = JSON.parse(data.substring(6));
-    handleEvent(event);
-  }
-});
-
-// Send command
-port.write(JSON.stringify({
-  method: 'POST',
-  path: 'timer/start',
-  data: {}
-}));
-```
-
----
-
 ## Testing
+
+### Frontend Tests
+
+The Jest suite lives in `tests/`, with its dependencies defined in
+`tests/package.json`. From the repository root:
+
+```bash
+cd tests
+npm install
+npm test -- --runInBand
+```
+
+Some tests compile firmware configuration code on the host and also require a
+C++ compiler. Device load and reliability tools are documented in
+[`tools/README.md`](../tools/README.md).
 
 ### Unit Tests (Future)
 
@@ -925,13 +823,6 @@ build_flags =
   -D VERSION="1.3.0"
 ```
 
-**package.json (Electron):**
-```json
-{
-  "version": "1.3.0"
-}
-```
-
 #### Step 2: Update CHANGELOG.md
 
 ```markdown
@@ -966,14 +857,6 @@ pio run -e esp32-s3-devkitc-1 -t buildfs
 cp .pio/build/esp32-s3-devkitc-1/littlefs.bin release/fpvgate_v1.3.0_filesystem.bin
 ```
 
-**Electron App:**
-```bash
-cd electron/
-npm run build:win
-npm run build:mac
-npm run build:linux
-```
-
 #### Step 4: Create GitHub Release
 
 1. Go to GitHub repository
@@ -984,9 +867,6 @@ npm run build:linux
 6. Attach binaries:
    - `fpvgate_v1.3.0_firmware.bin`
    - `fpvgate_v1.3.0_filesystem.bin`
-   - `FPVGate-Setup-1.3.0.exe` (Windows)
-   - `FPVGate-1.3.0.dmg` (macOS)
-   - `FPVGate-1.3.0.AppImage` (Linux)
 7. Publish release
 
 #### Step 5: Announce
@@ -1042,7 +922,7 @@ lib_deps =
 **Solution:** Enable PSRAM or reduce code size:
 ```ini
 board_build.arduino.memory_type = qio_opi
-board_build.partitions = custom_8mb.csv
+board_build.partitions = targets/partitions/custom_8mb.csv
 ```
 
 ### Filesystem Upload Issues
@@ -1057,23 +937,6 @@ pio run -t buildfs
 **Problem:** `Upload failed: No such file or directory`
 
 **Solution:** Ensure ESP32 connected and in download mode
-
-### Electron Build Issues
-
-**Problem:** `Cannot find module 'serialport'`
-
-**Solution:**
-```bash
-cd electron/
-npm install serialport --save
-```
-
-**Problem:** `Electron build fails on macOS`
-
-**Solution:** Install Xcode Command Line Tools:
-```bash
-xcode-select --install
-```
 
 ---
 

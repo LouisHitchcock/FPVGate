@@ -737,7 +737,7 @@ line after recovery gives the answer. 4=PANIC, 5=INT_WDT, 6=TASK_WDT, 7=WDT,
 
 This work originally carried its own partition table,
 `custom_8mb_coredump.csv`, to add a coredump partition at 0x510000. That table
-is gone: `custom_8mb.csv` now carries a coredump partition for every 8MB board
+is gone: `targets/partitions/custom_8mb.csv` now carries a coredump partition for every 8MB board
 at **0x7F0000/0x10000**, alongside a much larger spiffs. The Arduino core already
 sets `CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`, but the stock table gave it nowhere
 to write, so every panic was previously silent. Read and decode with:

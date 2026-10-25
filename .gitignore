@@ -37,12 +37,9 @@ __pycache__/
 *.pyc
 tools/__pycache__/
 
-# Node.js / Electron
+# Node.js
 node_modules/
-electron/dist/
-electron/node_modules/
 package-lock.json
-*_Electron_App.zip
 
 # WARP temporary files and documentation
 .warp/
@@ -76,7 +73,7 @@ flashing_defaults.json
 laptimer_v*.cpp
 tools/apply_frontend_defaults.html
 
-# Desktop app builds (too large for git, use GitHub releases)
+# Generated archives (use GitHub releases for distribution)
 *.zip
 
 # PCB design files
@@ -98,6 +95,3 @@ PCB/
 /overnight.json
 /step*.json
 /gate.json
-
-# The discord bot for the FPVGate Discord Server
-discord-bot/

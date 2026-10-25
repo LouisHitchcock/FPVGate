@@ -803,7 +803,7 @@ if (raceSyncMode === 1 || raceSyncMode === 2) {
 
 ### Overview
 
-![Track Management](../screenshots/12-12-2025/Config%20Screen%20-%20Track%20Info%2012-12-2025.png)
+![Track Management](../images/screenshots/12-12-2025/Config%20Screen%20-%20Track%20Info%2012-12-2025.png)
 
 FPVGate includes a comprehensive track management system for organizing and tracking your racing locations.
 
@@ -859,7 +859,7 @@ FPVGate includes a comprehensive track management system for organizing and trac
 
 ### Overview
 
-![Webhooks Configuration](../screenshots/12-12-2025/Config%20Screen%20-%20Webhooks%2012-12-2025.png)
+![Webhooks Configuration](../images/screenshots/12-12-2025/Config%20Screen%20-%20Webhooks%2012-12-2025.png)
 
 FPVGate can send HTTP POST webhooks to external devices on your network, perfect for integrating with external LED controllers, displays, or automation systems.
 
@@ -1414,7 +1414,7 @@ class TransportManager {
 
 ### Overview
 
-![System Diagnostics](../screenshots/12-12-2025/Config%20Screen%20Diagnostics%2012-12-2025.png)
+![System Diagnostics](../images/screenshots/12-12-2025/Config%20Screen%20Diagnostics%2012-12-2025.png)
 
 Comprehensive diagnostic system validates all hardware components and software features.
 

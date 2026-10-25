@@ -351,7 +351,7 @@ pio run -e ESP32S3SuperMini -t uploadfs
 
 ## Initial Configuration
 
-![Calibration](../screenshots/02-04-2026/RSSI%20Calibration.png)
+![Calibration](../images/screenshots/02-04-2026/RSSI%20Calibration.png)
 
 ### Step 1: Connect to FPVGate
 
@@ -561,7 +561,7 @@ Exit RSSI: 135 (10 below enter)
 
 ---
 
-![Calibration](../screenshots/02-04-2026/RSSI%20Calibration.png)
+![Calibration](../images/screenshots/02-04-2026/RSSI%20Calibration.png)
 
 ## Multi-Timer Setup (Optional)
 

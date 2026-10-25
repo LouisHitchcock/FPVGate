@@ -2,7 +2,7 @@
 // Receives GitHub webhook events and posts formatted embeds to Discord
 
 const REPO_URL = 'https://github.com/LouisHitchcock/FPVGate';
-const AVATAR_URL = 'https://github.com/LouisHitchcock/FPVGate/raw/main/logo/logo.png';
+const AVATAR_URL = 'https://github.com/LouisHitchcock/FPVGate/raw/V1.9.0-alpha/images/logo/WhiteLogo.png';
 const BOT_USERNAME = 'FPVGate GitHub';
 
 export default {
