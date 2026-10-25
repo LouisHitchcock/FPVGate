@@ -1,0 +1,21 @@
+FPVGate v1.8.3 - XIAO ESP32S3 Plus (16MB Flash)
+
+Flash all four files in one command. The filesystem offset differs per board,
+so use the value below rather than one from another board's instructions.
+
+esptool.py --chip esp32s3 --port <PORT> --baud 460800 write_flash -z \
+  0x0      XIAOS3Plus-bootloader.bin \
+  0x8000   XIAOS3Plus-partitions.bin \
+  0x10000  XIAOS3Plus-firmware.bin \
+  0x610000  XIAOS3Plus-littlefs.bin
+
+Notes
+-----
+* Upgrading from 1.7.x MUST be a full wired flash like the one above. An
+  over-the-air update replaces the application only and leaves the old
+  partition table in place, which a 1.8 filesystem image will not fit.
+* The easier route is the web flasher at https://fpvgate.xyz, which does all
+  of this from a browser.
+* After flashing, the gate is reachable over USB-C at http://192.168.7.1 as
+  well as over WiFi. USB networking works on Windows and Linux; macOS is not
+  supported, because Apple removed RNDIS.
