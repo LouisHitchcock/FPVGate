@@ -22,7 +22,8 @@
 #define RH_LINK_TIMEOUT_MS 15000     // RotorHazard plugin polls the clock every 5 s
 #define WEB_RH_RSSI_SEND_MS 50       // RSSI to the RotorHazard plugin, 20 per second
 #define WEB_TCP_SEND_BUFFER (2 * 1436)   // per connection: two segments (TCP_MSS 1436), see capSendBuffer()
-#define WEB_LOW_HEAP_BYTES 24576     // below this, new requests get 503 rather than run the heap out
+#define WEB_FILE_BUFFER 512          // stdio buffer per file served, down from Arduino's 4 KB
+#define WEB_LOW_HEAP_BYTES 24576    // below this, new requests get 503 rather than run the heap out
 #define WEB_SSE_BACKLOG 4            // live RSSI/status skipped while a stream's clients have more waiting
 #define WEB_HEAP_SNAPSHOT_BYTES 20480   // a low below this records what was going on (/api/system/info lowHeap)
 #define EVENT_PATH "/event.json"     // race director event (SD if present, else LittleFS)

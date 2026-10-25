@@ -1034,6 +1034,11 @@ void Webserver::startServices() {
         // which costs more heap than the cap saves.
         const bool stream = request->url().endsWith("/events");
         if (!stream) capSendBuffer(request);
+        // serveStatic has opened the file but not read it yet. Arduino gives
+        // every file a 4 KB stdio buffer; with the send cap above, each read
+        // is at most two segments, so 512 bytes (the LittleFS cache) loses
+        // nothing and leaves 3.5 KB per file in flight for everything else.
+        if (request->_tempFile) request->_tempFile.setBufferSize(WEB_FILE_BUFFER);
         // Counted for the low-heap snapshot.
         const bool file = !stream && !request->url().startsWith("/api/");
         ++activeRequests;
