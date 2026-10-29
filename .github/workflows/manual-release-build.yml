@@ -4,9 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.5.1)'
+        description: 'Version tag (e.g., v1.9.0-alpha-6); builds artifacts only'
         required: true
         type: string
+
+permissions:
+  contents: read
+
+env:
+  FPVGATE_RELEASE_VERSION: ${{ inputs.version }}
 
 jobs:
   build-firmware:
@@ -14,122 +20,55 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The boards a release ships binaries for. Keep this in step with
-        # docs/RELEASE_PROCESS.md and the Supported_Boards.txt written into each
-        # release directory; a board missing here silently ships nothing.
-        environment:
-          - ESP32S3            # ESP32-S3 DevKitC-1, 8MB
-          - FPVGateAIO         # XIAO ESP32S3, 8MB
-          - FPVGateC5MKAIO     # XIAO ESP32S3 + XIAO C5, 8MB, C5-only receiver
-          - FPVGateSolo        # XIAO ESP32S3, 8MB
-          - SeeedXIAOESP32S3   # 8MB
-          - WaveshareS3ETH     # 16MB, W5500 Ethernet
-    
+        # Keep aligned with tools/package_release.py and RELEASE_PROCESS.md.
+        environment: [ESP32S3, FPVGateAIO, FPVGateC5MKAIO, FPVGateSolo, SeeedXIAOESP32S3, WaveshareS3ETH]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Cache PlatformIO
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$FPVGATE_RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version tag'; exit 1; }
+      - name: Cache PlatformIO packages
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.platformio
-            .pio
-          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-
-      
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'targets/*.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
       - name: Install PlatformIO
-        run: |
-          pip install platformio
-          pio upgrade
-      
-      - name: Build firmware (${{ matrix.environment }})
+        run: pip install platformio==6.1.18
+      - name: Build firmware
         run: pio run -e ${{ matrix.environment }}
-      
-      - name: Build filesystem (${{ matrix.environment }})
+      - name: Build matching filesystem
         run: pio run -e ${{ matrix.environment }} -t buildfs
-        continue-on-error: true
-      
-      - name: Prepare release artifacts
-        run: |
-          mkdir -p release-artifacts/${{ matrix.environment }}
-          
-          # Copy firmware binary
-          if [ -f .pio/build/${{ matrix.environment }}/firmware.bin ]; then
-            cp .pio/build/${{ matrix.environment }}/firmware.bin \
-               release-artifacts/${{ matrix.environment }}/firmware.bin
-          fi
-          
-          # Copy filesystem binary
-          if [ -f .pio/build/${{ matrix.environment }}/littlefs.bin ]; then
-            cp .pio/build/${{ matrix.environment }}/littlefs.bin \
-               release-artifacts/${{ matrix.environment }}/littlefs.bin
-          fi
-          
-          # Copy bootloader
-          if [ -f ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/bin/bootloader_dio_80m.bin ]; then
-            cp ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/bin/bootloader_dio_80m.bin \
-               release-artifacts/${{ matrix.environment }}/bootloader.bin
-          elif [ -f ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32c3/bin/bootloader_dio_40m.bin ]; then
-            cp ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32c3/bin/bootloader_dio_40m.bin \
-               release-artifacts/${{ matrix.environment }}/bootloader.bin
-          elif [ -f ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/bin/bootloader_dio_40m.bin ]; then
-            cp ~/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/bin/bootloader_dio_40m.bin \
-               release-artifacts/${{ matrix.environment }}/bootloader.bin
-          fi
-          
-          # Copy partition table
-          if [ -f .pio/build/${{ matrix.environment }}/partitions.bin ]; then
-            cp .pio/build/${{ matrix.environment }}/partitions.bin \
-               release-artifacts/${{ matrix.environment }}/partitions.bin
-          fi
-          
-          # Create flash command reference
-          cat > release-artifacts/${{ matrix.environment }}/FLASH_INSTRUCTIONS.txt << 'EOF'
-          Flash using esptool:
-          
-          esptool.py --chip auto --port COM3 write_flash -z \
-            0x0 bootloader.bin \
-            0x8000 partitions.bin \
-            0x10000 firmware.bin \
-            0x410000 littlefs.bin
-          
-          Or use PlatformIO:
-          pio run -e ${{ matrix.environment }} -t upload
-          pio run -e ${{ matrix.environment }} -t uploadfs
-          EOF
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Package using the canonical board/partition definitions
+        run: python tools/package_release.py --version "$FPVGATE_RELEASE_VERSION" --only ${{ matrix.environment }} --skip-build
+      - name: Verify every packaged checksum before upload
+        working-directory: release/${{ inputs.version }}
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v4
         with:
           name: FPVGate-${{ inputs.version }}-${{ matrix.environment }}
-          path: release-artifacts/${{ matrix.environment }}/*
+          path: release/${{ inputs.version }}/
+          if-no-files-found: error
           retention-days: 90
-  
+
   create-release-bundle:
     needs: build-firmware
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
+          pattern: FPVGate-${{ inputs.version }}-*
           path: release-bundle
-      
       - name: Create unified release package
-        run: |
-          cd release-bundle
-          zip -r ../FPVGate-${{ inputs.version }}-AllBoards.zip .
-      
-      - name: Upload complete bundle
-        uses: actions/upload-artifact@v4
+        working-directory: release-bundle
+        run: zip -r "../FPVGate-${FPVGATE_RELEASE_VERSION}-AllBoards.zip" .
+      - uses: actions/upload-artifact@v4
         with:
           name: FPVGate-${{ inputs.version }}-Complete
           path: FPVGate-${{ inputs.version }}-AllBoards.zip
+          if-no-files-found: error
           retention-days: 90

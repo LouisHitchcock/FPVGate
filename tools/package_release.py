@@ -23,7 +23,9 @@ to install its esptool package under MSys and the filesystem build fails.
 """
 
 import argparse
+import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -139,6 +141,11 @@ def main():
                         help="package binaries already in .pio/build")
     parser.add_argument("--only", nargs="*", help="limit to these environments")
     args = parser.parse_args()
+    if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?", args.version):
+        parser.error("--version must be a version tag such as v1.9.0-alpha-6")
+    unknown = set(args.only or []) - {board[0] for board in BOARDS}
+    if unknown:
+        parser.error("unknown environments: " + ", ".join(sorted(unknown)))
 
     boards = [b for b in BOARDS if not args.only or b[0] in args.only]
     if not boards:
@@ -146,9 +153,9 @@ def main():
 
     root = os.path.join("release", args.version)
     board_dir = os.path.join(root, "boards")
-    os.makedirs(board_dir, exist_ok=True)
-
+    # Preflight the complete requested set before touching a release directory.
     missing = []
+    offsets = {}
     for environment, size, description in boards:
         print(f"\n=== {environment} ({size}) ===")
         if not args.skip_build:
@@ -156,12 +163,26 @@ def main():
             run(["run", "-e", environment, "-t", "buildfs"])
 
         build = os.path.join(".pio", "build", environment)
+        offsets[environment] = filesystem_offset(environment)
+        if not offsets[environment]:
+            missing.append(f"{environment}/filesystem partition offset")
         for part in PARTS:
             source = os.path.join(build, f"{part}.bin")
             if not os.path.isfile(source):
                 missing.append(f"{environment}/{part}.bin")
-                print(f"  MISSING {source}")
-                continue
+    if not os.path.isfile(BOOT_APP0):
+        missing.append(BOOT_APP0)
+    if missing:
+        print("\nMISSING artefacts/configuration:")
+        for item in missing:
+            print(f"  {item}")
+        return 1
+
+    os.makedirs(board_dir, exist_ok=True)
+    for environment, size, description in boards:
+        build = os.path.join(".pio", "build", environment)
+        for part in PARTS:
+            source = os.path.join(build, f"{part}.bin")
             shutil.copy2(source, os.path.join(root, f"{environment}-{part}.bin"))
             shutil.copy2(source, os.path.join(board_dir, f"{environment}-{size}-{part}.bin"))
             # Third copy, in the "modern" per-board layout, used by two
@@ -184,18 +205,14 @@ def main():
             shutil.copy2(source, os.path.join(ota_dir, f"{part}.bin"))
             print(f"  {part:11} {os.path.getsize(source) / 1024:7.0f} KB")
 
-        offset = filesystem_offset(environment) or "0x410000"
+        offset = offsets[environment]
         with open(os.path.join(root, f"{environment}-FLASH_INSTRUCTIONS.txt"), "w") as handle:
             handle.write(FLASH_INSTRUCTIONS.format(version=args.version,
                                                    description=description,
                                                    board=environment,
                                                    fs_offset=offset))
 
-    if os.path.isfile(BOOT_APP0):
-        shutil.copy2(BOOT_APP0, os.path.join(root, "boot_app0.bin"))
-    else:
-        missing.append(BOOT_APP0)
-        print(f"  MISSING {BOOT_APP0}")
+    shutil.copy2(BOOT_APP0, os.path.join(root, "boot_app0.bin"))
 
     with open(os.path.join(root, "Supported_Boards.txt"), "w") as handle:
         handle.write(f"FPVGate {args.version} - Supported Boards\n\n")
@@ -204,13 +221,25 @@ def main():
         handle.write("\nUSB networking (http://192.168.7.1 over USB-C) is available on all of\n"
                      "these. Windows and Linux only; macOS does not support RNDIS.\n")
 
+    # Cover every delivered layout and its instructions, not just one copy.
+    checksums = []
+    for directory, directories, filenames in os.walk(root):
+        directories.sort()
+        for filename in sorted(filenames):
+            source = os.path.join(directory, filename)
+            relative = os.path.relpath(source, root).replace(os.sep, "/")
+            if relative == "SHA256SUMS":
+                continue
+            digest = hashlib.sha256()
+            with open(source, "rb") as handle:
+                for chunk in iter(lambda: handle.read(65536), b""):
+                    digest.update(chunk)
+            checksums.append(f"{digest.hexdigest()}  {relative}\n")
+    with open(os.path.join(root, "SHA256SUMS"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.writelines(checksums)
+
     print(f"\npackaged into {root}")
-    print(f"  {len(boards)} boards, {len(boards) * len(PARTS)} binaries, two copies each")
-    if missing:
-        print("\nMISSING artefacts:")
-        for item in missing:
-            print(f"  {item}")
-        return 1
+    print(f"  {len(boards)} boards, {len(boards) * len(PARTS)} board binaries, three copies each, plus boot_app0.bin")
     print("\nNext: commit boards/*.bin (they are what the web flasher fetches),")
     print("      tag, push, then verify at https://fpvgate.xyz/flasher.html")
     return 0

@@ -1,289 +1,163 @@
-# FPVGate Release Process Guide
+# FPVGate alpha release process
 
-This document describes the complete process for creating and publishing FPVGate releases.
+This guide reflects `tools/package_release.py` and the checked-in
+`manual-release-build.yml`. A documentation/source commit does not change
+already published binaries.
 
-## Release Structure
+## Version and source
 
-Each release must follow this exact structure to work with the web flasher at https://fpvgate.xyz:
+The working alpha branch is `V1.9.0-alpha`. Set `lib/VERSION/version.h`:
+`FPVGATE_VERSION` is the base version and `FPVGATE_VERSION_STAGE` the suffix.
+The normal current label is `1.9.0-alpha-5`. Keep a nonempty alpha stage for
+pre-releases; only a final release uses an empty stage.
+`FPVGateC5MKAIO_EMAProbe` overrides the stage and is never a shipping target.
 
-```
-release/vX.Y.Z/
-├── boards/                          # For web flasher (fpvgate.xyz)
-│   ├── <BOARD>-<SIZE>-bootloader.bin
-│   ├── <BOARD>-<SIZE>-partitions.bin
-│   ├── <BOARD>-<SIZE>-firmware.bin
-│   └── <BOARD>-<SIZE>-littlefs.bin        ... for every board below
-├── <BOARD>-bootloader.bin            # For GitHub release downloads
-├── <BOARD>-partitions.bin
-├── <BOARD>-firmware.bin
-├── <BOARD>-littlefs.bin
-├── <BOARD>-FLASH_INSTRUCTIONS.txt     ... for every board below
-├── Supported_Boards.txt
-└── RELEASE_NOTES.md
-```
+Record the exact production source commit, board set and hashes when building.
+A release tag should identify the source used for its images. Do not silently
+move an existing public tag as a routine publishing step.
 
-### Boards a release ships
+## Shipping boards
 
-| Environment | Flash | Board |
-|---|---|---|
-| `ESP32S3` | 8MB | ESP32-S3 DevKitC-1 |
-| `FPVGateAIO` | 8MB | FPVGate AIO V3 (XIAO ESP32S3) |
-| `FPVGateC5MKAIO` | 8MB | FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5, C5-only) |
-| `FPVGateSolo` | 8MB | FPVGate Solo (XIAO ESP32S3) |
-| `SeeedXIAOESP32S3` | 8MB | Seeed Studio XIAO ESP32S3 |
-| `WaveshareS3ETH` | 16MB | Waveshare ESP32-S3-ETH |
+| Environment | Flash | Filesystem offset |
+| --- | --- | --- |
+| `ESP32S3` | 8 MB | `0x410000` |
+| `FPVGateAIO` | 8 MB | `0x410000` |
+| `FPVGateC5MKAIO` | 8 MB | `0x410000` |
+| `FPVGateSolo` | 8 MB | `0x410000` |
+| `SeeedXIAOESP32S3` | 8 MB | `0x410000` |
+| `WaveshareS3ETH` | 16 MB | `0x610000` |
 
-This list lives in three places that must agree, or a board silently ships
-nothing: the `BOARDS` table in `tools/package_release.py`, the `matrix` in
-`.github/workflows/manual-release-build.yml`, and this table.
+Keep this table, `BOARDS` in the packaging script, and the manual workflow's
+matrix in agreement. Retained custom targets are outside this six-board scope.
 
-For 1.9.0 this is the six-board shipping scope. The XIAO ESP32S3 Plus target
-remains in the source for custom/older builds but is not packaged for 1.9.0.
+## What the workflow actually does
 
-## Why Two Sets of Binaries?
+The checked-in workflow runs only on **workflow_dispatch**. Pushing a tag
+does not trigger it. It builds the six environments and uploads per-board
+Actions artifacts plus a combined ZIP (90-day retention). It does not create
+a GitHub Release, commit binaries, move tags or publish the website.
 
-### 1. `boards/` Directory
-- **Purpose**: Used by the web flasher at https://fpvgate.xyz
-- **Naming**: Must carry the flash size, `-8MB-` or `-16MB-`, matching the table above
-- **URL Pattern**: `https://fpvgate.xyz/firmware/vX.Y.Z/boards/ESP32S3-8MB-bootloader.bin`
-- **Must be committed to repository**: The website pulls files from the GitHub repository, NOT release assets
+Unreleased source makes filesystem builds mandatory and uses the canonical
+packaging script, including the built bootloader, partition-derived filesystem
+offset and `boot_app0.bin`. Missing images/offsets fail the job; invalid version
+tags are rejected. PlatformIO Core is pinned to the locally tested 6.1.18.
+The matrix caches packages, not stale `.pio` build outputs. Each board artifact
+contains all three layouts, a boot selector and board-specific instructions.
+`SHA256SUMS` covers the delivered files; verify it before flashing/publication.
+The aggregate ZIP retains per-board artifact directories (and their own board
+lists); it is not an automatically published release directory. Treat artifacts
+as unqualified build outputs until the hardware checklist passes. The changed
+workflow still needs an actual Actions run after it is pushed.
 
-### 2. Root Level Files
-- **Purpose**: Individual downloads for users flashing manually
-- **Naming**: Simpler names for easier identification
-- **Distribution**: GitHub release assets and optional zip files
+## Build and package
 
-## Automated Release Process
+From the repository root, after tests and source review:
 
-### Step 1: Update Version Number
-
-Edit `lib/VERSION/version.h`. Both lines matter — the stage suffix is what makes
-a build report `1.8.0-dev` rather than `1.8.0`, and leaving it set ships a
-release that calls itself a development build:
-```cpp
-#define FPVGATE_VERSION "X.Y.Z"
-#define FPVGATE_VERSION_STAGE ""   // "" for a release; "dev"/"alpha"/"beta"/"rc-1" otherwise
+```sh
+python tools/package_release.py --version vX.Y.Z-alpha-N
 ```
 
-### Step 2: Update CHANGELOG.md
+Use the intended version instead of the placeholder. The script builds both
+app and filesystem for each shipping environment and fails if artifacts are
+missing. It reads filesystem offsets from the configured partition CSV.
+Run it from PowerShell on Windows.
 
-Add new section at the top:
-```markdown
-## [X.Y.Z] - YYYY-MM-DD
+`--only ESP32S3 FPVGateAIO` deliberately limits the board set.
+`--skip-build` packages existing `.pio/build` outputs: only use it when those
+outputs are known to match the recorded source. The script creates
+`SHA256SUMS`, but not source-provenance `BUILD_INFO.json`.
 
-### Added/Fixed/Changed
-- Description of changes
+## Package layout
+
+Each board's bootloader, partitions, firmware and LittleFS image is copied
+into three layouts under `release/<tag>/`:
+
+| Path | Consumer |
+| --- | --- |
+| `<BOARD>-<part>.bin` | Individual/manual downloads |
+| `boards/<BOARD>-<SIZE>-<part>.bin` | Legacy size-qualified flasher layout |
+| `<BOARD>/<part>.bin` | Board-ID web flasher and device updater layout |
+
+For example, `WaveshareS3ETH/littlefs.bin` and
+`boards/WaveshareS3ETH-16MB-littlefs.bin` identify the same board image.
+Names and case must match the device's `FPVGATE_BOARD_ID`.
+
+The script also writes `<BOARD>-FLASH_INSTRUCTIONS.txt`,
+`Supported_Boards.txt` and a shared `boot_app0.bin` copied from the Arduino
+framework. Keep release notes, source metadata and hashes alongside them.
+An Alpha 5 package additionally has release-specific metadata/checksums
+checked by `tools/verify_alpha5_release.mjs`.
+
+## Wired flashing and upgrades
+
+A full S3 flash writes five images:
+
+| Offset | Image |
+| --- | --- |
+| `0x0` | bootloader |
+| `0x8000` | partition table |
+| `0xe000` | `boot_app0.bin` |
+| `0x10000` | application |
+| Board-specific offset above | LittleFS |
+
+Use the generated board command rather than substituting offsets by flash
+capacity alone. `boot_app0.bin` selects the freshly written app0 after a
+previous OTA session. From 1.7.x, perform a full wired flash for the changed
+partition table. OTA cannot alter that table and may reject oversized images.
+
+## Verify before publication
+
+1. Run `npm test --prefix tests -- --runInBand` and the relevant native checks.
+2. Build app and filesystem for all six shipping boards.
+3. Confirm each image's board, stage, flash size and filesystem layout.
+4. Verify every packaged copy matches, and generate/review checksums.
+5. Run device/component/page-load tests on available boards and record gaps.
+   Include C5 closed-browser completion, save retry and matching web assets.
+6. Back up real device data before any write tests or flash.
+7. Prepare release notes that state the actual validation and known limits.
+
+For the existing Alpha 5 artifact set:
+
+```sh
+node tools/verify_alpha5_release.mjs
 ```
 
-### Step 3: Create Release Notes
+Optional `--website <path>` compares a local website checkout too. The verifier
+requires `BUILD_INFO.json`, exact hashes, mklittlefs and production-source
+agreement with the recorded commit. Source refactors, including moved target
+paths, invalidate that exact-source assertion even if binary behavior is
+unchanged. Do not change the recorded source revision to force a pass:
+rebuild/requalify a new package or preserve the old package's provenance.
 
-Create `release/vX.Y.Z/RELEASE_NOTES.md` following the template from previous releases.
+## Publishing
 
-### Step 4: Tag and Push
+Commit only reviewed release metadata and verified images to the intended
+release branch; generated `.bin` files may require explicit `git add -f`.
+Keep all three layouts and the shared boot selector together.
 
-```bash
-git add -A
-git commit -m "Release vX.Y.Z: <brief description>"
-git tag -a vX.Y.Z -m "FPVGate vX.Y.Z - <brief description>"
-git push origin main
-git push origin vX.Y.Z
-```
+Create/tag the intended source revision, push the intended branch/tag, then
+create an explicit GitHub pre-release and attach the root downloads and
+instructions. Confirm the website's release metadata points to the branch,
+tag and paths that actually contain those files. Alpha source lives on
+`V1.9.0-alpha`; a URL hardcoded to `main` is not automatically an alpha URL.
 
-The GitHub Actions workflow will automatically:
-1. Build firmware for all boards
-2. Create properly named binaries
-3. Create GitHub release with assets
-4. Commit binaries to `release/vX.Y.Z/boards/` directory
+The updater constructs `<site>/preRelease/<tag>/<BOARD>/firmware.bin` and
+`littlefs.bin` for pre-releases, or `/firmware/…` for stable releases.
+Website routing/publication is maintained separately; verify actual download
+responses, lengths and hashes before testing a flash. GitHub release uploads
+alone do not populate repository-backed website paths.
 
-### Step 5: Verify Web Flasher
+After publication, check every board's downloadable images, flash a matching
+bench board, verify `/version` and `/api/system/info`, then test the app,
+storage, receiver and OTA compatibility. Report untested boards explicitly.
 
-After the workflow completes:
-1. Visit https://fpvgate.xyz/flasher.html
-2. Select the new version
-3. Verify that all binaries download correctly
+## Refreshing existing pre-releases
 
-## Manual Release Process (Fallback)
+A same-version refresh must be deliberate and traceable: preserve prior
+provenance, identify the new source and hashes, replace every required app/
+filesystem copy consistently, and disclose the refresh in its notes.
+Do not assume rebuilt app binaries are byte-identical because only web source
+changed, or treat silent overwrites of stable releases as the default process.
 
-If the automated process fails, follow these steps:
-
-### 1. Build and package every board
-
-One command builds all six boards, writes both naming conventions, generates
-per-board flash instructions with the correct filesystem offset read from that
-board's partition CSV, and writes `Supported_Boards.txt`:
-
-```bash
-python tools/package_release.py --version vX.Y.Z
-```
-
-Add `--skip-build` to repackage binaries already in `.pio/build`, or
-`--only ESP32S3 FPVGateAIO` to limit it to specific boards.
-
-For the refreshed Alpha 5, update `release/v1.9.0-alpha-5/BUILD_INFO.json`
-to the integrated source revision, regenerate all flash-image checksums,
-then verify the actual packaged filesystems as well as the binaries:
-
-```bash
-node tools/verify_alpha5_release.mjs --website ../FPVGate-Website
-```
-
-This extracts each LittleFS image into a fresh temporary directory and
-compares its script/event assets to source, catching a new firmware paired
-with old announcer or history-saving page code. Same-version Alpha 5 refreshes
-must replace both firmware and filesystem; keep the existing release/tag name
-and move its source tag and verified downloads together.
-
-**On Windows, run this from PowerShell, not Git Bash.** PlatformIO refuses to
-install its esptool package under MSys and the filesystem build fails with
-"MSys/Mingw is not supported".
-
-The rest of this section describes what that script does, for when it needs
-changing or the release has to be assembled by hand.
-
-### 2. Copy Binaries to Release Directory
-
-For each board, four artefacts are copied twice, under two naming conventions:
-
-```
-.pio/build/<ENV>/{bootloader,partitions,firmware,littlefs}.bin
-  -> release/vX.Y.Z/<ENV>-<part>.bin              (GitHub release assets)
-  -> release/vX.Y.Z/boards/<ENV>-<SIZE>-<part>.bin (web flasher)
-```
-
-The `-8MB-` / `-16MB-` infix in `boards/` is load-bearing and case-sensitive;
-the flasher builds its URLs from it.
-
-### 3. Create Flash Instructions
-
-One `<ENV>-FLASH_INSTRUCTIONS.txt` per board. The filesystem offset differs
-between the 8MB and 16MB layouts (`0x410000` vs `0x610000`), so it is read from
-that board's partition CSV rather than copied from another board's file.
-
-### 4. Commit Binaries to Repository
-
-```bash
-# IMPORTANT: Binaries in boards/ must be committed to work with web flasher
-git add -f release/vX.Y.Z/boards/*.bin
-git add release/vX.Y.Z/RELEASE_NOTES.md
-git add release/vX.Y.Z/*FLASH_INSTRUCTIONS.txt
-git commit -m "Add vX.Y.Z release binaries for web flasher"
-git push origin main
-```
-
-### 5. Upload to GitHub Release
-
-```bash
-gh release upload vX.Y.Z \
-  release/vX.Y.Z/*.bin \
-  release/vX.Y.Z/*FLASH_INSTRUCTIONS.txt \
-  release/vX.Y.Z/Supported_Boards.txt \
-  release/vX.Y.Z/RELEASE_NOTES.md
-```
-
-Note this uploads the root-level binaries only. The `boards/` copies are served
-from the repository, not from release assets, so they are committed rather than
-uploaded.
-
-## Hotfix Process (Silent Update)
-
-For bug fixes that don't warrant a new version number:
-
-### 1. Fix the Bug
-
-Make code changes and test thoroughly.
-
-### 2. Rebuild Affected Binaries
-
-Only rebuild what changed (usually just littlefs.bin for web interface fixes):
-
-```bash
-python tools/package_release.py --version vX.Y.Z
-```
-
-### 3. Update Release Binaries
-
-The packaging script overwrites both copies for every board, so there is nothing
-to do by hand. If only the web UI changed, the firmware binaries will be
-byte-identical anyway and `git add` picks up just the filesystem images.
-
-### 4. Commit and Upload
-
-```bash
-git add -f release/vX.Y.Z/boards/*.bin
-git add -f release/vX.Y.Z/*.bin
-git commit -m "Hotfix: <brief description> for vX.Y.Z"
-git push origin main
-
-# Replace GitHub release assets
-gh release upload vX.Y.Z release/vX.Y.Z/*-littlefs.bin --clobber
-```
-
-## Web Flasher Integration
-
-The web flasher at https://fpvgate.xyz expects:
-
-### URL Pattern
-```
-https://raw.githubusercontent.com/LouisHitchcock/FPVGate/main/release/vX.Y.Z/boards/BOARD-FLASH_SIZE-TYPE.bin
-```
-
-Or through the website proxy:
-```
-https://fpvgate.xyz/firmware/vX.Y.Z/boards/BOARD-FLASH_SIZE-TYPE.bin
-```
-
-### File Names Must Match
-
-`<Environment>-<Size>-<part>.bin`, case-sensitive, for each of the five
-environments in the table at the top and each of `bootloader`, `partitions`,
-`firmware`, `littlefs`. For example:
-
-- `ESP32S3-8MB-firmware.bin`
-- `FPVGateAIO-8MB-littlefs.bin`
-- `XIAOS3Plus-16MB-partitions.bin`
-
-### Testing Checklist
-
-Before tagging:
-- [ ] `lib/VERSION/version.h` has the right version **and an empty stage**
-- [ ] `cd tests && npx jest` passes
-- [ ] Every shipping environment builds, from PowerShell on Windows
-- [ ] `tools/concurrent_load.py` passes on each board that has hardware
-- [ ] The device self test (`/api/selftest`) passes on each board
-
-After releasing:
-- [ ] Visit https://fpvgate.xyz/flasher.html
-- [ ] Select new version from dropdown
-- [ ] For each of the five boards, verify all 4 files are found
-- [ ] Test flashing on actual hardware
-- [ ] Confirm the flashed device reports the expected version at `/version`
-- [ ] Verify GitHub release has all individual binaries as assets
-- [ ] Check that release notes are correct
-
-## Troubleshooting
-
-### Web Flasher Can't Find Binaries
-- **Problem**: 404 errors when trying to flash
-- **Solution**: Ensure binaries are committed to `release/vX.Y.Z/boards/` in the repository
-- **Verify**: Check https://github.com/LouisHitchcock/FPVGate/tree/main/release/vX.Y.Z/boards
-
-### Wrong File Names
-- **Problem**: Binaries have wrong naming convention
-- **Solution**: Rename files to match exact pattern above (case-sensitive)
-- **Key**: Must include the flash size, `-8MB-` or `-16MB-`, in boards/ directory files
-
-### Release Assets Not Uploading
-- **Problem**: GitHub Actions fails to create release
-- **Solution**: Check workflow logs, ensure tag is pushed, verify GITHUB_TOKEN permissions
-
-## Version Numbering
-
-Follow Semantic Versioning (SemVer):
-- **Major (X.0.0)**: Breaking changes, major new features
-- **Minor (x.Y.0)**: New features, backwards compatible
-- **Patch (x.y.Z)**: Bug fixes, no new features
-
-Examples:
-- v1.5.3 → v1.5.4 (bug fix)
-- v1.5.4 → v1.6.0 (new feature)
-- v1.6.0 → v2.0.0 (major rewrite/breaking changes)
+Historical notes under `release/` describe those releases. They are not
+current build instructions; use this guide and the current target files.
