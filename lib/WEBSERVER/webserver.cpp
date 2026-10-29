@@ -640,6 +640,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         events.send(timingPayload, "c5Timing");
         }
         C5LapEvent lap;
+        bool lapTaken = false;
         while (c5MultiPilot->takeLap(lap)) {
             JsonDocument lapDoc;
             lapDoc["pilot"] = lap.pilot;
@@ -649,6 +650,19 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             String lapPayload;
             serializeJson(lapDoc, lapPayload);
             events.send(lapPayload.c_str(), "c5Lap");
+            lapTaken = true;
+        }
+        // The gate's own lap flash, as an RX5808 lap gives (LapTimer), with
+        // or without a browser open. Once per batch: laps taken together are
+        // one flash, and the webhook is not sent several times at once.
+        if (lapTaken) {
+            if (led) led->on(200);
+#ifdef HAS_RGB_LED
+            if (g_rgbLed) g_rgbLed->flashLap();
+#endif
+            if (webhooks && conf->getGateLEDsEnabled() && conf->getWebhookLap()) {
+                webhooks->triggerLap();
+            }
         }
     }
     // A reboot asked for over HTTP. Deferred rather than immediate so the
