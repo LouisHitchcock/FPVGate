@@ -9598,6 +9598,83 @@ function switchSettingsSection(ev, sectionName) {
       }
     });
   }
+  if (sectionName === "elrs") loadElrsSettings();
+}
+
+// ---- ELRS backpack: race start and stop from a radio switch ----
+// The binding phrase is write-only; the gate keeps only the UID derived from it.
+
+// Outcomes are keys from the gate, or an Event Director error shown as-is.
+function elrsOutcome(result) {
+  const key = `settings.elrs.outcome.${result}`;
+  const text = i18n.t(key);
+  return text === key ? result : text;
+}
+
+async function elrsRequest(method, body) {
+  const response = await fetch("/api/elrs", { method, body, cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function elrsStatusText(data) {
+  const lines = [];
+  if (!data.enabled) lines.push(i18n.t("settings.elrs.status_off"));
+  else if (!data.configured) lines.push(i18n.t("settings.elrs.status_unpaired"));
+  else if (!data.apMode) lines.push(i18n.t("settings.elrs.status_needs_ap"));
+  else lines.push(i18n.t(data.active ? "settings.elrs.status_active" : "settings.elrs.status_inactive"));
+  if (data.active) {
+    const position = i18n.t(data.switchState === 1 ? "settings.elrs.switch_on" : data.switchState === 0 ? "settings.elrs.switch_off" : "settings.elrs.switch_unheard");
+    lines.push(`${i18n.t("settings.elrs.status_switch")}: ${position} (${data.switchMessages})`);
+    if (data.lastCommand) {
+      const command = i18n.t(`settings.elrs.command_${data.lastCommand}`);
+      const ago = i18n.t("settings.elrs.ago", { s: Math.round(data.lastCommandAgoMs / 1000) });
+      lines.push(`${i18n.t("settings.elrs.status_last")}: ${command}, ${elrsOutcome(data.lastResult)} (${ago})`);
+    }
+    if (data.foreign) lines.push(`${i18n.t("settings.elrs.status_foreign")}: ${data.foreign}`);
+  }
+  if (data.restartPending) lines.push(i18n.t("settings.elrs.restarting"));
+  return lines.join("\n");
+}
+
+async function loadElrsSettings(fill = true) {
+  const status = document.getElementById("elrsStatus");
+  try {
+    const data = await elrsRequest("GET");
+    if (fill) {
+      document.getElementById("elrsEnabled").checked = data.enabled;
+      document.getElementById("elrsRaceControl").checked = data.raceControl;
+      document.getElementById("elrsInvert").checked = data.invert;
+      document.getElementById("elrsPhrase").value = "";
+      document.getElementById("elrsForget").checked = false;
+    }
+    document.getElementById("elrsSave").disabled = !!data.restartPending;
+    status.textContent = elrsStatusText(data);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function saveElrsSettings(event) {
+  event.preventDefault();
+  const button = document.getElementById("elrsSave");
+  const status = document.getElementById("elrsStatus");
+  button.disabled = true;
+  try {
+    const body = new URLSearchParams();
+    for (const [key, id] of [["enabled", "elrsEnabled"], ["raceControl", "elrsRaceControl"], ["invert", "elrsInvert"], ["forget", "elrsForget"]]) {
+      body.set(key, document.getElementById(id).checked ? "1" : "0");
+    }
+    const phrase = document.getElementById("elrsPhrase").value;
+    if (phrase) body.set("phrase", phrase);
+    await elrsRequest("POST", body);
+    document.getElementById("elrsPhrase").value = "";
+    status.textContent = i18n.t("settings.elrs.restarting");
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
+  }
 }
 
 // Keyboard shortcut for closing modal (ESC key)

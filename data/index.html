@@ -765,6 +765,9 @@
             <div class="settings-nav-item" data-settings-section="wifi" onclick="switchSettingsSection(event, 'wifi')">
               <span data-i18n="settings.tabs.wifi">WiFi & Connection</span>
             </div>
+            <div class="settings-nav-item" data-settings-section="elrs" onclick="switchSettingsSection(event, 'elrs')">
+              <span data-i18n="settings.tabs.elrs">ELRS Backpack</span>
+            </div>
             <div class="settings-nav-item" data-settings-section="webhooks" onclick="switchSettingsSection(event, 'webhooks')">
               <span data-i18n="settings.tabs.webhooks">Webhooks</span>
             </div>
@@ -1265,6 +1268,43 @@
                 <button onclick="resetWiFiSettings()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="settings.wifi.reset">Reset</button>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-top: 8px" data-i18n="settings.wifi.restart_note">Note: Device will restart after applying WiFi settings</div>
+            </div>
+
+            <!-- ELRS Backpack Section -->
+            <div id="settings-elrs" class="settings-section">
+              <h2 data-i18n="settings.elrs.title">ELRS Backpack</h2>
+              <form id="elrsForm" onsubmit="saveElrsSettings(event)">
+                <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                  <p style="margin: 0" data-i18n="settings.elrs.description">Start and stop a race from a switch on your ExpressLRS radio, through its backpack. No extra hardware. Needs the C5 receiver, and FPVGate in hotspot mode, which moves to Wi-Fi channel 1. USB networking and Ethernet keep working.</p>
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsEnabled" /> <span data-i18n="settings.elrs.enable">Enable ELRS backpack</span></label>
+                </div>
+                <div class="config-item">
+                  <label for="elrsPhrase" data-i18n="settings.elrs.phrase">Binding phrase:</label>
+                  <input type="password" id="elrsPhrase" maxlength="63" autocomplete="new-password" placeholder="Blank keeps the current pairing" data-i18n-placeholder="settings.elrs.phrase_placeholder" />
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsForget" /> <span data-i18n="settings.elrs.forget">Forget pairing (turn the backpack off first)</span></label>
+                </div>
+
+                <h3 data-i18n="settings.elrs.race_title">Switch race control</h3>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsRaceControl" checked /> <span data-i18n="settings.elrs.race_enable">Start and stop races from the radio</span></label>
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsInvert" /> <span data-i18n="settings.elrs.invert">Swap the Start and Stop positions</span></label>
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color)">
+                  <p style="margin: 0" data-i18n="settings.elrs.race_hint">On the radio, open the ExpressLRS Lua script, go to Backpack, and set DVR Rec to the switch you want. Never use your arm switch. Switch on starts the race, switch off stops it. The gate beeps when a race starts; no beep means it was refused, and the status below says why.</p>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 16px">
+                  <button type="submit" id="elrsSave" style="flex: 1" data-i18n="settings.elrs.save">Save and restart</button>
+                  <button type="button" onclick="loadElrsSettings(false)" style="flex: 1; background-color: var(--secondary-color)" data-i18n="settings.elrs.refresh">Refresh status</button>
+                </div>
+                <pre id="elrsStatus" role="status" aria-live="polite" style="white-space: pre-wrap; font-size: 13px"></pre>
+              </form>
             </div>
 
             <!-- Webhooks Section -->
