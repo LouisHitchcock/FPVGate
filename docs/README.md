@@ -21,6 +21,7 @@ not a declaration that every feature/board has been physically qualified.
 - [Gate-managed C5 race completion](GATE_RACE_COMPLETION.md)
 - [Gate-managed Event progression, unreleased source](GATE_EVENT_PROGRESSION.md)
 - [RotorHazard plugin integration](ROTORHAZARD_INTEGRATION.md)
+- [ELRS race control from a radio switch, unreleased source](ELRS_RACE_CONTROL.md)
 - [USB networking](USB_NETWORKING.md)
 - [Waveshare S3-ETH](WAVESHARE_S3_ETH.md)
 - [Battery monitoring](BATTERY_MONITORING.md)
