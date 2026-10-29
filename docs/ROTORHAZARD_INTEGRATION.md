@@ -12,20 +12,22 @@ The [FPVGate RotorHazard plugin](https://github.com/LouisHitchcock/fpvgate-rh-pl
 
 - **One node** for an RX5808 gate, **eight** for an ESP32-C5 multi-pilot gate
 - **RotorHazard sets** each node's frequency and EnterAt/ExitAt levels; the gate's own settings are copied into RotorHazard the first time it connects
-- **Live RSSI** for every node in RotorHazard's Sensor Tuning and Marshal page, 20 times a second, each reading the highest since the last so no pass's peak is missed
-- **Every pass** is timed by the gate at its RSSI peak and sent with the gate's own timestamp, so network delay doesn't affect lap times
-- **Race mirroring** (optional): the gate's own race starts, stops and clears with RotorHazard's, for its display, LEDs and speaker
+- **Live RSSI** for every node in RotorHazard's Sensor Tuning and Marshal page, nominally 20 times a second, with peak-held readings between updates
+- **Passes** use the gate's RSSI peak timestamps rather than network arrival times; clock synchronization and RF detection still affect accuracy
+- **Race mirroring** (optional): the gate's own race starts, stops and clears with RotorHazard's, for its local race/display (available outputs depend on the build)
 
 The plugin connects to the gate. There is nothing to turn on in the FPVGate web UI: the RotorHazard API is always available.
 
-If RotorHazard already has its own nodes, the gate's nodes are added after them (an 8-node timer plus an 8-pilot C5 gate gives 16 nodes). The gate is not a split timer.
+If RotorHazard already has its own nodes, the gate's nodes are added after them (an 8-node timer plus an 8-pilot C5 gate gives 16 nodes). Recent companion-plugin versions can also use additional gates for splits
+when the RotorHazard API supports it; see the plugin's own split setup below.
 
 ---
 
 ## Requirements
 
-- FPVGate firmware **v1.9.0** or later
-- FPVGate RotorHazard plugin **v2.1** or later
+- FPVGate **1.9.0 alpha hardware-interface builds**, including this Alpha 5 source
+- Compatible FPVGate RotorHazard plugin v2; Alpha 5 timing comparisons use
+  **2.3.2-rc.1**. Keep the tested gate/plugin pair together.
 - RotorHazard **4.4** or later (tested on 4.4.0 and 4.5.0-beta.1)
 - FPVGate and RotorHazard able to reach each other over the network: Wi-Fi (gate in Station mode), USB networking or Ethernet
 
@@ -36,7 +38,7 @@ If RotorHazard already has its own nodes, the gate's nodes are added after them 
 ### Step 1: Install the plugin
 
 1. Download the plugin from [github.com/LouisHitchcock/fpvgate-rh-plugin](https://github.com/LouisHitchcock/fpvgate-rh-plugin).
-2. Put the `fpvgate` folder in the `plugins` folder of RotorHazard's data directory (normally `~/rh-data/plugins`), so you have `plugins/fpvgate/__init__.py`.
+2. Find `custom_plugins/fpvgate` in the plugin source and put that `fpvgate` folder in the `plugins` folder of RotorHazard's data directory (normally `~/rh-data/plugins`), so you have `plugins/fpvgate/__init__.py`.
 3. Restart RotorHazard.
 
 ### Step 2: Put FPVGate on the network
@@ -71,7 +73,7 @@ All in **Settings > FPVGate** in RotorHazard.
 |---|---|
 | **FPVGate Address** | IP address or hostname of the gate. Restart RotorHazard after changing it. |
 | **Nodes** | Node count to use when the gate can't be reached at startup. Set automatically from the gate. |
-| **Run races on the gate too** | Starts, stops and clears the gate's own race with RotorHazard's, for its display, LEDs and speaker. |
+| **Run races on the gate too** | Starts, stops and clears the gate's own race with RotorHazard's, for its local display and enabled outputs. |
 | **Full-resolution RSSI** | C5 gates only: shows RSSI as 0-1023 instead of 0-255 for finer graphs. EnterAt/ExitAt switch to the same scale and snap to steps of 4. Restart RotorHazard after changing it. |
 
 ---
@@ -84,7 +86,7 @@ The plugin talks to the gate over HTTP:
 |---|---|
 | `GET /api/rh/info` | Firmware, board, frequency range, and every node's frequency and EnterAt/ExitAt levels |
 | `GET /api/rh/clock` | The gate's clock in microseconds since boot. Polled every 5 s; this also keeps the link alive |
-| `POST /api/rh/node` | `{"node", "frequency", "enter", "exit"}`: tune one node. Replies with the node as stored |
+| `POST /api/rh/node` | `{"node":0,"frequency":5732,"enter":125,"exit":95}`: tune one node. Replies with the node as stored |
 | `GET /api/rh/events` | Server-sent events (needs `Accept: text/event-stream`): `rhPass` for each pass, `rhRssi` 20 times a second |
 | `POST /api/rh/testPass?node=n` | A pass on node `n` (0-based) now, sent to RotorHazard exactly as a real one, to check a setup (a split gate, say) without flying. Doesn't touch the gate's own race. Only while the plugin is linked (409 otherwise) |
 
@@ -94,13 +96,24 @@ A pass starts when a node's RSSI rises above EnterAt and ends once it has stayed
 
 ### Clock synchronisation
 
-The plugin samples `/api/rh/clock` and keeps the offset from the fastest recent round trip. Passes carry the gate's timestamp, which the plugin converts to RotorHazard's clock with that offset. The error is at most half the round trip, shown as "clock within" in the FPVGate panel.
+The plugin samples `/api/rh/clock` and keeps the offset from the fastest recent round trip. Passes carry the gate's timestamp, which the plugin converts to RotorHazard's clock with that offset. The panel estimates synchronization uncertainty from the round trip.
+This is not a strict bound on RF timing: asymmetric delays and the peak estimator
+are separate sources of error.
 
 ### RSSI and levels
 
-Levels are 0-255 on every gate. A C5 gate measures RSSI as 0-1023 and compares it against `level x 4`; it sends both scales, and the plugin uses the full one when **Full-resolution RSSI** is on.
+Stored threshold levels are 0-255. A C5 gate measures RSSI as 0-1023 and compares it against `level x 4`; it sends both scales, and the plugin uses the full one when **Full-resolution RSSI** is on.
 
 ---
+
+## Split gates and version scope
+
+The [companion plugin's current README](https://github.com/LouisHitchcock/fpvgate-rh-plugin#split-times)
+describes additional split gates. It requires the appropriate RHAPI support
+(split timers 1.10; separate sensor tuning 1.11). Older RH installations may
+support lap nodes without those additions. Configure each gate's own
+thresholds and use the plugin documentation for the exact installed version;
+this is not the S3 Master/Slave chain mode.
 
 ## Troubleshooting
 

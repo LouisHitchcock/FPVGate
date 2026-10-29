@@ -1,8 +1,9 @@
 # C5 race completion on the gate
 
-Merged from `feature/gate-race-completion` into the refreshed Alpha 5 release,
-together with the consecutive-lap announcer fixes and six board packages.
-Hardware validation of the integrated images is still required.
+Integrated into the refreshed Alpha 5 source and six-board packaging scope,
+together with the consecutive-lap announcer fixes.
+Physical closed-browser completion, failed storage recovery and all-six-board
+qualification are still required; this docs pass does not claim those tests.
 
 ## Behaviour
 
@@ -31,9 +32,10 @@ existing behaviour.
   Reconnecting restores laps and the saved record ID without posting another
   race. Older browser tabs are also prevented from creating a duplicate through
   `/races/save` while the gate owns a current session.
-- Browser speech, notes and Events recording remain available with an open page.
-  **Events results/next-heat advancement still require a browser** and are the
-  next part of the roadmap. This change does not claim full Milestone 2 completion.
+- Browser speech and notes remain available with an open page. Unreleased alpha
+  source now also records Event results and loads the next heat on the gate;
+  see [Event progression](GATE_EVENT_PROGRESSION.md). Published Alpha 5 images
+  are unchanged, and physical qualification still blocks release sign-off.
 
 ## API
 
@@ -55,6 +57,8 @@ safe. `POST /timer/clearLaps` only accepts an idle, saved session.
 | `timestamp` | Current session ID, zero before a start/after Clear |
 | `savedTimestamp` | Successfully saved history ID, otherwise zero |
 | `saveFailed` | Persistence failed; Stop retries, Start/Clear are blocked |
+| `eventManaged` | Firmware supports gate-side Events; not an Event-mode switch |
+| `eventFailed`, `error` | Event-specific save failure and diagnostic message |
 | `stopReason` | `manual`, `maxLaps`, `heatTime`, or empty |
 | `finished` | Bitmask of racers who reached their lap limit |
 
@@ -63,10 +67,12 @@ A successful HTTP stop response acknowledges the command, not a completed save.
 
 ## Verification
 
-Run the native tests from PowerShell with a C++17 compiler on PATH:
+Install test dependencies with `npm install --prefix tests`. Run the native
+tests from the repository root in PowerShell with C++17 `g++` on PATH:
 
 ```powershell
 ./tests/native/build_race_control.ps1
+./tests/native/build_event_director.ps1
 npm test --prefix tests -- --runInBand
 ```
 
@@ -87,3 +93,6 @@ check exactly one history record with the expected laps and an accessible RSSI
 trace. Repeat with a heat limit, a DNS racer, manual Stop, two open tabs and a
 page reconnecting during a stop. Verify failed-write recovery on real storage
 and run the existing device/load tests. Keep existing history backed up.
+
+For the end-user flow see [Racing](USER_GUIDE.md#racing). For packaging and
+matching app/filesystem requirements see [Release process](RELEASE_PROCESS.md).

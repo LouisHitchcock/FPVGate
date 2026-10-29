@@ -1,19 +1,21 @@
 # FPVGate multi-pilot review
 
-Reviewed 7 October 2026. Scope: C5 receiver/timing, configuration, web race UI,
+Original review: 7 October 2026. Status reconciled with the Alpha 5 source
+on 25 October 2026. Scope: C5 receiver/timing, configuration, web race UI,
 calibration, SD recording, history and marshalling, plus LCD, audio, overlays,
 RotorHazard, transports and webhooks.
 
 ## Implemented
 
 - **Exclusive Multi mode.** C5 selection gives effective mode 3 in firmware and
-  UI. Personal/Master/Slave/RotorHazard roles and chained devices are unavailable.
+  UI. Personal/Master/Slave sync roles and chained devices are unavailable.
+  RotorHazard plugin v2 is a separate supported API workflow.
   Firmware ignores stale sync roles and rejects incoming remote laps. Returning
   to a conventional receiver restores conventional mode controls.
 - **Race view.** Pilot cards rank by crossing count, then cumulative time. They
   show total at the last crossing, laps excluding Gate 1, last/best lap and
-  finish state. The detailed lap matrix remains. The single-pilot counter and
-  manual-lap control are hidden for C5. One-racer C5 heats use the same view
+  finish state. The detailed lap matrix remains. The single-pilot counter is hidden for C5; current C5 race cards expose
+  pilot-specific manual lap controls. One-racer C5 heats use the same view
   without duplicate browser announcements.
 - **Calibration.** Setup steps, explicit selected-pilot control, capture actions
   above the graph, collapsible diagnostics and wider/mobile pilot cards.
@@ -58,17 +60,22 @@ stalls appear as gaps.
 
 | Priority | Area and evidence | Recommended change |
 | --- | --- | --- |
-| P1 | `data/script.js` owns C5 finish announcements, all-pilots-finished stop and heat timeout. | Move completion, timeout and automatic saving into a device-owned race controller. Closing a browser must not affect race rules or persistence. |
+| Integrated | `lib/RACECONTROL` owns C5 completion and persistence. | See [gate completion](GATE_RACE_COMPLETION.md); physical closed-browser/storage qualification remains. |
 | P1 | `lib/C5LINK/c5multipilot.h` caps each pilot at 64 crossings and pending events are bounded. | Define visible overflow behaviour and recovery from the authoritative snapshot. Stress-test simultaneous passes and SSE reconnects. |
-| P1 | `/api/c5/race` snapshots lap arrays while browser roster metadata comes from current configuration. | Snapshot identities, channels, thresholds and race rules at start, with a race ID on every event and response. |
+| Integrated | C5 race control freezes roster, identity, rules and track metadata at start. | Check current snapshot fields in `/api/c5/race`; do not reapply the old live-config roster assumption. |
 | P1 | `lib/LCD_UI`, `lib/AUDIO/audio.cpp`, `data/osd.js` and `lib/TRANSPORT` primarily consume single-pilot events. | Add a common pilot-tagged event contract, then onboard speech, LCD standings, USB clients and OSD pilot selection. Browser support does not imply these consumers support eight pilots. |
-| P2 | `lib/ROTORHAZARD/rotorhazard.cpp` uses one node index. | Add C5-slot-to-RH-seat mapping and a compatible companion-plugin contract before offering RH integration for Multi. It is currently disabled with C5. |
+| Integrated | Plugin v2 connects to `/api/rh/*` and consumes all C5 nodes. | See [RotorHazard](ROTORHAZARD_INTEGRATION.md); the old gate-to-RH module is not the current contract. |
 | P2 | `lib/WEBHOOK` exposes generic events; multi-pilot LEDs and announcements partly originate in the browser. | Emit pilot ID, colour, crossing timestamp and race ID from the device. Define ordering/deduplication for simultaneous crossings and multiple clients. |
-| P2 | Minimum lap time is now saved for recalculation; other historic race rules are not fully saved. | Persist heat format, max laps and DNS/DNF/finished status as a start-of-race snapshot. |
+| Follow-up | Gate-managed races freeze/store race settings and finish state. | Audit Event-format/DNS/DNF semantics and export/import completeness on real event sessions. |
 | P2 | JSON downloads omit the binary RSSI sidecar. | Add a complete race export/import bundle and test rollback on interrupted edits or SD failures. |
 | P2 | New UI strings are English; legacy timeline/distance widgets use leader or single-pilot fields. | Add translations, pilot-selectable playback and per-pilot distance/finish summaries. Distinguish race-wide results from the leader summary. |
 
 ## Verification and hardware follow-up
+
+The original checks below are point-in-time evidence. Native race-control,
+compiled config, announcer and reconnect tests have since been added; the
+[test runner and validation plan](../tools/VALIDATION_PLAN.md) define current
+coverage. They do not replace a physical multi-transmitter qualification.
 
 Frontend tests cover eight-slot decoding, timestamp gaps, corrupt captures,
 sparse slot mapping, edit retention, legacy typed fallback and saving all

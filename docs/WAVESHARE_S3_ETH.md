@@ -5,7 +5,10 @@ FPVGate with wired Ethernet as well as Wi-Fi and USB. It has an ESP32-S3R8
 (8MB PSRAM), 16MB flash, a W5500 10/100 Ethernet port, a microSD slot and an
 RGB LED, and can be powered over Ethernet with Waveshare's PoE module.
 
-Firmware: the `WaveshareS3ETH` build, from 1.9.0-Multi-Alpha-2. In the web
+Firmware: `WaveshareS3ETH`, one of the six Alpha 5 shipping targets.
+It uses `targets/partitions/custom_16mb.csv`: 3 MB app slots and a 2 MB
+LittleFS partition at `0x610000`. Include `boot_app0.bin` at `0xe000` in a
+full wired flash; use the generated release instructions. In the web
 flasher it is **Waveshare ESP32-S3-ETH (16MB, Ethernet)**.
 
 ## Wiring
@@ -25,8 +28,9 @@ Waveshare's pinout). The microSD card, Ethernet and RGB LED are on the board.
 | ESP32-C5 receiver: S3 RX from C5 TX | GPIO44 | 22 |
 | Ground | GND | 23, 28 or 33 |
 
-Power the RX5808 or the ESP32-C5 from 5V (VBUS, pin 40, when powered over USB)
-and connect its ground to the board's.
+Power a supported C5 development board from its 5V/VUSB input (VBUS pin 40
+on the S3-ETH when USB-powered), and share ground. Match an RX5808 carrier's
+input supply to its regulator specification. All signal pins are 3.3V logic.
 
 Avoid GPIO0, GPIO3, GPIO45 and GPIO46 (they decide how the chip boots) and
 GPIO33 to GPIO37 (used by the PSRAM).
@@ -50,9 +54,16 @@ serial port, but gets no address on it while the cable is in. The header's
 connection indicator shows the Ethernet address. For RotorHazard, enter the
 gate's Ethernet address in the FPVGate plugin's settings.
 
+## Onboard resources and limitations
+
+The onboard SD mapping is CS4/SCK7/MOSI6/MISO5; RGB data is GPIO21 with one LED.
+W5500 uses MOSI11/MISO12/SCLK13/CS14/INT10/RST9. Battery GPIO2 needs an external
+divider and a custom `ENABLE_BATTERY_TEST` build for monitoring; stock shipping
+flags do not enable it. There is no I2S speaker in this target.
+
 ## Status
 
-Tested from 1.9.0-Multi-Alpha-3 with an ESP32-C5 receiver over Ethernet: OTA
+Historical hardware evidence, not a new test in this docs pass: tested from 1.9.0-Multi-Alpha-3 with an ESP32-C5 receiver over Ethernet: OTA
 updates, C5 firmware updates through the gate, and an overnight run alongside
 RotorHazard. Use Alpha-3 or later: earlier builds receive at about 10 KB/s over
 Ethernet, too slow for OTA updates.

@@ -1,184 +1,106 @@
-# FPVGate Tools
-Python utility scripts for voice generation and SD card language pack packaging.
+# FPVGate tools
 
-## Prerequisites
-```bash
-pip install -r ../requirements.txt
+Run the examples from the repository root on `V1.9.0-alpha`.
+Tools include voice generation, packaging, device load tests and offline
+timing diagnostics. Use each tool's `--help` for its actual arguments.
+
+## Voice generation
+
+Install `python -m pip install -r requirements.txt` and set
+`ELEVENLABS_API_KEY` before API generation. These scripts contact ElevenLabs
+and can consume quota:
+
+```sh
+python tools/generate_voice_files.py --language en --voice matilda
+python tools/generate_voice_files.py --language fr --voice default
 ```
 
-## Voice Generation
-### generate_voice_files.py
-Generates one voice pack with canonical folder naming.
+`generate_all_voices.py` generates the five English variants;
+`generate_sd_card_languages.py` generates English/French/Spanish/German.
+Outputs use canonical `SD_Card/voice_*` directories.
+[Generation guide](../docs/VOICE_GENERATION_README.md) and
+[playback mapping](../docs/MULTI_VOICE_SETUP.md).
 
-Usage examples:
-```bash
-python generate_voice_files.py --language en --voice matilda
-python generate_voice_files.py --language fr --voice default
+`generate_language_packs.py` packages existing files without API synthesis:
+
+```sh
+python tools/generate_language_packs.py --voice-root SD_Card --output-root release/v1.9.0-alpha-5 --languages en fr es de
 ```
 
-Output folders:
-- English voices: `SD_Card/voice_<voice>_en` (for example `voice_matilda_en`)
-- French: `SD_Card/voice_french_fr`
-- Spanish: `SD_Card/voice_spanish_es`
-- German: `SD_Card/voice_german_de`
+Always choose the output path: the retained default is `release/v1.7.3`.
+Outputs include `SD_Card_english_en.zip`, `SD_Card_french_fr.zip`,
+`SD_Card_spanish_es.zip` and `SD_Card_german_de.zip` plus staging folders.
+The `*_auto.py`/regeneration/upload scripts are specialized helpers; inspect
+their defaults before using them on customized packs or an attached device.
 
-### generate_voice_files_auto.py
-Non-interactive helper that runs `generate_voice_files.py` defaults.
+## Release packaging
 
-### generate_all_voices.py
-Generates all English voice variants in one run:
-- `SD_Card/voice_default_en`
-- `SD_Card/voice_rachel_en`
-- `SD_Card/voice_adam_en`
-- `SD_Card/voice_antoni_en`
-- `SD_Card/voice_matilda_en`
-
-## SD Card Language Pack Packaging
-### generate_sd_card_languages.py
-Generates multilingual voice folders directly in `SD_Card`:
-- `voice_default_en`
-- `voice_french_fr`
-- `voice_spanish_es`
-- `voice_german_de`
-
-### generate_language_packs.py
-Builds release-ready language pack folders and ZIP archives in `release/v1.7.3`.
-
-Generated staging folders:
-- `sd_card_english_en`
-- `sd_card_french_fr`
-- `sd_card_spanish_es`
-- `sd_card_german_de`
-
-Generated ZIPs:
-- `SD_Card_english_en.zip`
-- `SD_Card_french_fr.zip`
-- `SD_Card_spanish_es.zip`
-- `SD_Card_german_de.zip`
-
-Usage:
-```bash
-python generate_language_packs.py
+```sh
+python tools/package_release.py --version vX.Y.Z-alpha-N
 ```
 
-## Voice File Layout
-Each voice folder contains files like:
-```text
-voice_<...>/
-├── arm_your_quad.mp3
-├── starting_tone.mp3
-├── race_complete.mp3
-├── race_stopped.mp3
-├── gate_1.mp3
-├── lap_1.mp3
-├── ...
-├── num_0.mp3
-├── ...
-├── point.mp3
-└── test_sound_<pilot>.mp3
-```
-
-## Notes
-- ElevenLabs API key is read from `ELEVENLABS_API_KEY`.
-- Scripts are compatible with Windows PowerShell and Linux shells.
-- Legacy `sounds_*` folder naming is deprecated in tooling output.
-
-## See Also
-- `../docs/VOICE_GENERATION_README.md`
-- `../docs/MULTI_VOICE_SETUP.md`
-- `../docs/SD_CARD_MIGRATION_GUIDE.md`
+This builds app/filesystem for the six shipping boards, writes three binary
+layouts, board instructions and the shared `boot_app0.bin`.
+It validates version/environment names and requires every image and partition
+offset before writing a release directory, then generates `SHA256SUMS` across
+all delivered layouts. It does not publish a release or generate source provenance.
+See [Release process](../docs/RELEASE_PROCESS.md), including the limitations
+of the manual Actions workflow and the Alpha 5 verifier.
 
 ## Validating a device
 
-Four harnesses, in the order you would use them. **If you have been asked to
-validate a device and nothing else, read `VALIDATION_PLAN.md` first** — it says
-what each layer proves and, more usefully, what it does not.
+Read [the validation plan](VALIDATION_PLAN.md) first. Durations are examples,
+not guarantees.
 
-| Script | Writes to device? | Duration | Use it to |
-|---|---|---|---|
-| `race_day_sim.py --components-only` | **yes** | ~2 min | check every component once |
-| `race_day_sim.py` | **yes** | 1-4 h | simulate a full race day |
-| `reliability_check.py` | no | 4 h+ | prove it stays up under load |
-| `stress_test.py` | no | minutes | concurrency and throughput |
-| `soak_test.py` | no | hours | liveness across both transports |
-| `concurrent_load.py` | no | ~1 min | will the UI actually open in a browser |
+| Tool | Device effects | Main purpose |
+| --- | --- | --- |
+| `race_day_sim.py --components-only` | Writes config/history/tracks, then cleanup | Functional component checks |
+| `race_day_sim.py` | Repeated writes and cleanup | Race/storage workflow |
+| `reliability_check.py` | Read load plus self-test's temporary writes/buzzer | Sustained reachability/integrity |
+| `stress_test.py` | Read load | Mixed concurrent requests |
+| `soak_test.py` | Read load | Liveness and bursts |
+| `concurrent_load.py` | Read load | Synchronized startup asset requests |
 
-All of them take `--usb <gate ip> --bind <host ip>` and/or `--wifi <gate ip>`, and
-need at least one. The gate is always `192.168.7.1` over USB; `--bind` is your
-own address on the USB network adapter, normally `192.168.7.2`. **Without
-`--bind`, USB requests can leave via the wrong interface and appear to fail.**
+Most load tools accept `--usb`/`--wifi` and optional `--bind`. The exception
+is `concurrent_load.py`, which uses `--host`. `--bind` names your host adapter
+address, not the gate, and is normally unnecessary when routes are correct.
+USB is `192.168.7.1` only on enabled builds. S3-ETH with Ethernet link up needs
+its Ethernet IP instead.
 
-Every one of them exits `0` for pass, `1` for fail, `2` for could-not-run.
-Exit `2` is not a firmware failure — it means the check never got far enough to
-judge, usually a wrong address or an unplugged cable.
+Examples (replace the Wi-Fi/IP values with your device):
 
-### Start here
-
-```
-# 1. Is the device healthy and is every component working?   ~2 min
-python tools/race_day_sim.py --usb 192.168.7.1 --bind 192.168.7.2     --wifi 192.168.0.225 --i-know-this-writes --components-only
-
-# 2. Does it stay up under sustained load?                    4 h
-python tools/reliability_check.py --usb 192.168.7.1 --bind 192.168.7.2     --wifi 192.168.0.225 --duration 14400
+```sh
+python tools/concurrent_load.py --host 192.168.7.1 --rounds 8
+python tools/reliability_check.py --usb 192.168.7.1 --duration 14400
+python tools/race_day_sim.py --wifi 192.168.0.225 --i-know-this-writes --components-only
 ```
 
-Step 1 must pass before step 2 is worth starting.
+The race-day tool requires its write acknowledgement, even for
+`--components-only`. Back up real results and use a bench device.
+Cleanup aims to remove its generated data; it is not a guarantee that
+interrupted runs cannot leave artifacts. The legacy race-day workflow is
+not a complete C5 gate-managed/Events test: use native tests and the
+[physical C5 checklist](../docs/GATE_RACE_COMPLETION.md#verification) too.
 
-### race_day_sim.py
+Check the tool's exit code and actual report. Do not assume every tool uses
+the same 0/1/2 exit-code scheme: `concurrent_load.py` returns 0/1, for example.
 
-Drives real heats — start timer, post laps, stop, save — then verifies the race
-persisted, the RSSI sidecar was written and serves correctly, lap editing
-recalculates the statistics, history is ordered newest-first, and deletion
-removes both race and sidecar. Also checks config round-trips and that both
-transports serve identical data.
+## Reliability and transfer integrity
 
-**This creates and deletes races.** It refuses to run without
-`--i-know-this-writes`, and removes everything it created afterwards, including
-on Ctrl-C. Do not point it at a gate holding results that matter.
+[The runbook](RELIABILITY_RUNBOOK.md) explains thresholds and reporting.
+An HTTP 200 with an incomplete body is a failed transfer, so the load tools
+check Content-Length. Concurrent page bursts can expose memory/queue faults
+that sequential probes miss. A clean short run is not proof that intermittent
+failures are absent.
 
-### reliability_check.py
+## Offline timing diagnostics
 
-Read-only. Preflight, the device's own 18-check self test, an endpoint probe,
-then hours of sustained mixed load with liveness probing. Reaches its own
-PASS/FAIL verdict against explicit criteria. See `RELIABILITY_RUNBOOK.md` for
-running it unattended and what to report back.
+`rh_timing_diagnostics.py`, `rh_usb_poll_diagnostics.py` and related helpers
+compare controlled input paths. They need the documented separate RH/C5MK
+sources for cross-project tests. Do not confuse them with RF/device orchestration.
+See [the investigation](../docs/RH_POST_SOAK_INVESTIGATION.md) and
+[native harnesses](../tests/native/README.md).
 
-Safe against a gate with real race data, since it mutates nothing.
-
-### stress_test.py
-
-Concurrency and throughput across both transports at once, verifying every
-response against its `Content-Length`. Useful for comparing USB against WiFi, or
-for reproducing load-dependent faults quickly.
-
-### soak_test.py
-
-Long liveness watch: probes both transports on an interval, with periodic bursts
-of race-shaped traffic, and reports outages and whether they recovered unaided.
-
-### concurrent_load.py
-
-Fetches every startup asset simultaneously, several times over, exactly as a
-browser does on a cold load. Fast, read-only, and the first thing to run if a
-board serves assets perfectly one at a time but still will not open in a
-browser.
-
-This catches something the others miss. On a DevKitC-1 the sequential failure
-rate was about 1 in 1350 requests, which `soak_test.py` and
-`reliability_check.py` both passed; the same assets fetched concurrently failed
-six page loads out of eight. `stress_test.py --workers 3` comes closest, but its
-workers loop over random assets independently, which is sustained mixed traffic
-rather than the synchronised burst that a page load actually is.
-
-Run this before a release on every board, not just the one on the bench. The
-failure is memory- and buffer-dependent, so a board without PSRAM can fail it
-while a board with PSRAM passes on identical firmware.
-
-### Why Content-Length is checked everywhere
-
-The RNDIS transmit stall presents as a response body that stops partway with
-**HTTP 200 already sent**. A status-only check reports success on exactly the
-fault being hunted, so every harness compares bytes received against the declared
-length. For the same reason the load mixes are weighted towards large transfers:
-small requests keep working right through a stall.
+Native software equivalence, live/Marshal consistency and absolute RF timing
+accuracy are distinct measurements. Diagnostic EMA bypass is not a shipping fix.
 

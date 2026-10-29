@@ -1,10 +1,10 @@
 # ESP32-C5 multi-pilot receiver: user guide
 
 FPVGate can use an ESP32-C5 as its receiver instead of an RX5808. One C5
-watches up to **eight pilots at once**, reading each pilot's signal about
-**1000 times a second**, continuously: the same rate RotorHazard reads one
-pilot per receiver. FPVGate (the ESP32-S3) runs the lap timing, the web app,
-the announcer and race history as usual.
+watches up to **eight pilot slots**, time-slicing one RF receiver and typically
+reading each pilot about **1000 times a second**. This is a scan-rate figure,
+not an absolute timing-accuracy specification. FPVGate (the ESP32-S3) runs lap
+timing, the web app and race history; announcements run in the browser.
 
 You can use it for a single quad on one channel, or for multi-pilot races
 with up to eight pilots.
@@ -14,7 +14,8 @@ with up to eight pilots.
 - An FPVGate S3 timer on one of the six Alpha 5 targets: XIAO S3, S3-ETH,
   DevKitC-1 (8MB), FPVGate AIO, Solo or C5MK AIO.
 - An ESP32-C5 board flashed with
-  [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK) 1.2.1 or later.
+  [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK) 1.2.1 or later for the documented multi-pilot workflow. The Alpha 5
+  timing investigation used 1.2.4-rc.1; record the actual receiver version.
   The C5MK AIO has a separate integrated XIAO C5 receiver; use XIAO C5 firmware.
 - Four wires for a separate receiver, joining TX to RX and sharing ground:
 
@@ -31,7 +32,7 @@ with up to eight pilots.
 For example, XIAO S3 D3 connects to XIAO C5 D4, and S3 D4 connects to C5 D5.
 The D-labels on the two boards do not mean the same GPIO numbers.
 
-**Power the C5 from 5V/VUSB, not the S3's 3V3 regulator.** Join grounds;
+**Power a supported C5 development board from 5V/VUSB, not the S3's 3V3 regulator.** Join grounds;
 signal pins are 3.3V logic only. Never connect 5V to a signal pin.
 With separate USB supplies, share ground and leave the 5V link disconnected.
 Disconnect power before changing wiring.
@@ -113,7 +114,8 @@ times while a race runs.
 
 ## Racing
 
-With C5 selected, the device uses **Multi** mode exclusively. Personal,
+On C5MK AIO the receiver selection is fixed to C5. With C5 selected,
+the device uses **Multi** mode exclusively. Personal,
 Master and Slave roles are unavailable; C5 devices cannot be daisy-chained.
 This applies even when only one pilot races. To race in RotorHazard, use the
 [RotorHazard plugin](ROTORHAZARD_INTEGRATION.md), which gives each pilot a node.
@@ -149,7 +151,9 @@ and Clear until Stop retries successfully. More than 63 real laps is rejected;
 Gate 1 uses the remaining crossing slot. A DNS racer never reaches max laps,
 so configure a heat limit or use manual Stop.
 
-Events result recording/next heat and browser speech still need an open page.
+Unreleased source now handles Event result recording/next-heat loading on the
+gate; published Alpha 5 still needs a page for those steps. Browser speech
+continues to require a page. See [Event progression](GATE_EVENT_PROGRESSION.md).
 Other receiver modes keep their previous browser stopping/saving behavior.
 These integrated builds still need physical closed-browser/storage testing.
 
@@ -158,7 +162,8 @@ These integrated builds still need physical closed-browser/storage testing.
 - **Gate 1**: the time from the start to the pilot's first pass.
 - After that, each lap runs from one pass to the next.
 - Passes quicker than the **minimum lap time** (Settings) are ignored.
-- Each pass is timed at its strongest point, to the nearest millisecond or so.
+- Each pass uses its sample-derived peak timestamp. A pass closes after
+  300 ms below Exit. Timestamp resolution is not measured RF accuracy.
 
 ### Multi-pilot races
 
@@ -206,8 +211,8 @@ works with the RX5808 and stays blank with the C5; use the window.
 | What you see | What to check |
 |---|---|
 | "No live data from FPVGate yet" | Receiver Module is ESP32-C5 and the configuration was saved. |
-| "No reply from the C5" | Wiring (D3 → GPIO4, D4 ← GPIO5, GND) and C5 power: the C5 must be powered from 5V, not the S3's 3V3 pin. |
-| Mode shows **Slots** | The C5 has older firmware: about 116 readings per pilot per second instead of 1000. Update the C5. |
+| "No reply from the C5" | Use the board-specific TX/RX table above: XIAO C5 uses D4/GPIO23 and D5/GPIO24; C5-Zero uses GPIO4/5. Check common ground and C5 power. |
+| Mode shows **Slots** | The C5 has older firmware: lower per-pilot rates than scan mode. Update the C5. |
 | Per pilot far below 1 kHz | Fewer pilots read faster; with eight it should be close to 1 kHz. Check the link figures for errors. |
 | Seq gaps rising | Occasional single gaps are harmless. Steady increases point to wiring or interference on the link. |
 | A pilot never laps | Its Race box, its Enter threshold (must be below the pass peak), and the minimum lap time. |

@@ -23,11 +23,16 @@ single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
 events with heats and seeding, or a RotorHazard race. No transponders, no
 Raspberry Pi: open the gate in any browser and fly.
 
+This branch reports **1.9.0-alpha-5**. It is evaluation firmware; full
+six-board, independent multi-transmitter and storage-failure qualification is
+not complete. [Documentation index](docs/README.md) lists the current guides
+and separates historical notes from operating procedures.
+
 ## Why FPVGate
 
 | | |
 |---|---|
-| **Industry-leading timing accuracy** | On average, FPVGate's maximum lap-time deviation is 20 ms lower than an 8-node RX5808 timer's. Every pass is timed at the peak of the signal, and the ESP32-C5 timestamps each pilot's readings about 1000 times a second. |
+| **Sample-timestamped timing** | C5 passes use receiver sample timestamps rather than network arrival time. Typical eight-slot scan rates are about 1 kHz per pilot; physical timing accuracy depends on RF conditions and remains under qualification. |
 | **Affordable** | Built on ESP32-S3 boards and off-the-shelf receivers, with free firmware you flash from your browser. Or buy a ready-made gate from the [shop](https://fpvgate.xyz/shop.html). |
 | **Scales with your group** | One pilot on an RX5808 gate, up to eight from one ESP32-C5, Event Mode for club days, and RotorHazard for bigger events. |
 | **Event Mode** | Pilot roster, groups, race formats, heat scheduling, and Elo or lap-time seeding, saved on the gate. |
@@ -134,16 +139,19 @@ Download your board's files from the
 esptool.py --chip esp32s3 --port COM3 write_flash -z \
   0x0 [BOARD]-bootloader.bin \
   0x8000 [BOARD]-partitions.bin \
+  0xe000 boot_app0.bin \
   0x10000 [BOARD]-firmware.bin \
   0x410000 [BOARD]-littlefs.bin
 ```
 
-The Waveshare ESP32-S3-ETH (16 MB) puts the filesystem at `0x610000`.
+Use the release's board-specific flash instructions. `boot_app0.bin` selects
+app0 after a previous OTA update. The Waveshare ESP32-S3-ETH (16 MB) puts the
+filesystem at `0x610000`; do not copy the 8 MB offset to that board.
 
 Or build with [PlatformIO](https://platformio.org/):
 
 ```bash
-git clone https://github.com/LouisHitchcock/FPVGate.git
+git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
 pio run -e ESP32S3 -t upload      # ESP32-S3-DevKitC-1 (8 MB)
 pio run -e ESP32S3 -t uploadfs
@@ -297,6 +305,13 @@ RotorHazard integration.
 | [Development](docs/DEVELOPMENT.md) | Building from source and contributing |
 | [Repository layout](docs/REPOSITORY_LAYOUT.md) | Source, build configuration, images and integrations |
 | [Changelog](CHANGELOG.md) | Every release |
+
+For test evidence and its limits, see the
+[post-soak investigation](docs/RH_POST_SOAK_INVESTIGATION.md).
+C5 race completion/saving runs on the gate. Unreleased alpha source adds
+[gate-managed Event results and next-heat loading](docs/GATE_EVENT_PROGRESSION.md);
+published Alpha 5 images still require a page for Event progression. Speech
+continues to need an open browser page. Physical qualification remains open.
 
 ## What's new in 1.9.0
 

@@ -3,7 +3,8 @@
 Status: offline causes reproduced and physical USB stock/candidate/stock checks
 completed. The first-read adapter is not validated as a hardware fix and is not
 promoted. The S3 firmware, default peak estimator and RH upstream source remain
-unchanged. Work is on `fix/post-soak-timing-diagnostics`.
+unchanged. The original investigation used `fix/post-soak-timing-diagnostics`; its
+source tools and diagnostic environment are now present on `V1.9.0-alpha`.
 
 ## Preserved overnight evidence
 
@@ -216,9 +217,15 @@ SHA-256 `1c70297f128421b7728451e4c4aac36a639c0bdefec4991283d3ca4090de4e7b`.
 OTA verified the upload MD5; the firmware label, board, app size and filesystem
 layout were checked after reboot. Its internal XIAO C5 remains online on
 `1.2.4-rc.1`. No release artifacts, public repository, tags or flasher were
-updated. The diagnostic build and tests remain local, uncommitted work.
+updated. At the time of the experiment the diagnostic build and tests were local
+and uncommitted. Their later presence in alpha source does not change the
+recorded hardware measurements or make the probe a shipping target.
 
 ## Reproduce offline
+
+Run from the FPVGate repository root. These checks require separate local
+C5MK and RotorHazard source checkouts; configure their paths as below.
+Do not run RF/device orchestration merely to reproduce the offline tests.
 
 Build the S3 simulator with `tests/native/build_rh_timing_sim.sh`. Build C5 USB
 from the 1.2.4-rc.1 sources using the command in `tools/rh_timing_diagnostics.py`.

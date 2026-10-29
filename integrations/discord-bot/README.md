@@ -14,3 +14,7 @@ change an already deployed worker or its GitHub webhook configuration.
 The avatar URL points to `images/logo/WhiteLogo.png` on `V1.9.0-alpha`. Publish the
 image at that path before deploying this version of the worker; adjust the ref
 if deploying from another branch.
+
+This service is independent of the device's LED webhooks and RotorHazard API.
+No bot deployment or webhook change is performed by building the alpha firmware.
+See [repository layout](../../docs/REPOSITORY_LAYOUT.md).

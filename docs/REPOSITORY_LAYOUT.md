@@ -9,15 +9,17 @@
 | `variants/` | Board pin definitions |
 | `scripts/` | PlatformIO build hooks |
 | `tools/` | Release packaging, voice generation and device test utilities |
-| `tests/` | Frontend tests and their Node dependencies |
-| `docs/` | User, hardware and developer documentation |
+| `tests/` | Jest production-logic tests, native firmware harnesses and offline diagnostics |
+| `docs/` | Current guides; start with [the index](README.md) |
+| `docs/archive/` | Superseded engineering records, clearly marked historical |
 | `images/` | Documentation banner, social preview, screenshots and source logos |
 | `integrations/` | Standalone services maintained separately from the device |
 | `release/` | Published firmware, filesystem images and release notes |
 | `.github/` | Workflows and repository automation |
 
 `platformio.ini` stays at the root as the build entry point. The root
-`requirements.txt` contains Python tooling dependencies. `boards.json` is retained
+`requirements.txt` contains voice-generation dependencies (ElevenLabs/dotenv),
+not PlatformIO, esptool or pyserial. `boards.json` is retained
 at its existing path as a board catalogue: it has no in-repository callers, but
 changing its URL would need a separate audit of possible external consumers.
 
@@ -31,6 +33,10 @@ external deployment status is unknown.
 Screenshots keep their dated/versioned subdirectories under `images/screenshots/`;
 logo exports live under `images/logo/`. Runtime logos in `data/` belong to the
 device filesystem and stay there.
+
+The six shipping targets and retained custom targets are listed in
+[Hardware](HARDWARE_GUIDE.md). USB networking and battery support are build
+capabilities, not properties implied by every ESP32-S3 pin table.
 
 The old `targets/custom_8mb.csv` was an unused, outdated 1 MB filesystem layout.
 The active root partition tables were moved without changing their contents,

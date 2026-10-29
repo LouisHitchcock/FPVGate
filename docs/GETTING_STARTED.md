@@ -1,611 +1,155 @@
-﻿# Getting Started with FPVGate
+# Getting started with FPVGate alpha
 
-Complete guide to building, flashing, and configuring your FPVGate lap timer.
+These instructions are for `V1.9.0-alpha`, currently reporting
+`1.9.0-alpha-5`. Alpha firmware is for evaluation; physical eight-pilot
+qualification and storage-failure testing are still incomplete.
+For day-to-day operation see the [user guide](USER_GUIDE.md).
 
-** Navigation:** [Home](../README.md) | [User Guide](USER_GUIDE.md) | [Hardware Guide](HARDWARE_GUIDE.md) | [Features](FEATURES.md)
+## Choose hardware
 
----
+A ready-made FPVGate needs power and an appropriate SD voice pack. A DIY build
+needs an ESP32-S3 timer and either an RX5808 for one pilot or an ESP32-C5
+receiver for up to eight pilots. C5MK AIO uses its integrated C5 and fixes the
+receiver selection to C5.
 
-## Table of Contents
+The six Alpha 5 packages are `ESP32S3` (8 MB DevKitC-1),
+`SeeedXIAOESP32S3`, `FPVGateAIO`, `FPVGateSolo`, `FPVGateC5MKAIO` and
+`WaveshareS3ETH`. Pick firmware by the exact board identity, not just
+"ESP32-S3". [Hardware and wiring](HARDWARE_GUIDE.md) lists retained custom
+targets separately.
 
-1. [Hardware Requirements](#hardware-requirements)
-2. [Hardware Assembly](#hardware-assembly)
-3. [Software Setup](#software-setup)
-4. [Flashing Firmware](#flashing-firmware)
-5. [Initial Configuration](#initial-configuration)
-6. [First Flight](#first-flight)
-7. [Troubleshooting](#troubleshooting)
+Disconnect power before assembly. Check the selected board's GPIO mapping,
+receiver supply, common ground and 3.3 V logic. A C5 uses UART TX-to-RX;
+an RX5808 uses three tuning lines plus RSSI. Follow the module-specific
+[SPI modification guide](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)
+when needed. Do not connect an unscaled flight battery to an ADC.
 
----
+## Prepare the SD card
 
-## Option 1: Buy Pre-Built (FPVGate AIO)
+1. Format a suitable card as FAT32.
+2. Copy generated/downloaded `voice_*` folders to its root. A typical path is
+   `voice_default_en/arm_your_quad.mp3`.
+3. Insert the card with the gate powered off.
+4. Keep existing race files backed up when replacing firmware.
 
-If you'd rather skip the soldering, wiring, and flashing, the **FPVGate AIO** is a pre-built, plug-and-play device that's ready to use out of the box.
+Old `sounds_*` folders are compatibility paths, not the new install layout.
+See [SD setup](SD_CARD_MIGRATION_GUIDE.md) and
+[voice packs](MULTI_VOICE_SETUP.md).
 
-**[Buy FPVGate AIO](https://fpvgate.xyz/shop.html)**
+## Flashing firmware
 
-The AIO is designed for pilots who want to start timing laps without the hassle of sourcing components and assembling hardware. Just power it on, connect, and fly.
+### Method 1: Web flasher
 
-If you have an AIO, you can skip straight to [Initial Configuration](#initial-configuration).
+Open the [FPVGate flasher](https://fpvgate.xyz/flasher.html) in a browser with
+Web Serial support, normally desktop Chrome or Edge. Select the alpha/pre-release
+version explicitly and the exact board. Connect its USB data port, choose the
+COM/serial device and follow the flasher prompts. The flasher's listed versions
+depend on website publication; this branch alone does not publish a build.
 
----
+A separate C5 must also run the correct
+[C5MK firmware](https://github.com/LouisHitchcock/FPVGateC5MK) for its own board.
+Use the C5 flasher or the gate's supported C5 update flow; an S3 image cannot
+be used on a C5.
 
-## Option 2: Build Your Own (DIY)
+### Method 2: Downloaded files
 
-### Required Components
+Download the matching board's bootloader, partition table, firmware,
+LittleFS image and shared `boot_app0.bin` from the same release.
+Follow its `<BOARD>-FLASH_INSTRUCTIONS.txt`. For the `ESP32S3` 8 MB package,
+this one-line command works in PowerShell and POSIX shells:
 
-| Component | Specs | Purchase Links | Approx. Cost |
-|-----------|-------|----------------|--------------|
-| **[Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/)** (Recommended) | USB-C, 8MB Flash, Compact | [Seeed Studio](https://www.seeedstudio.com/), [Amazon](https://www.amazon.com) | $7-15 |
-| **[ESP32-S3-DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html)** | USB-C, 8MB Flash | [Espressif](https://www.espressif.com/en/products/devkits) | $10-15 |
-| **RX5808 Module** | 5.8GHz receiver with SPI mod | [Banggood](https://www.banggood.com) | $5-8 |
-| **MicroSD Card** | FAT32, 1GB+, Class 10 | Any retailer | $3-5 |
-| **MicroSD Card Module** | SPI interface | Amazon/eBay | $2-3 |
-| **5V Power Supply** | 18650 battery + boost converter | Various | $8-12 |
-
-**Total Core Cost:** ~$30-45
-
-### Optional Components
-
-| Component | Purpose | Cost |
-|-----------|---------|------|
-| **WS2812 RGB LEDs** | Visual feedback (1-2 LEDs) | $5-10 |
-| **Active Buzzer** | Audio beeps (3.3V-5V) | $1-2 |
-| **Enclosure** | Protection and mounting | $0-20 |
-| **Antenna** | Improved RSSI reception | $3-8 |
-
-### Tools Required
-
-- Soldering iron and solder
-- Wire strippers
-- Multimeter (for testing)
-- USB-C cable (data capable)
-- Computer (Windows, Mac, or Linux)
-
----
-
-## Hardware Assembly
-
-### Step 1: Prepare the RX5808 Module
-
-The RX5808 must be modified for SPI control. Follow this guide:
-
-**[RX5808 SPI Modification Guide](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)**
-
-**Key points:**
-1. Remove resistor R5 (enables SPI mode)
-2. Add wire jumpers for CH1, CH2, CH3
-3. Verify SPI pins are accessible
-4. Test with multimeter before connecting
-
-### Step 2: ESP32-S3 Pin Connections
-
-#### RX5808 Connection
-
-**[ESP32-S3-DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html) (8MB Flash):**
-```
-ESP32-S3        RX5808 Module
------------------------------
-GPIO4    ------ RSSI (analog output)
-GPIO10   ------ CH1 / DATA
-GPIO11   ------ CH2 / SELECT
-GPIO12   ------ CH3 / CLOCK
-GND      ------ GND
-5V (VBUS)------ +5V
+```sh
+esptool.py --chip esp32s3 --port COM3 --baud 460800 write_flash -z 0x0 ESP32S3-bootloader.bin 0x8000 ESP32S3-partitions.bin 0xe000 boot_app0.bin 0x10000 ESP32S3-firmware.bin 0x410000 ESP32S3-littlefs.bin
 ```
 
-**[ESP32-S3 Super Mini](https://www.espboards.dev/esp32/esp32-s3-super-mini/) (4MB Flash):**
-```
-ESP32-S3        RX5808 Module
------------------------------
-GPIO3    ------ RSSI (analog output)
-GPIO6    ------ CH1 / DATA
-GPIO7    ------ CH2 / SELECT
-GPIO4    ------ CH3 / CLOCK
-GND      ------ GND
-5V (VBUS)------ +5V
-```
+Replace `COM3` with the actual port. The command uses the esptool v4 command
+spelling; use the equivalent commands for your installed esptool version.
 
-** Important Notes:**
-- **DevKitC-1**: Uses GPIO4 for RSSI (GPIO3 is strapping pin)
-- **Super Mini**: Uses GPIO3 for RSSI (optimized pin layout)
-- **VBUS (5V)** - Not 3.3V! RX5808 requires 5V
-- Solder connections for reliability (no breadboard for final build)
+`boot_app0.bin` selects app0 after a wired flash; omitting it can leave a
+previously OTA-updated device booting its old app1. The S3-ETH filesystem is
+at `0x610000`, not `0x410000`. A Super Mini custom build uses `0x290000`.
+Never mix these layouts.
 
-#### MicroSD Card Module (Recommended)
+### Method 3: Build from source
 
-**[ESP32-S3-DevKitC-1](https://docs.keyestudio.com/projects/ESP32-S3/en/latest/1.Introduction.html):**
-```
-ESP32-S3        SD Card Module
------------------------------
-GPIO39   ------ CS (Chip Select)
-GPIO36   ------ SCK (Clock)
-GPIO35   ------ MOSI (Data In)
-GPIO37   ------ MISO (Data Out)
-GND      ------ GND
-3.3V     ------ VCC
-```
-
-**[ESP32-S3 Super Mini](https://www.espboards.dev/esp32/esp32-s3-super-mini/):**
-```
-ESP32-S3        SD Card Module
------------------------------
-GPIO8    ------ CS (Chip Select)
-GPIO2    ------ SCK (Clock)
-GPIO10   ------ MOSI (Data In)
-GPIO9    ------ MISO (Data Out)
-GND      ------ GND
-3.3V     ------ VCC
-```
-
-** SD Card Notes:**
-- Must be formatted as FAT32
-- Use 3.3V power (not 5V!)
-- Module should have voltage regulator
-- First boot will auto-copy audio files to SD
-
-#### RGB LED Strip (Optional)
-
-```
-ESP32-S3        WS2812 Strip
------------------------------
-VBUS (5V)------ +5V
-GND      ------ GND
-GPIO5    ------ Data In
-```
-
-**LED Configuration:**
-- Edit `lib/RGBLED/rgbled.h` to set LED count:
-  ```cpp
-  #define NUM_LEDS 2  // Change to 1 or 2
-  ```
-- Add 330O resistor on data line for stability
-- Keep strip short (1-2 LEDs max)
-
-#### Buzzer (Optional)
-
-```
-ESP32-S3        Active Buzzer
------------------------------
-GPIO6    ------ Positive (+)
-GND      ------ Negative (-)
-```
-
-**Buzzer Notes:**
-- Use active buzzer (not passive)
-- 3.3V-5V compatible
-- No resistor needed
-
-### Step 3: Power Supply
-
-**Option A: USB Power (Development)**
-- USB-C cable to ESP32-S3
-- Easy for testing
-- Not portable
-
-**Option B: Battery Power (Portable)**
-```
-18650 Battery (3.7V nominal)
-    ?
-5V Boost Converter (USB output)
-    ?
-ESP32-S3 VBUS pin (USB-C or 5V pin)
-```
-
-**Recommended Setup:**
-- 18650 battery holder
-- MT3608 boost converter (set to 5.0V)
-- XT60 or JST connector
-- Power switch
-- Add voltage monitoring to GPIO1 (battery sense)
-
-### Step 4: Physical Assembly
-
-**Enclosure Considerations:**
-1. **Ventilation** - ESP32-S3 generates heat
-2. **LED Visibility** - Mount LEDs where visible
-3. **Button Access** - Leave BOOT button accessible for flashing
-4. **SD Card Access** - Allow card removal without disassembly
-
-**Mounting Options:**
-- 3D printed case (STL files available in community)
-- Plastic project box
-- Custom PCB with integrated mounting
-
----
-
-## Software Setup
-
-### Prerequisites
-
-#### Option A: Flashing Prebuilt Firmware (Easiest)
-
-**Install esptool:**
-```bash
-pip install esptool
-```
-
-That's it! Download firmware from [Releases](https://github.com/LouisHitchcock/FPVGate/releases).
-
-#### Option B: Building from Source
-
-**Install Required Software:**
-
-1. **Visual Studio Code**
-   - Download: https://code.visualstudio.com/
-
-2. **PlatformIO Extension**
-   - Open VS Code
-   - Extensions (Ctrl+Shift+X)
-   - Search "PlatformIO IDE"
-   - Click Install
-
-3. **Python** (for esptool)
-   - Download: https://www.python.org/downloads/
-   - Check "Add Python to PATH" during install
-
----
-
-## Flashing Firmware
-
-### Method 1: Prebuilt Binaries (Recommended)
-
-**1. Download Firmware**
-
-Go to [Releases](https://github.com/LouisHitchcock/FPVGate/releases) and download:
-- `bootloader-esp32s3.bin`
-- `partitions-esp32s3.bin`
-- `firmware-esp32s3.bin`
-- `littlefs-esp32s3.bin`
-
-**2. Connect ESP32-S3**
-
-- Use data-capable USB-C cable
-- Connect to computer
-- Note the COM port (Windows: Device Manager ? Ports)
-
-**3. Flash Firmware**
-
-**Windows:**
-```bash
-esptool.py --chip esp32s3 --port COM3 --baud 921600 write_flash -z ^
-  0x0 bootloader-esp32s3.bin ^
-  0x8000 partitions-esp32s3.bin ^
-  0x10000 firmware-esp32s3.bin ^
-  0x410000 littlefs-esp32s3.bin
-```
-
-**Linux/Mac:**
-```bash
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash -z \
-  0x0 bootloader-esp32s3.bin \
-  0x8000 partitions-esp32s3.bin \
-  0x10000 firmware-esp32s3.bin \
-  0x410000 littlefs-esp32s3.bin
-```
-
-**4. Verify**
-
-You should see:
-```
-Connecting....
-Writing at 0x00000000... (100%)
-Hash of data verified.
-Leaving...
-```
-
-### Method 2: Build from Source
-
-**1. Clone Repository**
-
-```bash
-git clone https://github.com/LouisHitchcock/FPVGate.git
+```sh
+git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
+python -m pip install platformio
+pio run -e SeeedXIAOESP32S3
+pio run -e SeeedXIAOESP32S3 -t buildfs
+pio run -e SeeedXIAOESP32S3 -t upload
+pio run -e SeeedXIAOESP32S3 -t uploadfs
 ```
 
-**2. Configure LED Count (if using external LEDs)**
+Use your board's environment from [Development](DEVELOPMENT.md#build-targets).
+On Windows run builds in PowerShell. Uploading a filesystem replaces that
+partition: export saved races and traces first. Config lives in EEPROM; it
+is not a `config.json` inside the web image.
 
-Edit `lib/RGBLED/rgbled.h`:
-```cpp
-#define NUM_LEDS 2  // Change to 1 or 2
-```
+### Upgrades and recovery
 
-**3. Build and Flash**
+From 1.7.x, use a full wired flash for the changed partition layout.
+For later compatible layouts, use Settings' OTA flow with a matching board
+image and update both app and filesystem when the release requires it.
+OTA cannot change the partition table. Back up before any full erase.
 
-**Using VS Code:**
-1. Open FPVGate folder in VS Code
-2. PlatformIO icon (left sidebar)
-3. Project Tasks ? ESP32S3 ? General ? Build
-4. Wait for "SUCCESS"
-5. Project Tasks ? ESP32S3 ? General ? Upload
-6. Project Tasks ? ESP32S3 ? Platform ? Upload Filesystem Image
+After flashing, power-cycle if normal USB operation does not return.
+If the firmware will not boot, hold BOOT while connecting/resetting as
+appropriate to the board, then retry flashing. A reset button alone does not
+always clear a persistent bootloader state.
 
-**Using Command Line:**
-```bash
-# For ESP32-S3-DevKitC-1 (8MB flash):
-pio run -e ESP32S3 -t upload
-pio run -e ESP32S3 -t uploadfs
+## Initial configuration
 
-# For ESP32-S3 Super Mini (4MB flash):
-pio run -e ESP32S3SuperMini -t upload
-pio run -e ESP32S3SuperMini -t uploadfs
-```
+1. Power the gate, join `FPVGate_XXXX` using `fpvgate1`, and open
+   `http://192.168.4.1`. `http://fpvgate.local` also works where mDNS is supported.
+   Stay on the network if the phone warns that it has no Internet.
+2. On a shipping USB-network build, Windows/Linux can instead open
+   `http://192.168.7.1` over native USB-C. A COM port is for flashing/debugging,
+   not for connecting the current web app. macOS users should use Wi-Fi.
+3. S3-ETH users can connect Ethernet and find the DHCP address in the router
+   or the System page. See [Ethernet setup](WAVESHARE_S3_ETH.md).
+4. Open Settings/Configuration. For RX5808 set the band/channel to the actual
+   transmitter frequency. For a C5 select **ESP32-C5 Multi-Pilot** unless the
+   C5MK AIO has already fixed that setting.
+5. Set pilot identity, minimum lap time, desired lap/heat limits and announcer.
+   In C5 mode configure pilot slots in Calibration and tick Race for entrants.
+6. Enable browser audio with a tap/click and test it. Voice packs play through
+   the browser device; stock alpha builds do not provide an I2S speaker.
+7. Wait for settings to save. Run Diagnostics' self-test and inspect failures;
+   unsupported capabilities can legitimately report Skip.
 
-### Common Flashing Issues
+## Calibration and first race
 
-**"Port doesn't exist"**
-- Use data-capable USB-C cable (not charge-only)
-- Try different USB ports
-- Check Device Manager (Windows) or `ls /dev/tty*` (Linux)
+For RX5808, record a quiet baseline and several real passes in Calibration;
+calculate thresholds, review them and save. Enter should be above background
+but below a real peak, with Exit lower. Minimum lap time must be shorter than
+your fastest real lap and long enough to reject duplicate detections.
 
-**"Timed out waiting for packet header"**
-- Disconnect RX5808 RSSI wire from GPIO4
-- Hold BOOT button while plugging in USB
-- Try lower baud rate: `--baud 115200`
+For C5, start with gain 30 and follow
+[per-pilot calibration](C5_MULTI_PILOT.md#setting-enter-and-exit). Do not retune,
+change gain or edit thresholds during a race. Wait for the saved confirmation.
 
-**"Flash size mismatch"**
-- Ensure you have ESP32-S3 with 8MB flash
-- Don't use ESP32 or ESP32-C3 binaries
-
----
-
-## Initial Configuration
-
-![Calibration](../images/screenshots/02-04-2026/RSSI%20Calibration.png)
-
-### Step 1: Connect to FPVGate
-
-**Power on your FPVGate device**
-
-**WiFi Connection (Default):**
-
-1. Look for WiFi network: `FPVGate_XXXX` (XXXX = last 4 digits of MAC)
-2. Connect using password: `fpvgate1`
-3. Open browser and go to:
-   - `http://fpvgate.local` (preferred)
-   - `http://192.168.4.1` (fallback)
-
-**USB Connection (firmware 1.8.0 and later):**
-
-1. Connect the gate to your computer with a USB-C cable
-2. Open a browser and go to `http://192.168.7.1`
-
-Nothing to install and nothing to configure — the gate presents itself as a
-network adapter. Windows and Linux only; macOS does not support it, so use WiFi
-on a Mac. WiFi keeps working at the same time.
-
-If nothing appears, **unplug the cable and plug it back in** — after a flash the
-board waits in its bootloader until power is removed. See
-[USER_GUIDE.md § USB troubleshooting](USER_GUIDE.md#usb-troubleshooting) if it
-still will not connect.
-
-### Step 2: Configure Your VTx Frequency
-
-1. Navigate to **Configuration** tab
-2. **Pilot Info** section:
-   - **Band & Channel**: Select to match your VTx
-   - Default is RaceBand 8 (5917 MHz)
-   - Frequency auto-calculates
-
-**Common Frequencies:**
-- RaceBand 1-8: 5658-5917 MHz
-- Fatshark 1-8: 5740-5880 MHz
-- Band E (DJI): 5705-5945 MHz
-
-3. Click **"Save Configuration"**
-
-### Step 3: Set Pilot Information
-
-**Pilot Info Section:**
-
-1. **Pilot Name**: Full name (used in voice callouts)
-2. **Pilot Callsign**: Short name (max 10 chars, for UI)
-3. **Phonetic Name**: How TTS pronounces your name
-   - Example: "Louis" ? "Louie"
-   - Example: "Xavier" ? "Zavier"
-4. **Pilot Color**: Choose your racing color
-
-**TTS Settings Section:**
-
-1. **Announcer Type**: Choose announcement style
-   - `Lap Time` - Announces each lap (recommended)
-   - `Beep` - Just beeps
-   - `2 Consecutive Laps` - Every 2 laps
-   - `3 Consecutive Laps` - Every 3 laps
-
-2. **Voice**: Select voice engine
-   - `ElevenLabs (Sarah)` - Default, energetic
-   - `ElevenLabs (Rachel)` - Calm
-   - `PiperTTS` - Lower latency
-
-3. **Enable Voice**: Click to test audio
-
-4. Click **"Save Configuration"**
-
-### Step 4: Run System Self-Test
-
-1. Navigate to **Configuration** tab
-2. Scroll to **System Diagnostics** section
-3. Click **"Run System Self-Test"**
-
-**Verify all tests pass:**
--  RX5808 RSSI Module
--  Storage (SD card or LittleFS)
--  WiFi/USB connectivity
--  Audio/Buzzer
--  RGB LEDs (if installed)
--  Configuration values
-
-**If tests fail**, see [Troubleshooting](#troubleshooting) section.
-
----
-
-## First Flight
-
-### Step 1: Calibrate RSSI Thresholds
-
-** Critical: Proper calibration is essential for accurate timing**
-
-1. **Warm up your VTx** (30 seconds minimum)
-2. **Position your drone** one gate distance away (~3-6 feet)
-3. Navigate to **Calibration** tab
-4. Watch the **RSSI graph** - note the peak value as you move drone to gate
-5. **Set Enter RSSI**: 2-5 points below observed peak
-6. **Set Exit RSSI**: 8-10 points below Enter RSSI
-7. Click **"Save RSSI Thresholds"**
-
-**Good Calibration Example:**
-```
-Observed peak: 150
-Enter RSSI: 145 (5 below peak)
-Exit RSSI: 135 (10 below enter)
-```
-
-**[Detailed calibration guide ?](USER_GUIDE.md#calibration)**
-
-### Step 2: Test Detection
-
-1. Stay in **Calibration** tab
-2. Fly your drone through the gate area
-3. Watch the RSSI graph:
-   - Should see single clean peak
-   - Peak should cross Enter threshold
-   - Should exit below Exit threshold
-
-**If you see multiple peaks or false triggers**, see [Calibration Tips](USER_GUIDE.md#calibration-tips).
-
-### Step 3: First Race
-
-1. Navigate to **Race** tab
-2. Click **"Start Race"**
-3. Wait for countdown and start beep
-4. Fly through the gate!
-5. Watch lap times appear in table
-6. Click **"Stop Race"** when finished
-
-> **Mobile Note:** Make sure your phone is NOT on silent mode or the starting beep won't play!
-
-**[Complete user guide ?](USER_GUIDE.md)**
-
----
+Start a short test race. The first pass is **Gate 1**; real laps run between
+subsequent passes. Check each pilot and save/reopen the result. In C5 mode the
+gate stops/saves at its limits even without a browser. Unreleased alpha source
+adds [gate-side Event progression](GATE_EVENT_PROGRESSION.md); published Alpha 5
+still needs a page for Event results/next heat. Speech always needs a page.
+Conventional receiver
+completion and automatic history saving retain their browser dependency.
 
 ## Troubleshooting
 
-### Hardware Issues
+| Problem | Check |
+| --- | --- |
+| Flasher cannot see board | Data cable, correct USB connector, another app holding the port, BOOT recovery |
+| Old version after flashing | Matching files and `boot_app0.bin` at `0xe000` |
+| Web page missing after app update | Matching LittleFS image and the installed partition layout |
+| Only a COM port over USB | Custom target without USB networking, USB-to-UART connector, or bootloader mode |
+| C5 offline | Its board firmware, crossed TX/RX, common ground and independent power budget |
+| No voice | Audio permission, selected voice directory, browser/phone volume |
+| C5 save failure | Keep power on, fix storage and retry Stop; do not Clear or reboot an unsaved race |
 
-**No WiFi Network Appearing**
-
-- Wait 15 seconds after power-on
-- Check 5V power supply voltage
-- Verify firmware flashed successfully
-- Check Serial Monitor for error messages
-
-**No RSSI Reading**
-
-- Verify RX5808 is powered (5V)
-- Check GPIO4 connection (RSSI pin)
-- Ensure RX5808 SPI mod is correct
-- Test with multimeter: RSSI pin should show ~1-3V
-
-**RGB LEDs Not Working**
-
-- Check 5V power to LED strip
-- Verify GPIO18 data connection
-- Ensure `NUM_LEDS` matches your setup
-- WS2812 LEDs need 5V (not 3.3V)
-
-**SD Card Not Detected**
-
-- Format as FAT32
-- Check wiring (use 3.3V, not 5V!)
-- Verify CS pin on GPIO39
-- Try different SD card (Class 10 recommended)
-
-### Software Issues
-
-**Can't Connect to Web Interface**
-
-- Try both URLs: `http://fpvgate.local` and `http://192.168.4.1`
-- Forget and reconnect to WiFi network
-- Clear browser cache
-- Try different browser
-
-**Voice Announcements Not Working**
-
-- Click "Enable Audio" in Configuration
-- Check browser allowed audio autoplay
-- Verify SD card has audio files (or will use fallback)
-- Test with "Generate Audio" button
-
-**Missing Laps**
-
-- Lower Enter RSSI threshold by 5 points
-- Ensure VTx warmed up (30 seconds)
-- Check band/channel matches your VTx
-- Increase minimum lap time if getting false laps
-
-**Too Many False Laps**
-
-- Increase Minimum Lap Time to 12-15 seconds
-- Raise Exit RSSI threshold
-- Move timer further from flight path
-- Reduce RF interference
-
-### Getting Help
-
-1. **Check documentation**: [User Guide](USER_GUIDE.md) | [Hardware Guide](HARDWARE_GUIDE.md)
-2. **Run self-test**: Configuration ? System Diagnostics
-3. **Check Serial Monitor**: For debug messages
-4. **GitHub Issues**: [Report bugs](https://github.com/LouisHitchcock/FPVGate/issues)
-5. **Community**: [GitHub Discussions](https://github.com/LouisHitchcock/FPVGate/discussions)
-
----
-
-![Calibration](../images/screenshots/02-04-2026/RSSI%20Calibration.png)
-
-## Multi-Timer Setup (Optional)
-
-If you have multiple FPVGate devices and want to race with multiple pilots:
-
-### Quick Setup
-
-1. **Connect all devices to same network**
-   - Either connect all to external WiFi, or
-   - Keep one device as AP, connect others to it
-
-2. **On the master device:**
-   - Go to Configuration ? WiFi & Connection ? Race Synchronization
-   - Add other devices' IP addresses
-   - Set this device's role to "Master"
-   - Set other devices to "Slave"
-
-3. **Test connections**
-   - Click "Test All Connections"
-   - Green checkmarks = ready to race
-
-4. **Start racing**
-   - Start race on master device
-   - All slaves will sync automatically
-   - All lap times appear on master's multi-pilot view
-
-For detailed setup instructions, see [Race Synchronization in User Guide](USER_GUIDE.md#race-synchronization-multi-timer).
-
----
-## Next Steps
-
- **Hardware assembled and tested**  
- **Firmware flashed successfully**  
- **Initial configuration complete**  
- **First flight tested**
-
-**Continue learning:**
-
- **[User Guide](USER_GUIDE.md)** - Master all features  
- **[Hardware Guide](HARDWARE_GUIDE.md)** - Advanced hardware tips  
- **[Features Guide](FEATURES.md)** - Explore capabilities  
- **[Development Guide](DEVELOPMENT.md)** - Contribute to the project
-
----
-
-**Need help? [Open an issue](https://github.com/LouisHitchcock/FPVGate/issues) or [start a discussion](https://github.com/LouisHitchcock/FPVGate/discussions)!**
+Next: [User guide](USER_GUIDE.md), [multi-pilot guide](C5_MULTI_PILOT.md),
+[RotorHazard](ROTORHAZARD_INTEGRATION.md) and [feature reference](FEATURES.md).
 

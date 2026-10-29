@@ -1,106 +1,41 @@
-# LilyGO T-Energy S3 - Wiring Diagram
+# LilyGO T-Energy S3 wiring
 
-**Expert mode - Integrated battery management**
+Alpha branch mapping from `lib/CONFIG/config.h`. Environment: `LilyGOTEnergyS3`.
+GPIO numbers are not physical header positions.
 
-## Pin Configuration
+## Pin configuration
 
+| Signal | Pin / GPIO |
+| --- | --- |
+| RX5808 RSSI | 4 |
+| RX5808 DATA / CH1 | 10 |
+| RX5808 SELECT / CH2 | 11 |
+| RX5808 CLOCK / CH3 | 12 |
+| SD CS / SCK / MOSI / MISO | 39 / 36 / 35 / 37 |
+| External status LED | 2 |
+| WS2812 data; count | 48; 2 LEDs |
+| Active buzzer | 5 |
+| Built-in battery ADC | 3 |
+
+## Board-specific notes
+
+This source target is not an Alpha 5 shipping package. It uses an 8 MB layout, Wi-Fi and CDC serial; USB networking is not enabled. The manufacturer's V1.0 board has 16 MB flash and 8 MB octal PSRAM, unlike the configured layout. Review the actual module's GPIO35–37 reservations before adding SD: the retained mapping must not be assumed safe on a PSRAM-equipped board. Battery is GPIO3, not GPIO4. Buzzer and RGB pins differ from DevKitC (6/5 on DevKitC versus 5/48 here). See [the detailed guide](../LILYGO_TENERGY_S3_WIRING.md) before assembling.
+
+## Power and setup
+
+Use a regulated board supply, common ground and 3.3 V signal levels.
+SD cards need 3.3 V at the card; check whether the breakout includes a regulator.
+Match an RX5808 carrier's VCC to its regulator/input specification.
+Optional buzzers must stay within the GPIO drive rating or use a transistor.
+There is no GPIO Wi-Fi/RotorHazard mode switch in this firmware.
+
+Build and upload both firmware and web assets from the repository root:
+
+```sh
+pio run -e LilyGOTEnergyS3 -t upload
+pio run -e LilyGOTEnergyS3 -t uploadfs
 ```
-T-Energy S3     RX5808           SD Card          Optional
-GPIO4    ────── RSSI             
-GPIO10   ────── CH1 (DATA)       
-GPIO11   ────── CH2 (SELECT)     
-GPIO12   ────── CH3 (CLOCK)      
-GPIO39   ────────────────────── CS
-GPIO36   ────────────────────── SCK
-GPIO35   ────────────────────── MOSI
-GPIO37   ────────────────────── MISO
-GPIO2    ─────────────────────────────────── LED (External)
-GPIO48   ─────────────────────────────────── WS2812 RGB LED
-GPIO5    ─────────────────────────────────── Buzzer (3.3V-5V)
-GPIO3    ─────────────────────────────────── Battery Voltage (Built-in)
-GPIO9    ─────────────────────────────────── Mode Switch
-GND      ────── GND           ─── GND      ─── GND
-5V       ────── +5V           ─── 5V       ─── 5V
-```
 
-## Component Requirements
-
-| Component | Required | Notes |
-|-----------|----------|-------|
-| **LilyGO T-Energy S3** | Yes | Integrated battery management |
-| **RX5808 Module** | Yes | 5.8GHz receiver ([SPI mod required](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)) |
-| **MicroSD Card** | Yes | FAT32, 1GB+ for audio storage |
-| **18650 Battery** | Optional | Built-in battery holder and charging |
-| **WS2812 RGB LEDs** | Optional | 1-2 LEDs for visual feedback (GPIO48) |
-| **External LED** | Optional | Single LED for basic status (GPIO2) |
-| **Active Buzzer** | Optional | 3.3V-5V for audio beeps (GPIO5) |
-| **Mode Switch** | Optional | LOW=WiFi, HIGH=RotorHazard mode (GPIO9) |
-
-## Pin Details
-
-### RX5808 Module
-- **RSSI (GPIO4)**: Analog signal strength input (same as DevKitC-1)
-- **CH1/DATA (GPIO10)**: SPI data line (same as DevKitC-1)
-- **CH2/SELECT (GPIO11)**: SPI chip select (same as DevKitC-1)
-- **CH3/CLOCK (GPIO12)**: SPI clock (same as DevKitC-1)
-
-### SD Card (SPI)
-- **CS (GPIO39)**: Chip select (same as DevKitC-1)
-- **SCK (GPIO36)**: SPI clock (same as DevKitC-1)
-- **MOSI (GPIO35)**: Master out, slave in (same as DevKitC-1)
-- **MISO (GPIO37)**: Master in, slave out (same as DevKitC-1)
-
-### Visual Feedback
-- **GPIO48**: WS2812/NeoPixel RGB LED (addressable)
-- **GPIO2**: External single LED (basic status)
-
-### Audio & Control
-- **GPIO5**: Active buzzer output
-- **GPIO9**: Mode selection switch (LOW=WiFi, HIGH=RotorHazard)
-- **GPIO3**: Battery voltage input (built-in 2:1 divider - no external resistors needed!)
-
-## Power Supply
-
-The LilyGO T-Energy S3 has integrated battery management:
-- **Built-in 18650 Holder**: Single 18650 cell (3.7V nominal)
-- **USB-C Charging**: Built-in charging circuit (1A charge current)
-- **5V Boost Converter**: Internal boost to 5V for system power
-- **Battery Monitoring**: Built-in voltage divider on GPIO3 (no external components needed)
-- **Current Draw**: ~200-400mA typical, up to 500mA peak with WiFi active
-
-## Unique Features
-
-### Built-in Battery Management
-- **Charging IC**: Integrated TP4054 or similar for safe Li-ion charging
-- **Protection**: Over-charge, over-discharge, over-current protection
-- **LED Indicators**: Built-in charge status LEDs on board
-- **No External Components**: Battery voltage divider already included
-
-### Pin Compatibility
-The T-Energy S3 uses the **same pinout** as ESP32-S3 DevKitC-1 for most peripherals:
-- RX5808 connections identical (GPIO4, 10, 11, 12)
-- SD card connections identical (GPIO39, 36, 35, 37)
-- Only difference: Battery monitoring on GPIO3 instead of GPIO1
-
-## Notes
-
-- **Battery Required**: Designed for portable/field use with 18650 cell
-- **SD Card**: Ensure FAT32 formatting and proper 5V power for reliable operation
-- **RX5808 SPI Mod**: Required for frequency control - [See guide](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)
-- **RGB LED**: Uses RMT peripheral on ESP32-S3 - compatible with WS2812/WS2812B/SK6812
-- **No External Divider**: Battery voltage divider is built-in (100K/100K on GPIO3)
-- **Charging**: Connect USB-C to charge - red LED indicates charging, green/blue indicates full
-
-## Expert Mode Notice
-
-The LilyGO T-Energy S3 is marked as **Expert Mode** because:
-- Less common board - fewer community builds and documentation
-- Battery management requires understanding Li-ion safety
-- Requires specific T-Energy S3 board definition
-- Recommended for users building portable lap timers
-
-## References
-
-- [LilyGO T-Energy S3 Documentation](https://github.com/Xinyuan-LilyGO/T-Energy)
-- [Complete Hardware Guide](../HARDWARE_GUIDE.md)
-- [LilyGO T-Energy S3 Verification](../LILYGO_TENERGY_S3_VERIFICATION.md)
+Back up races before filesystem uploads. See the [hardware guide](../HARDWARE_GUIDE.md),
+[battery guide](../BATTERY_MONITORING.md) and
+[C5 receiver guide](../C5_MULTI_PILOT.md) for the rest of the procedure.

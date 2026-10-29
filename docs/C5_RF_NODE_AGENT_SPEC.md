@@ -1,266 +1,117 @@
-# FPVGate ESP32-C5 RF Node — Agent Build Specification
+# ESP32-C5 receiver integration contract
 
-## Mission
+This is the alpha S3/C5 integration reference, replacing the early
+single-frequency-only build specification. C5 firmware is maintained separately
+in [FPVGateC5MK](https://github.com/LouisHitchcock/FPVGateC5MK).
+The S3 implementation is `lib/C5LINK/c5link.h/.cpp` and
+`c5multipilot.h/.cpp`; the external
+[link protocol](https://github.com/LouisHitchcock/FPVGateC5MK/blob/main/docs/LINK_PROTOCOL.md)
+is the byte-level companion reference.
 
-Build the separate ESP32-C5 firmware that acts as FPVGate's RF co-processor.
-The FPVGate S3 remains responsible for Wi-Fi, web UI, race state, pilot
-configuration, and lap presentation. The C5 is responsible for tuning its
-5.8 GHz receiver path and continuously reporting a normalized RSSI value.
+## Responsibilities and wiring
 
-The C5 must support one active RF receiver being time-sliced across up to eight
-pilot frequencies. It must never report samples while a retune is in progress.
+The C5 tunes/captures RF samples. The S3 owns pilot configuration, per-pilot
+peak detection, browser/API presentation and C5 race completion/storage.
+Select `receiverRadio=2`; C5MK AIO enforces this value.
 
-The S3-side implementation is in `lib/C5LINK/` and is selected with
-`receiverRadio = 2`.
+UART is 921600 baud, 8N1, no hardware flow control, 3.3 V logic.
+Cross TX/RX and share ground. Host pins are board-specific: XIAO S3/AIO/Solo
+use TX GPIO4/RX GPIO5; DevKitC and S3-ETH use TX43/RX44.
+C5 RX/TX depend on its board (XIAO C5 GPIO23/24 versus C5-Zero GPIO4/5).
+The [user wiring guide](C5_MULTI_PILOT.md#what-you-need) has the connection table.
+Do not inject debug output into the link UART.
 
-## Hardware and UART
+## Protocol capabilities
 
-Default wiring to an FPVGate ESP32-S3:
+Protocol capability numbers are distinct from the semantic firmware version.
 
-| FPVGate S3 | ESP32-C5 | Notes |
-|---|---|---|
-| GPIO43 TX | C5 RX | Crossed UART data line |
-| GPIO44 RX | C5 TX | Crossed UART data line |
-| GND | GND | Required |
-| 5 V / suitable supply | C5 supply | Use the carrier's regulated supply limits |
+| Capability | S3 behavior |
+| --- | --- |
+| 1 | Legacy `F`/`G`/`Q` text commands and host-controlled slot cycling |
+| 2+ | `P` pilot list and binary multi-slot scan records |
+| 3+ | Reported board/version and chunked application update over UART |
 
-The S3 pin definitions can be overridden with `C5_UART_RX_PIN` and
-`C5_UART_TX_PIN`. The UART is:
+A current scanner serves up to eight enabled slots on one time-sliced RF path.
+A typical eight-slot rate is about 1 kHz per pilot, but validate measured
+throughput, sequence gaps and queue drops rather than assuming a fixed rate.
+The valid range is **5180–5917 MHz**, replacing the old 5885 MHz ceiling.
 
-* 921600 baud
-* 8 data bits, no parity, 1 stop bit
-* No hardware flow control
-* Newline-terminated ASCII messages
+## Text framing
 
-The C5 firmware must not mix debug text into this UART. Use a separate USB
-console or compile-time debug output that is disabled on the link UART.
+Text uses `<payload>*<HH>\n`, where HH is the two-digit uppercase XOR of the
+payload bytes. Lines and binary records share the stream; the parser must
+recover after invalid lengths/checksums and keep binary payload bytes intact.
 
-## Line framing
+| Command/status | Purpose |
+| --- | --- |
+| `Q` | Request status / detect capabilities |
+| `G,<gain>` | Fixed gain (0–89 for the supported receiver contract) |
+| `F,<MHz>` | Legacy single-frequency tuning |
+| `P,<MHz>,...` | One frequency per slot; 0 disables a slot |
+| `S,<MHz>,<gain>,<state>,<fw>[,<version>,<board>]` | Status and capability/version/board |
+| `R,<seq>,<rssi>` | Legacy single-frequency sample |
 
-Every line has this form:
+Use reported status and current firmware scale handling instead of assuming
+that every `R` sample is permanently 0–255. Scan values are 10-bit.
+State names include SCAN, TUNING, OK and error/update states.
 
-```text
-<payload>*<HH>\n
-```
-
-`HH` is two uppercase hexadecimal digits containing the XOR of every byte in
-`payload`, excluding `*`, the checksum, and the newline.
-
-Example:
-
-```text
-S,5732,40,OK,1*61\n
-```
-
-The receiver must:
-
-1. Accumulate until `\n`.
-2. Strip an optional `\r`.
-3. Split at the final `*`.
-4. Verify exactly two hexadecimal checksum characters.
-5. Drop malformed or checksum-invalid lines.
-6. Recover cleanly at the next newline after an invalid/oversized line.
-
-Maximum expected line length is under 96 bytes.
-
-## Messages
-
-### S3 → C5 commands
-
-| Payload | Meaning | Required response/behavior |
-|---|---|---|
-| `F,<MHz>` | Tune RF center frequency | Validate range, enter `TUNING`, stop `R` samples, retune, then emit `S,<MHz>,<gain>,OK,<fw>` or an error state |
-| `G,<gain>` | Set fixed RF gain index | Accept 0–89. Apply it before returning to `OK`. |
-| `Q` | Status request | Immediately emit a status line. |
-
-The C5 must reject frequencies outside **5180–5885 MHz** with `ERR_FREQ`.
-It must not emit RSSI samples for an invalid frequency.
-
-The S3 may send `F` followed immediately by `G`. The C5 should process both
-commands in order and emit a final `OK` status after both have taken effect.
-
-### C5 → S3 samples
+## Binary scan record consumed by C5Link
 
 ```text
-R,<sequence>,<rssi>
+0xA5, length, payload[length], crc8
+payload:
+  'M'          type
+  seq          uint8 cycle counter
+  t0           uint32 little endian
+  slotMask     uint8
+  per enabled slot, in physical slot order:
+    value      uint16 little endian
+    dt         uint16 little endian
 ```
 
-* `sequence`: unsigned 8-bit counter, wrapping 255 → 0.
-* `rssi`: unsigned integer 0–255.
-* Target rate: approximately 1 kHz while in `OK` state.
-* Do not send `R` while `TUNING`, `ERR_FREQ`, or `ERR_RF`.
+CRC-8 covers length and payload (polynomial 0x07, initial value 0).
+Value bits 0–9 contain RSSI 0–1023; bit 15 marks a failed capture, which is
+discarded as a sample. `t0 + dt` represents that slot's sample time, not host
+arrival time. Validate length, mask and checksum before using a record.
+Track sequence loss separately from queue overflow and malformed data.
 
-The S3 associates incoming samples with the currently selected pilot slot.
-Therefore, after reporting `OK`, the C5 must keep reporting samples for that
-frequency until it receives another valid tune command.
+S3 reception uses a 16 KB UART buffer, bounded polling chunks (1024 bytes)
+and sample queues of 128 per pilot. Long HTTP/SD stalls can still exceed
+those bounds. The nominal online timeout is 2500 ms.
 
-### C5 → S3 status
+## Detection and race timing
 
-```text
-S,<MHz>,<gain>,<state>,<firmware>
-```
+The S3 filters samples and detects each pilot independently using stored
+Enter/Exit thresholds scaled by four from the 0–255 configuration range.
+A C5 pass stays open across brief dips and closes after 300 ms below Exit.
+Peak samples, not message arrival, determine pass timestamps.
 
-Valid states:
+Nominal 20 ms SD review frames are a separate, lower-resolution recording
+pipeline. Their plotted peaks must not be treated as the full-rate detector
+input or proof of absolute physical timing accuracy.
+The production EMA remains enabled; `FPVGateC5MKAIO_EMAProbe` is diagnostic
+only. See [the post-soak evidence](RH_POST_SOAK_INVESTIGATION.md).
 
-* `OK` — measuring at the reported frequency.
-* `TUNING` — retune in progress; no `R` lines are sent.
-* `ERR_FREQ` — requested frequency is outside 5180–5885 MHz.
-* `ERR_RF` — RF/PHY retune or initialization failed.
+## Firmware update contract
 
-Send status:
+The S3 checks the receiver's reported board and image metadata, starts an
+update with `U,<bytes>,<sha256>`, waits for ready, sends acknowledged
+`0xA6` records containing `'W'`, a uint32 offset and data, then finishes with
+`E`. Update replies begin `u,`. Success requires the expected new version and
+a working link after reboot, not merely an HTTP upload response.
+Do not send an S3 image or a different C5 board's image.
 
-* Once during boot after RF initialization.
-* After every `F` or `G` command.
-* At least once per second as a heartbeat.
-* Immediately after `Q`.
+Use Settings' supported update flow on compatible C5 firmware.
+The C5's rollback/confirmation behavior is implemented in its own repository;
+validate that exact receiver version before relying on it during recovery.
 
-`firmware` should be a short version string or integer with no commas. The
-current S3 parser expects the first four fields and tolerates the final field.
+## Acceptance checks
 
-## RF measurement requirements
+Validate text/binary framing, corrupt CRC/length, sequence wrap, sparse masks,
+stale data, all slots Off, frequency bounds, queue pressure and reconnect.
+Use the native detector/race harnesses for deterministic timing/state tests,
+then exercise real UART, RF, SD and network contention on hardware.
 
-The RF implementation is platform-specific, but its external behavior must be:
-
-1. Initialize the ESP32-C5 5 GHz receive path without enabling Wi-Fi AP/STA
-   traffic.
-2. Tune to the requested FPV frequency.
-3. Disable/freeze packet AGC if required for stable analog-carrier power
-   measurement.
-4. Capture a repeatable power estimate.
-5. Convert that estimate to a monotonic 0–255 RSSI value.
-6. Stream samples at a stable approximately 1 kHz cadence.
-
-RSSI does not need to be calibrated in dBm. FPVGate only needs a repeatable
-relative signal level suitable for per-pilot enter/exit thresholds. Avoid
-changing gain during a pass; gain is configured before racing.
-
-The recommended measurement shape is a short IQ power window:
-
-```text
-power = mean(I² + Q²)
-rssi  = clamp(log-scaled power, 0, 255)
-```
-
-The exact window size and scaling can be tuned experimentally, but the mapping
-must not jump or wrap and must remain stable at idle for calibration.
-
-## Retune and timing contract
-
-The S3 currently advances pilot slots every 20 ms and sends a new `F` command
-for the next configured frequency. The C5 must:
-
-* Stop `R` output as soon as a valid `F` command is accepted.
-* Emit `TUNING` promptly.
-* Complete the retune and settle the receiver before emitting `OK`.
-* Resume `R` only after `OK`.
-* Remain on that frequency until the next `F` command.
-* Avoid emitting stale samples from the previous frequency after `TUNING`.
-
-If retuning cannot settle within the current 20 ms slot, report `TUNING` or
-`ERR_RF` rather than sending samples that could be assigned to the wrong pilot.
-The S3 will tolerate missing samples but must not receive mislabelled samples.
-
-On boot, the C5 should remain idle or use its last known safe configuration,
-then accept the S3's initial `Q`, `F`, and `G` commands. Do not require a
-special handshake beyond the line protocol.
-
-## Persistence and recovery
-
-Recommended behavior:
-
-* Store the last valid frequency and gain in C5 NVS after successful tuning.
-* On C5 reboot, initialize RF safely and send a status line.
-* The S3 resends configuration periodically, so the C5 must be safe if it
-  starts with no active frequency.
-* Never report `OK` for a frequency that failed validation or RF setup.
-* Continue sending heartbeat status even when no valid frequency is active.
-
-## Reference command examples
-
-```text
-# S3 requests status
-Q*51
-
-# S3 selects pilot frequency R3 and gain 40
-F,5732*60
-G,40*74
-
-# C5 reports tuning then ready
-S,5732,40,TUNING,1*??
-S,5732,40,OK,1*61
-
-# C5 reports samples
-R,0,12*??
-R,1,14*??
-R,2,143*??
-```
-
-Do not copy the `??` values: calculate checksums programmatically. The exact
-checksum algorithm is XOR, not CRC.
-
-## Host-side acceptance tests
-
-The C5 agent should provide a host-testable protocol module or a Python test
-tool that can run without hardware. At minimum test:
-
-### Framing
-
-* Valid line accepted.
-* Wrong checksum rejected.
-* Missing checksum rejected.
-* Lowercase/non-hex checksum rejected or normalized consistently.
-* Oversized line discarded and parser resynchronizes at the next newline.
-* CRLF input accepted.
-
-### Commands
-
-* `F,5180` accepted.
-* `F,5885` accepted.
-* `F,5179` returns `ERR_FREQ` and no `R` samples.
-* `F,5886` returns `ERR_FREQ` and no `R` samples.
-* `G,0`, `G,40`, and `G,89` accepted.
-* Invalid gain is rejected or clamped deterministically.
-* `Q` returns a status immediately.
-
-### Runtime
-
-* No `R` samples during `TUNING`.
-* `R` resumes only after `OK`.
-* Sequence wraps from 255 to 0.
-* Heartbeat appears at least once per second.
-* A failed retune produces `ERR_RF`, not false `OK`.
-* A tune followed by a second tune cannot leak samples from the first
-  frequency after the second `TUNING` begins.
-
-### Bench validation
-
-With a known FPV video transmitter:
-
-1. Tune to a supported channel and verify the idle RSSI is stable.
-2. Move the transmitter through the gate and verify one clear RSSI peak.
-3. Repeat at low and high transmitter power.
-4. Retune repeatedly between at least four channels and verify each status
-   frequency matches the requested frequency.
-5. Run eight configured slots and verify each slot produces samples without
-   corrupting the next slot's frequency assignment.
-
-## Definition of done
-
-The C5 side is ready for FPVGate integration when:
-
-* It builds and flashes on the target ESP32-C5 board.
-* UART framing and checksums pass host tests.
-* `Q`, `F`, and `G` work at 921600 baud.
-* RSSI samples are monotonic, bounded 0–255, and approximately 1 kHz in `OK`.
-* No samples are emitted during tuning/error states.
-* Four-channel and eight-channel round-robin bench tests complete without
-  parser desynchronization or frequency/sample mix-ups.
-* The agent supplies the C5 firmware repository/path, build command, flash
-  command, UART pin overrides if different from the defaults, and test logs.
-
-## Important scope boundary
-
-Do not merge C5 RF implementation code into the FPVGate S3 firmware. Keep the
-RF-node firmware as a separate program with the protocol above as its stable
-interface. The S3-side integration is intentionally independent of the RF
-implementation details.
+Test all eight *independent* transmitters before claiming eight-pilot RF
+qualification. Four same-frequency slots or identical-input fixtures exercise
+different properties. [Validation plan](../tools/VALIDATION_PLAN.md).
