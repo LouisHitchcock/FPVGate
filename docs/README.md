@@ -1,7 +1,7 @@
 # FPVGate alpha documentation
 
 Current source branch: `V1.9.0-alpha`. Normal build label:
-`1.9.0-alpha-5`. These guides describe the checked-in implementation,
+`1.9.0-Alpha-6`. These guides describe the checked-in implementation,
 not a declaration that every feature/board has been physically qualified.
 
 ## Start here
