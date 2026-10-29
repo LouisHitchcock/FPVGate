@@ -1117,6 +1117,17 @@ uint8_t Config::getMaxLaps() {
     return conf.maxLaps;
 }
 
+bool Config::setRaceLimits(uint8_t laps, uint16_t minLapTenths, uint8_t heatBlocks) {
+    if (laps > 63 || minLapTenths < 1 || minLapTenths > 200 || heatBlocks > 60) return false;
+    if (conf.maxLaps != laps || conf.minLap != minLapTenths || conf.maxHeatTime30s != heatBlocks) {
+        conf.maxLaps = laps;
+        conf.minLap = minLapTenths;
+        conf.maxHeatTime30s = heatBlocks;
+        modified = true;
+    }
+    return true;
+}
+
 uint8_t Config::getLedMode() {
     return conf.ledMode;
 }

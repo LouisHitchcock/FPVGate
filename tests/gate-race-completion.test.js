@@ -180,3 +180,19 @@ test('a delayed C5 snapshot cannot overwrite another receiver after switching', 
   expect(p.raceRunning).toBe(true);
   expect(p.currentRaceSessionTimestamp).toBeNull();
 });
+
+test('gate-owned Events suppress browser result writes and refresh after save', async () => {
+  const p = page([snapshot({ eventManaged: true })], { observed: 42 });
+  p.RaceEvent.reload = jest.fn(async () => {});
+  await p.completeC5RaceInBrowser();
+  expect(p.RaceEvent.recordRace).not.toHaveBeenCalled();
+  expect(p.RaceEvent.reload).toHaveBeenCalledTimes(1);
+});
+
+test('reconnect uses the finished roster even after the next heat changed live config', async () => {
+  const p = page([snapshot({ eventManaged: true, pilots: [
+    { slot: 0, name: 'Original pilot', phonetic: 'Original', color: 0x123456, frequency: 5658, laps: [1000, 10000] },
+  ] })]);
+  await p.c5RaceResync();
+  expect(p.c5Race.racers[0]).toMatchObject({ name: 'Original pilot', spoken: 'Original', freq: 5658, color: '#123456' });
+});

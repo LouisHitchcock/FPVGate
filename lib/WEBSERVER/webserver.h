@@ -12,6 +12,7 @@
 #include "c5link.h"
 #include "c5multipilot.h"
 #include "c5racecontrol.h"
+#include "eventdirector.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -27,7 +28,6 @@
 #define WEB_SSE_BACKLOG 4            // live RSSI/status skipped while a stream's clients have more waiting
 #define WEB_HEAP_SNAPSHOT_BYTES 20480   // a low below this records what was going on (/api/system/info lowHeap)
 #define EVENT_PATH "/event.json"     // race director event (SD if present, else LittleFS)
-#define EVENT_TMP_PATH "/event.tmp"
 #define EVENT_MAX_BYTES (512u * 1024u)
 #define C5_IMAGE_PATH "/c5fw.bin"          // LittleFS: C5 firmware waiting to be sent
 #define C5_IMAGE_TMP_PATH "/c5fw.tmp"
@@ -39,6 +39,7 @@ class Webserver : public TransportInterface {
     void setTransportManager(TransportManager *tm);
     void setC5Receiver(C5Link *link, C5MultiPilot *multiPilot);
     void setC5RaceControl(C5RaceControl* control) { c5RaceControl = control; }
+    void setEventDirector(EventDirector* director) { eventDirector = director; }
     void notifyGateRaceState(const char* state) {
         pendingRaceState = state;
         if (strcmp(state, "stopped") == 0) setPendingLcdEvent(PendingLcdEvent::ShowFinish);
@@ -107,6 +108,7 @@ class Webserver : public TransportInterface {
     C5Link *c5Link = nullptr;
     C5MultiPilot *c5MultiPilot = nullptr;
     C5RaceControl* c5RaceControl = nullptr;
+    EventDirector* eventDirector = nullptr;
 
     wifi_mode_t wifiMode = WIFI_OFF;
     wl_status_t lastStatus = WL_IDLE_STATUS;
@@ -153,9 +155,12 @@ class Webserver : public TransportInterface {
     void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1, int64_t levelUs = -1);
     void sendRhUpdates(uint32_t currentTimeMs);
 
-    // Race director event (/api/event): written to EVENT_TMP_PATH as it
+    // Race director event (/api/event): written to EventDirector::UPLOAD as it
     // arrives, then renamed over EVENT_PATH once complete.
     bool eventUploadOk_ = false;
+    AsyncWebServerRequest* eventUploadRequest_ = nullptr;
+    std::shared_ptr<EventDirector::Lease> eventUploadLease_;
+    size_t eventUploadBytes_ = 0;
 
     // C5 firmware image (/api/c5/firmware), for C5Link::requestUpdate().
     struct C5Image {

@@ -404,6 +404,48 @@ bool Storage::renameFile(const String& fromPath, const String& toPath) {
     return LittleFS.rename(fromPath, toPath);
 }
 
+bool Storage::recoverFile(const String& path) {
+    fs::FS* fs = &LittleFS;
+    bool locked = false;
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return false;
+        locked = true;
+        fs = &SD;
+    }
+#endif
+    const String backup = path + ".bak";
+    const bool ok = fs->exists(path) ? (!fs->exists(backup) || fs->remove(backup)) :
+        (!fs->exists(backup) || fs->rename(backup, path));
+    if (locked) spiMutexGive();
+    return ok;
+}
+
+bool Storage::replaceFileSafely(const String& fromPath, const String& toPath) {
+    fs::FS* fs = &LittleFS;
+    bool locked = false;
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return false;
+        locked = true;
+        fs = &SD;
+    }
+#endif
+    const String backup = toPath + ".bak";
+    bool ok = true;
+    if (!fs->exists(toPath) && fs->exists(backup)) ok = fs->rename(backup, toPath);
+    if (ok && fs->exists(toPath)) {
+        if (fs->exists(backup)) ok = fs->remove(backup);
+        if (ok) ok = fs->rename(toPath, backup);
+    }
+    if (ok) ok = fs->rename(fromPath, toPath);
+    if (!ok && !fs->exists(toPath) && fs->exists(backup)) fs->rename(backup, toPath);
+    // Failure to remove an obsolete backup is harmless: the destination won.
+    if (ok && fs->exists(backup)) fs->remove(backup);
+    if (locked) spiMutexGive();
+    return ok;
+}
+
 bool Storage::readFile(const String& path, String& data) {
 #ifdef HAS_SD_CARD_SUPPORT
     if (sdAvailable) {

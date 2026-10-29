@@ -2,6 +2,7 @@
 #include "trackmanager.h"
 #include <algorithm>
 #include <time.h>
+#include <cstdio>
 
 void C5RaceControl::begin(Config* config, LapTimer* timer, C5MultiPilot* detector, RaceHistory* history) {
     config_ = config;
@@ -13,6 +14,7 @@ void C5RaceControl::begin(Config* config, LapTimer* timer, C5MultiPilot* detecto
 C5RaceControl::Status C5RaceControl::status() {
     portENTER_CRITICAL(&mux_);
     Status result = status_;
+    result.eventManaged = events_ != nullptr;
     portEXIT_CRITICAL(&mux_);
     return result;
 }
@@ -20,11 +22,12 @@ C5RaceControl::Status C5RaceControl::status() {
 bool C5RaceControl::requestStart(uint32_t timestamp) {
     if (!config_ || config_->getReceiverRadio() != 2) return false;
     // Every configured lap must fit, including Gate 1.
-    if (config_->getMaxLaps() >= C5MultiPilot::MAX_RACE_LAPS) return false;
+    const bool eventStart = events_ && config_->getEventMode();
+    if (!eventStart && config_->getMaxLaps() >= C5MultiPilot::MAX_RACE_LAPS) return false;
     bool racer = false;
     for (uint8_t i = 0; i < 8; ++i)
         racer |= config_->getC5Frequency(i) && ((config_->getC5RaceMask() >> i) & 1);
-    if (!racer) return false;
+    if (!eventStart && !racer) return false;
     portENTER_CRITICAL(&mux_);
     const bool accepted = !status_.running && !status_.busy && !status_.saveFailed;
     if (accepted) {
@@ -99,6 +102,31 @@ void C5RaceControl::start(uint32_t timestamp) {
     const time_t wall = time(nullptr);
     if (!timestamp) timestamp = wall > 0 ? (uint32_t)wall : millis() / 1000u;
     race_.timestamp = lastTimestamp_ = std::max(timestamp, lastTimestamp_ + 1);
+    historySaved_ = false;
+    // Bind identities and rules to the loaded heat before starting the timer.
+    if (events_ && !events_->prepare(race_)) {
+        portENTER_CRITICAL(&mux_);
+        status_ = {};
+        status_.error = events_->error();
+        portEXIT_CRITICAL(&mux_);
+        event_ = "startFailed";
+        return;
+    }
+    // A loaded Event heat may restore a different roster after reboot. Check
+    // the resulting live settings, not just the pre-prepare browser settings.
+    bool racer = false;
+    for (uint8_t i = 0; i < 8; ++i)
+        racer |= config_->getC5Frequency(i) && ((config_->getC5RaceMask() >> i) & 1);
+    if (!racer || config_->getMaxLaps() >= C5MultiPilot::MAX_RACE_LAPS) {
+        const bool cancelled = !events_ || events_->cancel();
+        portENTER_CRITICAL(&mux_);
+        status_ = {};
+        status_.saveFailed = status_.eventFailed = !cancelled;
+        status_.error = cancelled ? "No racing pilots or invalid lap limit" : events_->error();
+        portEXIT_CRITICAL(&mux_);
+        event_ = "startFailed";
+        return;
+    }
     race_.minLapMs = config_->getMinLapMs();
     race_.syncMode = 3;
     heatMs_ = (uint32_t)config_->getMaxHeatTime30s() * 30000u;
@@ -121,10 +149,18 @@ void C5RaceControl::start(uint32_t timestamp) {
     }
     timer_->start();
     detector_->start(timer_->getRaceStartMs());
+    Status started;
+    started.running = true;
+    started.timestamp = race_.timestamp;
+    for (const auto& pilot : race_.pilots) {
+        auto& identity = started.roster[pilot.slot];
+        std::snprintf(identity.name, sizeof(identity.name), "%s", pilot.name.c_str());
+        std::snprintf(identity.phonetic, sizeof(identity.phonetic), "%s", pilot.callsign.c_str());
+        identity.color = pilot.color;
+        identity.frequency = pilot.frequency;
+    }
     portENTER_CRITICAL(&mux_);
-    status_ = {};
-    status_.running = true;
-    status_.timestamp = race_.timestamp;
+    status_ = started;
     portEXIT_CRITICAL(&mux_);
     event_ = "started";
 }
@@ -178,11 +214,20 @@ void C5RaceControl::save() {
     // An empty race doesn't create history. Failed saves remain available for
     // retry, and block a new start from discarding their laps/RSSI capture.
     const bool hasLaps = !race_.lapTimes.empty();
-    const bool ok = !hasLaps || history_->saveRace(race_);
+    const bool historyOk = !hasLaps || historySaved_ || history_->saveRace(race_);
+    historySaved_ = historyOk && hasLaps;
+    bool eventOk = true;
+    if (historyOk && events_) {
+        if (hasLaps) eventOk = events_->complete(race_);
+        else eventOk = events_->cancel();
+    }
+    const bool ok = historyOk && eventOk;
     portENTER_CRITICAL(&mux_);
     status_.busy = false;
     status_.saveFailed = !ok;
-    status_.savedTimestamp = ok && hasLaps ? race_.timestamp : 0;
+    status_.eventFailed = !eventOk;
+    status_.error = !eventOk ? events_->error() : !historyOk ? "Race history save failed" : "";
+    status_.savedTimestamp = historySaved_ ? race_.timestamp : 0;
     portEXIT_CRITICAL(&mux_);
 }
 

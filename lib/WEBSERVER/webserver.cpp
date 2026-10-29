@@ -1443,9 +1443,14 @@ EEPROM:\n\
         doc["running"] = c5MultiPilot->running();
         doc["racers"] = c5MultiPilot->racerMask();
         doc["multi"] = c5MultiPilot->multiRace();
+        C5RaceControl::Status raceState;
         if (c5RaceControl) {
             const auto state = c5RaceControl->status();
+            raceState = state;
             doc["gateManaged"] = true;
+            doc["eventManaged"] = state.eventManaged;
+            doc["eventFailed"] = state.eventFailed;
+            doc["error"] = state.error;
             doc["running"] = state.running;
             doc["busy"] = state.busy;
             doc["timestamp"] = state.timestamp;
@@ -1460,6 +1465,13 @@ EEPROM:\n\
             JsonObject p = pilots.add<JsonObject>();
             p["slot"] = i;
             p["frequency"] = conf->getC5Frequency(i);
+            if (raceState.timestamp) {
+                const auto& identity = raceState.roster[i];
+                p["frequency"] = identity.frequency;
+                p["name"] = identity.name;
+                p["phonetic"] = identity.phonetic;
+                p["color"] = identity.color;
+            }
             JsonArray a = p["laps"].to<JsonArray>();
             const uint8_t n = c5MultiPilot->copyLaps(i, laps, C5MultiPilot::MAX_RACE_LAPS);
             for (uint8_t k = 0; k < n; ++k) a.add(laps[k]);
@@ -2223,40 +2235,69 @@ EEPROM:\n\
         led->on(200);
     });
 
-    // Race director event: pilots, formats, heats and their results, kept by
-    // the web UI as one JSON document. The gate only stores it, in chunks
-    // either way, so a large event never sits in heap.
+    // Editor uploads and gate-owned result/progression commits share a lease.
+    // The GET response retains its lease until the stream is destroyed, so a
+    // concurrent replacement cannot splice two document revisions together.
     server.on("/api/event", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        auto lease = eventDirector ? eventDirector->readLease() : nullptr;
+        if (!lease) {
+            request->send(503, "application/json", "{\"error\":\"event storage busy or recovery required\"}");
+            return;
+        }
         size_t bytes = 0;
         if (!storage->exists(EVENT_PATH) || !storage->fileSize(EVENT_PATH, bytes) || bytes == 0) {
             request->send(404, "application/json", "{\"error\":\"no event\"}");
             return;
         }
         request->send(request->beginResponse("application/json", bytes,
-            [this](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+            [this, lease](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
                 return storage->readBinaryRange(EVENT_PATH, index, buffer, maxLen);
             }));
     });
 
     server.on("/api/event", HTTP_POST,
         [this](AsyncWebServerRequest *request) {
+            uint32_t revision = 0;
             if (request->contentLength() > EVENT_MAX_BYTES) {
                 request->send(413, "application/json", "{\"error\":\"event too large\"}");
-            } else if (!eventUploadOk_) {
-                request->send(500, "application/json", "{\"error\":\"event not saved\"}");
+            } else if (eventUploadRequest_ != request) {
+                request->send(409, "application/json", "{\"error\":\"event busy or race not saved; retry after Stop\"}");
+            } else if (!eventUploadOk_ || eventUploadBytes_ != request->contentLength()) {
+                request->send(500, "application/json", "{\"error\":\"incomplete event upload; old document retained\"}");
+            } else if (!eventDirector->commitUpload(revision)) {
+                JsonDocument result; result["error"] = eventDirector->error();
+                String out; serializeJson(result, out);
+                request->send(eventDirector->errorStatus(), "application/json", out);
             } else {
-                request->send(200, "application/json", "{\"status\":\"OK\"}");
+                request->send(200, "application/json", String("{\"status\":\"OK\",\"revision\":") + String(revision) + "}");
             }
-            eventUploadOk_ = false;   // an empty body never reaches the body handler
+            if (eventUploadRequest_ == request) {
+                eventUploadRequest_ = nullptr;
+                eventUploadLease_.reset();
+            }
         },
         nullptr,
         [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
             if (total > EVENT_MAX_BYTES) return;
-            if (index == 0) eventUploadOk_ = storage->writeBinaryFile(EVENT_TMP_PATH, data, len);
-            else if (eventUploadOk_) eventUploadOk_ = storage->appendBinaryFile(EVENT_TMP_PATH, data, len);
-            if (eventUploadOk_ && index + len >= total) {
-                eventUploadOk_ = storage->renameFile(EVENT_TMP_PATH, EVENT_PATH);   // replaces the old file
+            if (index == 0) {
+                if (eventUploadRequest_ || !eventDirector) return;
+                auto lease = eventDirector->editLease();
+                if (!lease) return;
+                eventUploadLease_ = lease;
+                eventUploadRequest_ = request;
+                eventUploadBytes_ = 0;
+                eventUploadOk_ = storage->writeBinaryFile(EventDirector::UPLOAD, nullptr, 0);
+                request->onDisconnect([this, request]() {
+                    if (eventUploadRequest_ == request) {
+                        eventUploadRequest_ = nullptr;
+                        eventUploadLease_.reset();
+                    }
+                });
             }
+            if (eventUploadRequest_ != request) return;
+            if (index != eventUploadBytes_) eventUploadOk_ = false;
+            if (eventUploadOk_) eventUploadOk_ = storage->appendBinaryFile(EventDirector::UPLOAD, data, len);
+            eventUploadBytes_ += len;
         });
 
     server.on("/races/download", HTTP_GET, [this](AsyncWebServerRequest *request) {

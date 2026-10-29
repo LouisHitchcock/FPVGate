@@ -515,6 +515,7 @@ class Config {
     uint8_t getAutoThresholdEnabled();
     uint8_t getAutoThresholdOffset();
     uint8_t getMaxLaps();
+    bool setRaceLimits(uint8_t laps, uint16_t minLapTenths, uint8_t heatBlocks);
     uint8_t getLedMode();
     uint8_t getLedBrightness();
     uint32_t getLedColor();

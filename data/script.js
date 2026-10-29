@@ -604,6 +604,7 @@ function setupWiFiEvents() {
         window.lastSSEEvent = Date.now();
         console.log("[SSE] configUpdated event - refreshing config from device");
         refreshConfigFromDevice();
+        if (typeof RaceEvent !== "undefined" && c5EventManaged && !raceRunning) RaceEvent.reload();
       },
       false
     );
@@ -651,6 +652,8 @@ function handleRaceStateEvent(state) {
     resetLapDisplay();
     updateRaceButtons();
     console.log("[Sync] Laps cleared via SSE");
+  } else if (state === "startFailed" && c5ReceiverSelected()) {
+    c5RaceResync().then((d) => { if (d && d.error) alert(d.error); });
   }
 }
 
@@ -811,6 +814,7 @@ let c5Race = { active: false, racers: [], laps: {}, finished: {} };
 let c5RaceResyncing = false;
 let c5RaceRequest = null;
 let c5GateManaged = false;
+let c5EventManaged = false;
 let c5ObservedTimestamp = 0;
 let c5CompletedTimestamp = 0;
 let c5CompletionPromise = null;
@@ -897,7 +901,18 @@ function c5RaceResync() {
     .then((d) => {
       if (c5Race !== targetRace || !c5ReceiverSelected()) return d;
       c5GateManaged = d.gateManaged === true;
+      c5EventManaged = d.eventManaged === true;
       if (!c5Race.active) c5RaceReset(true);
+      if (d.timestamp && (d.pilots || []).some((p) => typeof p.name === "string")) {
+        // The device may already have loaded the next heat into config. The
+        // current race still belongs to its frozen roster, including on reload.
+        c5Race.racers = d.pilots.filter((p) => (d.racers >> p.slot) & 1).map((p) => ({
+          slot: p.slot, name: p.name, label: p.name || `Pilot ${p.slot + 1}`,
+          spoken: p.phonetic || p.name || `Pilot ${p.slot + 1}`,
+          color: `#${(p.color >>> 0).toString(16).padStart(6, "0")}`, freq: p.frequency,
+          channel: typeof C5UI !== "undefined" ? C5UI.channelName(p.frequency) : String(p.frequency),
+        }));
+      }
       for (const p of d.pilots || []) {
         if (!((d.racers >> p.slot) & 1)) continue;
         c5Race.laps[p.slot] = (p.laps || []).map((ms) => ms / 1000);
@@ -937,7 +952,7 @@ async function waitForC5RaceSave() {
     if (!state) throw new Error("Cannot read C5 race status");
     if (!state.gateManaged) return null; // older firmware keeps browser saving
     if (!state.busy && !state.running) {
-      if (state.saveFailed) throw new Error("Gate could not save race; press Stop to retry before starting another race");
+      if (state.saveFailed) throw new Error(state.error || "Gate could not save race; press Stop to retry before starting another race");
       return state.savedTimestamp || null;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -953,19 +968,24 @@ function completeC5RaceInBrowser() {
     const races = await loadRaceHistory();
     const saved = (races || []).find((r) => r.timestamp === timestamp);
     if (!saved) throw new Error("Race is saved on the gate, but history could not be loaded. Retry Stop to refresh it.");
-    // Keep the existing browser Events integration until results move onto
-    // the gate. A page opened after a race must not assign it to a new heat.
+    // Older firmware still uses browser Events. New firmware binds and saves
+    // the heat itself; browser notes must not overwrite that frozen label.
     if (saved && timestamp === c5ObservedTimestamp) {
       const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
       if (notes || c5RaceLabel.name || c5RaceLabel.tag) {
         const form = new URLSearchParams({ timestamp: String(timestamp),
-          name: c5RaceLabel.name || saved.name || "", tag: c5RaceLabel.tag || saved.tag || "", notes: notes || saved.notes || "" });
+          name: c5EventManaged ? saved.name || "" : c5RaceLabel.name || saved.name || "",
+          tag: c5EventManaged ? saved.tag || "" : c5RaceLabel.tag || saved.tag || "", notes: notes || saved.notes || "" });
         const response = await fetch("/races/update", { method: "POST", body: form });
         const result = await response.json();
         if (!response.ok || result.status !== "OK") throw new Error("Could not update race notes");
         await loadRaceHistory();
       }
-      if (typeof RaceEvent !== "undefined") RaceEvent.recordRace(saved);
+      if (typeof RaceEvent !== "undefined" && !c5EventManaged) RaceEvent.recordRace(saved);
+    }
+    if (c5EventManaged && typeof RaceEvent !== "undefined" && typeof RaceEvent.reload === "function") {
+      await RaceEvent.reload();
+      if (typeof refreshConfigFromDevice === "function") await refreshConfigFromDevice();
     }
     c5CompletedTimestamp = timestamp;
     if (timestamp === c5ObservedTimestamp && (c5StopReason === "maxLaps" || c5StopReason === "heatTime"))
@@ -3700,6 +3720,11 @@ function openRssiDebugPopout(event) {
 }
 
 async function startRace() {
+  if (typeof RaceEvent !== "undefined" && RaceEvent.pendingReview?.()) {
+    alert("Confirm the saved Event results before starting another race.");
+    document.getElementById("nav-link-event")?.click();
+    return;
+  }
   if (c5CompletionPromise) {
     try { await c5CompletionPromise; }
     catch (err) { alert(err.message); return; }
@@ -3709,6 +3734,10 @@ async function startRace() {
     return;
   }
   if (c5ReceiverSelected()) {
+    if (typeof RaceEvent !== "undefined" && typeof RaceEvent.flush === "function") {
+      try { await RaceEvent.flush(); }
+      catch (err) { alert(err.message); return; }
+    }
     const state = await c5RaceResync();
     if (!state || state.busy || state.running || state.saveFailed) {
       alert("The gate is busy or has an unsaved race. Stop/retry the save before starting another race.");

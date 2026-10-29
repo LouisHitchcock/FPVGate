@@ -40,6 +40,9 @@ class Storage {
     bool fileSize(const String& path, size_t& out);
     bool deleteFile(const String& path);
     bool renameFile(const String& fromPath, const String& toPath);
+    // Keep the previous file as .bak until the replacement is in place.
+    bool replaceFileSafely(const String& fromPath, const String& toPath);
+    bool recoverFile(const String& path);
     bool exists(const String& path);
     bool mkdir(const String& path);
     bool listDir(const String& path, std::vector<String>& files);

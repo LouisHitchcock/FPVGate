@@ -36,7 +36,10 @@ const RaceEvent = (() => {
   let saveState = "";
   let loadError = "";
   let damaged = false;   // the gate has an event file that isn't valid JSON
+  let revision = 0, editVersion = 0, savedVersion = 0;
+  let saving = null, loading = null, conflict = false;
   let note = "";         // one-line message under the status strip
+  let confirmingResults = false;
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -50,7 +53,7 @@ const RaceEvent = (() => {
       version: 3, name: "", nextId: 2, pilots: [], groups: [], races: [], active: null,
       seed: "roster", groupSize: 4, band: "R",
       formats: [{ id: 1, name: "3 laps", maxLaps: 3, timeLimitS: 0, minLapS: 3, countdown: 1, win: "first_to" }],
-      schedule: { blocks: [], pos: 0, auto: true },
+      schedule: { blocks: [], pos: 0, auto: true, requireReview: true, autoChannels: true },
     };
   }
 
@@ -95,58 +98,114 @@ const RaceEvent = (() => {
 
   // ---- storage --------------------------------------------------------------------------
 
-  async function load() {
+  async function load({ force = false } = {}) {
+    if (loading) return loading;
+    // Automatic refreshes must not erase a director's unsaved draft. The
+    // explicit reload action offers export/review before discarding it.
+    if (!force && doc && (editVersion !== savedVersion || conflict)) return false;
+    const version = editVersion;
+    loading = readEvent(force, version).finally(() => { loading = null; });
+    return loading;
+  }
+
+  async function readEvent(force, version) {
     damaged = false;
     try {
-      const r = await fetch("/api/event");
+      let r;
+      for (let attempt = 0; attempt < 5; ++attempt) {
+        r = await fetch("/api/event");
+        if (r.status !== 503 || attempt === 4) break;
+        await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+      }
+      let loaded;
       if (r.status === 404) {
-        doc = blank();
+        loaded = blank();
       } else if (!r.ok) {
         throw new Error(`HTTP ${r.status}`);
       } else {
         const text = await r.text();
         try {
-          doc = migrate(JSON.parse(text));
+          loaded = migrate(JSON.parse(text));
         } catch (e) {
           damaged = true;
           throw e;
         }
       }
+      if (!force && version !== editVersion) return false;
+      doc = loaded;
+      revision = +doc.gateRevision || 0;
+      conflict = false;
+      savedVersion = editVersion;
+      setSaveState("");
       loadError = "";
     } catch (e) {
       console.error("[Event] load failed", e);
+      if (!force && version !== editVersion) return false;
       loadError = damaged
         ? "The event saved on FPVGate is damaged and can't be read. Download it to keep a copy, then start a new event."
         : "Couldn't load the event from FPVGate. Changes won't be saved until it loads.";
       doc = null;
     }
     render();
+    return !!doc;
   }
 
   function save() {
     if (!doc) return;
+    ++editVersion;
+    if (conflict) { setSaveState("error"); return; }
     setSaveState("pending");
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      setSaveState("saving");
-      try {
-        const r = await fetch("/api/event", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        setSaveState("saved");
-      } catch (e) {
-        console.error("[Event] save failed", e);
-        setSaveState("error");
+    saveTimer = setTimeout(() => flush().catch(() => {}), SAVE_DELAY_MS);
+  }
+
+  async function flush() {
+    clearTimeout(saveTimer);
+    if (!enabled) return;
+    if (loading) await loading;
+    if (!doc || loadError || conflict) throw new Error("Reload the Event from the gate before saving. Export unsaved edits first.");
+    if (saving) return saving;
+    saving = (async () => {
+      // Serialize writes from this tab; a second edit uses the acknowledged
+      // revision of the first, never a stale in-flight copy of the document.
+      while (savedVersion !== editVersion) {
+        const version = editVersion;
+        setSaveState("saving");
+        // A read in another tab can briefly hold the gate's storage lease.
+        // Retry that response, but never retry an actual revision conflict.
+        const body = JSON.stringify({ ...doc, gateRevision: revision });
+        let r, result;
+        for (let attempt = 0; attempt < 5; ++attempt) {
+          r = await fetch("/api/event", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body,
+          });
+          result = await r.json();
+          const busy = (r.status === 409 || r.status === 503) && /busy|lease/i.test(result.error || "");
+          if (!busy || attempt === 4) break;
+          await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+        }
+        if (!r.ok) {
+          conflict = r.status === 409 && /changed|revision|stale/i.test(result.error || "");
+          throw new Error(result.error || `HTTP ${r.status}`);
+        }
+        revision = result.revision ?? revision; // old firmware has no revision
+        doc.gateRevision = revision;
+        savedVersion = version;
       }
-    }, SAVE_DELAY_MS);
+      setSaveState("saved");
+    })().catch((e) => {
+      console.error("[Event] save failed", e);
+      setSaveState("error");
+      throw e;
+    }).finally(() => { saving = null; });
+    return saving;
   }
 
   function setSaveState(s) {
     saveState = s;
     const el = $("#evSave");
     if (el) {
-      el.textContent = { pending: "Unsaved changes…", saving: "Saving…", saved: "Saved ✓", error: "Save failed" }[s] || "";
+      el.textContent = { pending: "Unsaved changes…", saving: "Saving…", saved: "Saved ✓", error: conflict ? "Event changed: export edits or reload from gate" : "Save failed" }[s] || "";
       el.className = "c5p-save" + (s ? " c5p-save-" + s : "");
     }
   }
@@ -208,7 +267,7 @@ const RaceEvent = (() => {
   const pilotName = id => byId(doc.pilots, id)?.name || "?";
 
   function raceStandings(race) {
-    const format = formatById(race.formatId);
+    const format = race.format || formatById(race.formatId);
     return race.results.map(x => row(x.pilotId, x.laps, format)).sort(compare(format.win));
   }
 
@@ -423,7 +482,7 @@ const RaceEvent = (() => {
       note = "Add pilots first.";
       return;
     }
-    if (doc.races.length && !confirm("Rebuild the groups? Pilots move between groups; results so far are kept.")) return;
+    if (doc.races.length && !confirm("Rebuild the groups? Pilots move between groups; results so far are kept.")) return false;
     const stats = pilotStats();
     const order = doc.pilots.slice();
     if (doc.seed === "random") {
@@ -445,12 +504,13 @@ const RaceEvent = (() => {
     }
     doc.groups = doc.groups.filter((g, i) => i < count || racesOf(g).length);
     doc.groups.slice(count).forEach(g => { g.pilotIds = []; });
-    const tooBig = assignChannels();
+    const tooBig = doc.schedule.autoChannels === false ? [] : assignChannels();
     if (!doc.schedule.blocks.length) {
       doc.schedule.blocks.push({ id: newId(), kind: "rotate", groupIds: doc.groups.slice(0, count).map(g => g.id), times: 3 });
       doc.schedule.pos = 0;
     }
-    note = `${count} group${count > 1 ? "s" : ""} of up to ${per} pilots, seeded by ${SEEDS[doc.seed].toLowerCase()}. ${channelNote(tooBig)}`;
+    note = `${count} group${count > 1 ? "s" : ""} of up to ${per} pilots, seeded by ${SEEDS[doc.seed].toLowerCase()}. ${doc.schedule.autoChannels === false ? "Pilot channels kept. Review them before racing." : channelNote(tooBig)}`;
+    return true;
   }
 
   // ---- heats -------------------------------------------------------------------------------------
@@ -517,6 +577,10 @@ const RaceEvent = (() => {
   // Load a group into the slots. step is the heat it runs as, or null for a
   // race outside the heat order.
   function loadGroup(groupId, step, quiet) {
+    if (doc.schedule.reviewRaceId) {
+      if (!quiet) alert("Confirm the saved Event results before preparing another race.");
+      return false;
+    }
     const group = byId(doc.groups, groupId);
     if (!group) return false;
     if (typeof C5UI === "undefined" || !c5ReceiverSelected()) {
@@ -556,18 +620,103 @@ const RaceEvent = (() => {
 
   function loadStep(step, quiet) {
     const seq = sequence();
+    if (!Number.isInteger(step) || step < 0) return false;
     if (step >= seq.length) {
       note = "Every heat has been raced.";
       render();
       return false;
     }
-    return loadGroup(seq[step], step, quiet);
+    const loaded = loadGroup(seq[step], step, quiet);
+    if (loaded && doc.schedule.skipped?.includes(step)) {
+      doc.schedule.skipped = doc.schedule.skipped.filter(value => value !== step);
+      save();
+    }
+    return loaded;
   }
 
   // The heat after the loaded one, or the next unraced one.
   function nextStep() {
     const step = activeStep();
-    return step != null ? step + 1 : doc.schedule.pos;
+    return nextAvailable(step != null ? Math.max(step + 1, doc.schedule.pos) : doc.schedule.pos);
+  }
+
+  function nextAvailable(step) {
+    while (doc.schedule.skipped?.includes(step)) ++step;
+    return step;
+  }
+
+  function pendingReview() { return enabled && !!doc?.schedule.reviewRaceId; }
+
+  async function refreshReviewRace() {
+    const race = doc && byId(doc.races, doc.schedule.reviewRaceId);
+    if (!race) throw new Error("No saved Event result is awaiting review.");
+    const event = doc;
+    const response = await fetch(`/races/downloadOne?timestamp=${race.timestamp}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Could not read the saved race. Keep the results pending and retry.");
+    const payload = await response.json();
+    const history = payload.races?.find(r => +r.timestamp === +race.timestamp);
+    if (doc !== event || doc.schedule.reviewRaceId !== race.id) throw new Error("The event changed while reading its saved race. Reload before confirming.");
+    if (!history || !Array.isArray(history.pilots)) throw new Error("The saved multi-pilot race is missing. Reload Race History before confirming.");
+    const corrected = race.results.map(row => {
+      const pilot = history.pilots.find(p => p.slot === row.slot);
+      if (!pilot || !Array.isArray(pilot.lapTimes) || pilot.lapTimes.some(t => !Number.isFinite(t) || t < 0)) throw new Error("Saved race pilot mapping is incomplete. Review Race History before confirming.");
+      return { ...row, laps: pilot.lapTimes.slice() };
+    });
+    if (JSON.stringify(corrected) === JSON.stringify(race.results)) return false;
+    race.results = corrected;
+    save(); await flush();
+    note = "Results refreshed from Race History / Marshal. Check the corrected results, then confirm.";
+    render(); return true;
+  }
+
+  async function confirmResults() {
+    if (!pendingReview() || raceRunning || confirmingResults) return;
+    const race = byId(doc.races, doc.schedule.reviewRaceId);
+    if (!race) { note = "The result awaiting review is missing. Reload from gate before continuing."; render(); return; }
+    // Save the acknowledgement before loading another heat. On failure keep the
+    // review visible; a stale tab must not clear a newer gate-side result.
+    const reviewId = doc.schedule.reviewRaceId;
+    confirmingResults = true;
+    try {
+      if (await refreshReviewRace()) return;
+      doc.schedule.reviewRaceId = null;
+      save();
+      await flush();
+      if (typeof EventDirectorUI !== "undefined") EventDirectorUI.select(null);
+      if (doc.schedule.auto && doc.schedule.pos < sequence().length) loadStep(doc.schedule.pos);
+      else if (doc.schedule.auto) { doc.active = null; save(); }
+      note = "Results confirmed. Start the next race when the pilots are ready.";
+    } catch (error) {
+      doc.schedule.reviewRaceId = reviewId;
+      note = `${error.message} Results remain pending. Retry, or export your edits and reload from gate.`;
+    } finally {
+      confirmingResults = false;
+    }
+    render();
+  }
+
+  function skipStep(step) {
+    if (raceRunning || pendingReview() || raceOfStep(step)) return;
+    if (!confirm(`Skip Heat ${step + 1}? No result will be recorded. You can select it later to race it.`)) return;
+    doc.schedule.skipped = [...new Set([...(doc.schedule.skipped || []), step])];
+    doc.schedule.pos = nextAvailable(step + 1);
+    doc.active = null;
+    save();
+    if (doc.schedule.pos < sequence().length) loadStep(doc.schedule.pos);
+    else render();
+  }
+
+  function buildSchedule(rounds) {
+    if (raceRunning || pendingReview() || !doc.pilots.length) return;
+    if ((doc.groups.length || doc.schedule.blocks.length) && !confirm("Rebuild the groups and replace the heat order? Existing results are kept; group membership and future race order will change.")) return;
+    // buildGroups already asks before moving pilots who have raced.
+    if (!buildGroups()) return;
+    if (!doc.groups.length) return;
+    doc.schedule.blocks = [{ id: newId(), kind: "rotate", groupIds: doc.groups.filter(g => g.pilotIds.length).map(g => g.id), times: rounds }];
+    doc.schedule.pos = 0;
+    doc.schedule.skipped = [];
+    doc.active = null;
+    save();
   }
 
   // Race tab "Next Heat": skip to the following heat even if this one wasn't raced.
@@ -594,20 +743,28 @@ const RaceEvent = (() => {
   // After a race is saved: record it as the loaded heat's result, move to
   // the next heat and, with auto on, load it.
   function recordRace(raceData) {
+    if (typeof c5EventManaged !== "undefined" && c5EventManaged) {
+      // The gate already recorded the frozen heat and advanced its schedule.
+      // Replaying this through browser recordRace would associate it with the
+      // newly loaded heat or send an obsolete document over the gate's result.
+      return load();
+    }
     const group = enabled && activeGroup();
     if (doc && doc.races.some(r => r.timestamp === raceData.timestamp)) return;
     const pilots = raceData.pilots || [];
     if (!group || !pilots.length || !pilots.every(p => doc.active.seats[p.slot] != null)) return;
     syncFromSlots();
     const step = activeStep();
+    const resultId = newId();
     doc.races.push({
-      id: newId(), groupId: group.id, step, timestamp: raceData.timestamp, formatId: formatOf(group).id,
+      id: resultId, groupId: group.id, step, timestamp: raceData.timestamp, formatId: formatOf(group).id,
       results: pilots.map(p => ({ pilotId: doc.active.seats[p.slot], slot: p.slot, freq: p.frequency, laps: p.lapTimes.slice() })),
     });
+    if (doc.schedule.requireReview) doc.schedule.reviewRaceId = resultId;
     if (step != null) {
-      doc.schedule.pos = step + 1;
+      doc.schedule.pos = nextAvailable(step + 1);
       const seq = sequence();
-      if (doc.schedule.auto && doc.schedule.pos < seq.length) {
+      if (doc.schedule.auto && !pendingReview() && doc.schedule.pos < seq.length) {
         save();
         render();
         // The C5 reports the race over a moment after the stop.
@@ -640,6 +797,7 @@ const RaceEvent = (() => {
   }
 
   function statusLine() {
+    if (doc.schedule.reviewRaceId) return { cls: "c5p-warn", text: "Race saved. Review and confirm results in Event before preparing another race." };
     const group = activeGroup();
     const seq = sequence();
     if (!group) {
@@ -681,10 +839,10 @@ const RaceEvent = (() => {
     const sizeOpts = [2, 3, 4, 5, 6, 7, 8].map(n => `<option value="${n}"${n === doc.groupSize ? " selected" : ""}>${n} per group</option>`).join("");
     const bandOpts = bands().map(b => `<option value="${esc(b.value)}"${b.value === doc.band ? " selected" : ""}>${esc(b.label)} · ${b.freqs.length} ch</option>`).join("");
     host.innerHTML = `
-      <div class="calib-card c5p-panel ev-panel">
+      <div class="calib-card c5p-panel ev-panel${typeof EventDirectorUI !== "undefined" && !EventDirectorUI.statistics() ? " ev-simple-statistics" : ""}">
         <div class="calib-card-header c5p-head">
-          <input type="text" class="ev-title" data-f="name" maxlength="40" placeholder="Event name" value="${esc(doc.name)}">
-          <div class="c5p-headctl">
+          <input type="text" class="ev-title" data-f="name" maxlength="40" placeholder="Event name" aria-label="Event name" value="${esc(doc.name)}">
+          <div class="c5p-headctl"${typeof EventDirectorUI !== "undefined" && !EventDirectorUI.fullPage() ? ' style="display:none"' : ""}>
             <select class="c5p-mini" data-f="groupSize" title="Pilots per group">${sizeOpts}</select>
             <select class="c5p-mini" data-f="seed" title="How pilots are grouped">${seedOpts}</select>
             <button class="calib-wizard-btn" data-act="build" title="Put the pilots into groups and give them channels">Build groups</button>
@@ -694,7 +852,14 @@ const RaceEvent = (() => {
         </div>
         <div class="c5p-status ${st.cls}"><span class="c5p-dot"></span><span class="ev-status-text">${esc(st.text)}</span><span class="c5p-save" id="evSave"></span></div>
         ${note ? `<div class="c5p-fillnote">${esc(note)}</div>` : ""}
-        <div class="c5p-main ev-main">
+        ${typeof EventDirectorUI !== "undefined" ? EventDirectorUI.render({
+          doc, running: raceRunning, sequence, render, save, loadStep, skipStep, confirmResults, refreshReviewRace, buildSchedule,
+          raceOfStep, renderHeats, renderGroups, renderPilots, renderFormats, renderLeaderboard,
+          format: formatOf, frequency: seatFreq, channel: chName, bands, pilotName, winLabel: win => WIN[win] || win,
+          resultsTable: race => standingsTable(raceStandings(race), (race.format || formatById(race.formatId)).win),
+          advancedControls: () => `<div class="ev-actions"><label>Grouping method<select data-f="seed">${seedOpts}</select></label><button class="c5p-btn" data-act="build">Build groups</button><button class="c5p-btn" data-act="channels">Assign channels</button><button class="c5p-btn" data-act="edit-order">Edit heat order</button></div>`,
+          addPilots: names => names.forEach(name => doc.pilots.push({ id: newId(), name, phonetic: "", color: COLORS[doc.pilots.length % COLORS.length], freq: 0, enter: 0, exit: 0 })),
+        }) : `<div class="c5p-main ev-main">
           <div class="c5p-left">
             ${renderHeats()}
             ${renderGroups()}
@@ -704,12 +869,13 @@ const RaceEvent = (() => {
             ${renderPilots()}
           </div>
         </div>
-        ${renderFormats()}
+        ${renderFormats()}`}
         <div class="ev-actions ev-foot">
           <button class="c5p-btn c5p-small" data-act="export-results-csv"${doc.races.length ? "" : " disabled"} title="Every heat's result, one row per pilot">Results CSV</button>
           <button class="c5p-btn c5p-small" data-act="export-results-report"${doc.races.length ? "" : " disabled"} title="A page to print or share: leaderboard, groups and every heat">Results report</button>
           <button class="c5p-btn c5p-small" data-act="export-event" title="The whole event as one file: pilots, groups, formats, heat order and results">Export event</button>
           <button class="c5p-btn c5p-small" data-act="import-event" title="Replace this event with one from a file">Import event</button>
+          <button class="c5p-btn c5p-small" data-act="reload-event">Reload from gate</button>
           <button class="c5p-btn c5p-small ev-danger" data-act="new-event">New event</button>
         </div>
       </div>`;
@@ -726,7 +892,7 @@ const RaceEvent = (() => {
       const seq = doc && enabled ? sequence() : [];
       const n = doc && enabled ? nextStep() : 0;
       nextBtn.style.display = seq.length ? "" : "none";
-      nextBtn.disabled = raceRunning || n >= seq.length;
+      nextBtn.disabled = raceRunning || pendingReview() || n >= seq.length;
       nextBtn.title = n < seq.length ? `Load Heat ${n + 1} (${byId(doc.groups, seq[n])?.name})` : "Every heat has been raced";
     }
     if (!el) return;
@@ -854,7 +1020,7 @@ const RaceEvent = (() => {
     };
     const rows = [...stats.values()].filter(s => s.races).sort(sorts[leaderSort] || sorts.best3);
     const th = (key, label) => `<th><button class="ev-sort${leaderSort === key ? " ev-sort-on" : ""}" data-act="sort" data-key="${key}">${label}</button></th>`;
-    return `<div class="ev-section"><div class="c5p-list-head ev-sec-head"><span>Leaderboard</span>
+    return `<div class="ev-section ev-leaderboard"><div class="c5p-list-head ev-sec-head"><span>Leaderboard</span>
         <button class="ev-x ev-info-btn" data-act="elo-info" title="How Elo works">How Elo works</button></div>
       <div class="ev-info" id="evEloInfo" hidden>
         <b>Elo</b> rates pilots by who they beat, not how fast they are, so pilots from different groups and formats can be compared.
@@ -899,18 +1065,17 @@ const RaceEvent = (() => {
     const used = id => doc.groups.filter(g => g.formatId === id).map(shortName);
     const rows = doc.formats.map(f => `
       <div class="ev-frow" data-coll="formats" data-id="${f.id}">
-        <input type="text" class="c5p-mini" data-f="name" maxlength="24" value="${esc(f.name)}" aria-label="Name">
-        <select class="c5p-mini" data-f="win" aria-label="Win condition">${winOpts(f.win)}</select>
-        <input type="number" class="c5p-mini" data-f="maxLaps" min="0" max="50" value="${f.maxLaps}" title="0 = no limit" aria-label="Laps">
-        <input type="number" class="c5p-mini" data-f="timeLimitS" min="0" max="1800" step="30" value="${f.timeLimitS}" title="Steps of 30 s; 0 = no limit" aria-label="Time limit">
-        <input type="number" class="c5p-mini" data-f="minLapS" min="1" max="20" step="0.5" value="${f.minLapS}" aria-label="Minimum lap">
-        <select class="c5p-mini" data-f="countdown" aria-label="Start"><option value="1"${f.countdown == 1 ? " selected" : ""}>10 s countdown</option><option value="0"${f.countdown == 0 ? " selected" : ""}>Random 1–5 s</option></select>
+        <label>Format name<input type="text" class="c5p-mini" data-f="name" maxlength="24" value="${esc(f.name)}"></label>
+        <label>Rank results by<select class="c5p-mini" data-f="win">${winOpts(f.win)}</select></label>
+        <label>Lap target<input type="number" class="c5p-mini" data-f="maxLaps" min="0" max="50" value="${f.maxLaps}" title="0 = no lap limit"></label>
+        <label>Heat duration (seconds)<input type="number" class="c5p-mini" data-f="timeLimitS" min="0" max="1800" step="30" value="${f.timeLimitS}" title="Steps of 30 s; 0 = no time limit"></label>
+        <label>Ignore laps shorter than (seconds)<input type="number" class="c5p-mini" data-f="minLapS" min="1" max="20" step="0.5" value="${f.minLapS}"></label>
+        <label>Start countdown<select class="c5p-mini" data-f="countdown"><option value="1"${f.countdown == 1 ? " selected" : ""}>10 s countdown</option><option value="0"${f.countdown == 0 ? " selected" : ""}>Random 1–5 s</option></select></label>
         <span class="c5p-hint ev-frow-used">${used(f.id).length ? "Groups " + esc(used(f.id).join(", ")) : "Not used"}</span>
         <button class="ev-x" data-act="del" title="Remove format"${doc.formats.length < 2 ? " disabled" : ""}>✕</button>
       </div>`).join("");
     return `<div class="ev-section ev-formats">
       <div class="c5p-list-head ev-sec-head"><span>Race formats</span></div>
-      <div class="ev-frow ev-frow-head"><span>Name</span><span>Win condition</span><span>Laps</span><span>Time limit (s)</span><span>Min lap (s)</span><span>Start</span><span>Used by</span><span></span></div>
       ${rows}
       <div class="ev-actions"><button class="c5p-btn c5p-small" data-act="add-format">Add format</button>
         <span class="c5p-hint">Laps 0 and time 0 mean no limit. A group's format is applied when its heat loads.</span></div>
@@ -1419,6 +1584,8 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
   function onChange(e) {
     if (!doc) return;
     const t = e.target;
+    if (typeof EventDirectorUI !== "undefined" && EventDirectorUI.handleChange(t)) return;
+    if (raceRunning) { note = "Stop and save the race before editing the event."; render(); return; }
     const holder = t.closest("[data-coll]");
     if (!holder) {
       // Header and heat settings.
@@ -1427,6 +1594,11 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
       else if (t.dataset.f === "band") doc.band = t.value;
       else if (t.dataset.f === "groupSize") doc.groupSize = Number(t.value);
       else if (t.dataset.f === "auto") doc.schedule.auto = t.checked;
+      else if (t.dataset.f === "requireReview") {
+        if (pendingReview()) { note = "Confirm the pending results before changing result review."; render(); return; }
+        doc.schedule.requireReview = t.checked;
+      }
+      else if (t.dataset.f === "autoChannels") doc.schedule.autoChannels = t.checked;
       else return;
       save();
       renderKeepingFocus();
@@ -1457,15 +1629,24 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
 
   function onClick(e) {
     if (!doc) return;
+    const uiButton = e.target.closest("[data-ui-act]");
+    if (typeof EventDirectorUI !== "undefined" && EventDirectorUI.handleClick(uiButton)) return;
     const btn = e.target.closest("[data-act]");
     if (!btn) {
       // Clicking a heat loads it.
       const heat = e.target.closest("[data-step]");
-      if (heat && +heat.dataset.step !== activeStep()) loadStep(+heat.dataset.step);
+      if (heat && typeof EventDirectorUI !== "undefined" && !EventDirectorUI.fullPage()) { EventDirectorUI.select(+heat.dataset.step); render(); }
+      else if (heat && +heat.dataset.step !== activeStep()) loadStep(+heat.dataset.step);
       return;
     }
     const holder = e.target.closest("[data-coll]");
     const coll = holder && holder.dataset.coll, id = holder && +holder.dataset.id;
+    if (raceRunning && !["export-pilots", "export-event", "export-results-csv", "export-results-report", "sort", "elo-info"].includes(btn.dataset.act)) {
+      note = "Stop and save the race before editing the event."; render(); return;
+    }
+    if (pendingReview() && ["new-event", "import-event", "restart", "del-race", "del", "build", "race-now"].includes(btn.dataset.act)) {
+      note = "Confirm the saved results before changing the event or schedule."; render(); return;
+    }
     switch (btn.dataset.act) {
       case "add-pilot":
         doc.pilots.push({ id: newId(), name: "", phonetic: "", color: COLORS[doc.pilots.length % COLORS.length], freq: 0, enter: 0, exit: 0 });
@@ -1494,6 +1675,10 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
       case "export-pilots": exportPilots(); return;
       case "import-pilots": importPilots(); return;
       case "export-event": exportEvent(); return;
+      case "reload-event":
+        if ((editVersion !== savedVersion || conflict) && !confirm("Discard unsaved Event edits and reload the gate's document? Export first if you need to keep them.")) return;
+        if (!saving) load({ force: true });
+        return;
       case "import-event": importEvent(); return;
       case "export-results-csv": exportResultsCsv(); return;
       case "export-results-report": exportResultsReport(); return;
@@ -1540,6 +1725,7 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
       case "new-event":
         if (!confirm("Start a new event? This removes every pilot, group, heat and result in the current one.")) return;
         doc = blank();
+        if (typeof EventDirectorUI !== "undefined") EventDirectorUI.resetEvent();
         note = "";
         break;
       default:
@@ -1555,5 +1741,5 @@ ${groups ? `<h2>Groups</h2>${groups}` : ""}
     host.addEventListener("click", onClick);
   }
 
-  return { show, setEnabled, raceLabel, recordRace, nextHeat, refreshRaceTab: renderRaceTab, reload: load };
+  return { show, setEnabled, raceLabel, recordRace, nextHeat, flush, pendingReview, confirmResults, refreshReviewRace, refreshRaceTab: renderRaceTab, reload: load };
 })();

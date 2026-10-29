@@ -100,6 +100,7 @@ void* g_audioAnnouncer = nullptr;
 #endif
 static LapTimer timer;
 static C5RaceControl c5RaceControl;
+static EventDirector eventDirector;
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
 static Qmi8658 g_qmi8658;
 static FpvLcdUI* g_lcdUi = nullptr;
@@ -551,6 +552,9 @@ void setup() {
 #endif
     ws.setC5Receiver(&c5Link, &c5MultiPilot);
     c5RaceControl.begin(&config, &timer, &c5MultiPilot, &raceHistory);
+    eventDirector.begin(&config, &storage, &raceHistory);
+    c5RaceControl.setEvents(&eventDirector);
+    ws.setEventDirector(&eventDirector);
     ws.setC5RaceControl(&c5RaceControl);
 
     // Start the C5 UART last so no later peripheral initialization can reclaim
@@ -617,6 +621,8 @@ void loop() {
     uint32_t currentTimeMs = nowMs;
     if (config.getReceiverRadio() == 2) startC5Task();
     c5RaceControl.update();
+    if (sdInitAttempted) eventDirector.update();
+    if (eventDirector.takeChanged()) ws.triggerConfigUpdated();
     if (const char* state = c5RaceControl.takeStateEvent()) ws.notifyGateRaceState(state);
     
     // Debug: Periodic "alive" message every 5 seconds with detailed memory stats
