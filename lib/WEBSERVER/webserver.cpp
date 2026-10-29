@@ -1,4 +1,5 @@
 #include "webserver.h"
+#include "elrs_backpack.h"
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
@@ -63,10 +64,12 @@ static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
 static wifi_mode_t effectiveWifiModeForRole(bool primaryAp, Config* /*cfg*/) {
-    return primaryAp ? WIFI_AP : WIFI_STA;
+    // ESP-NOW to an ELRS backpack needs the station interface as well.
+    return primaryAp ? (elrsBackpack.enabled() ? WIFI_AP_STA : WIFI_AP) : WIFI_STA;
 }
 
 void Webserver::requestWifiStackReinit() {
+    elrsBackpack.stop();
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true, true);
     wifiMode = WIFI_OFF;
@@ -773,6 +776,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             case WIFI_AP:
                 DEBUG("Changing to WiFi AP mode\n");
 
+                elrsBackpack.stop();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -781,6 +785,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 wifiMode = WIFI_AP;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
                 WiFi.mode(effectiveWifiModeForRole(true, conf));
+                elrsBackpack.afterModeSet();
                 changeTimeMs = currentTimeMs;
 
                 // Power-saving settings for AP mode to prevent boot-looping
@@ -791,7 +796,10 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 DEBUG("Starting WiFi AP: %s with password: %s\n", wifi_ap_ssid.c_str(), wifi_ap_password);
                 
                 // Start AP with max 4 connections to limit power draw.
-                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, 6, 0, 4);
+                // ELRS backpacks talk on channel 1.
+                if (WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, elrsBackpack.enabled() ? 1 : 6, 0, 4)) {
+                    elrsBackpack.afterApStarted();
+                }
 
 #ifdef SEEED_XIAO_ESP32S3
                 // Disable WiFi power saving for faster responsiveness on XIAO
@@ -811,6 +819,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 break;
             case WIFI_STA:
                 DEBUG("Connecting to WiFi network\n");
+                elrsBackpack.stop();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -897,7 +906,7 @@ static void handleRoot(AsyncWebServerRequest *request) {
     String host = request->host();
     if (!isIp(host)) {
         // Get the device's IP address
-        IPAddress deviceIP = (WiFi.getMode() == WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+        IPAddress deviceIP = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
         String redirectUrl = "http://" + deviceIP.toString() + request->url();
         DEBUG("Redirecting %s to %s\n", host.c_str(), redirectUrl.c_str());
         request->redirect(redirectUrl);
@@ -1020,6 +1029,7 @@ void Webserver::startServices() {
     DEBUG("CORS headers configured\n");
 
     startLittleFS();
+    elrsBackpack.registerRoutes(server);
     
     // Note: storage is already initialized in main.cpp before webserver starts
     // Do NOT call storage->init() here as it would reset the sdAvailable flag!
@@ -2110,7 +2120,7 @@ EEPROM:\n\
         
         // Get WiFi mode
         wifi_mode_t mode = WiFi.getMode();
-        if (mode == WIFI_AP) {
+        if (mode & WIFI_AP) {
             doc["mode"] = "AP";
             doc["ssid"] = WiFi.softAPSSID();
             doc["ip"] = WiFi.softAPIP().toString();
