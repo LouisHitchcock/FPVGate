@@ -29,6 +29,9 @@ public:
     void begin(Config* config, LapTimer* timer, C5MultiPilot* detector, RaceHistory* history);
     void setEvents(C5RaceEvents* events) { events_ = events; }
     bool requestStart(uint32_t timestamp = 0);
+    bool requestStartAfterCountdown(uint32_t timestamp = 0);
+    bool completeCountdownStart();
+    bool consumeCountdownRequest();
     bool requestStop(); // also retries a failed save, without stopping twice
     bool requestClear();
     void update();
@@ -46,6 +49,9 @@ private:
     Command command_ = Command::None;
     uint32_t requestedTimestamp_ = 0;
     bool stopAfterStart_ = false;
+    bool countdownRequested_ = false;
+    bool countdownActive_ = false;
+    uint32_t countdownUntilMs_ = 0;
     uint32_t lastTimestamp_ = 0;
     uint32_t heatMs_ = 0;
     float trackLength_ = 0;

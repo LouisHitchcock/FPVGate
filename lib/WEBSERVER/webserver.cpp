@@ -360,7 +360,7 @@ static void sendSyncCommand(Config* config, const char* endpoint) {
 // via pendingRaceState, which handleWebUpdate() picks up.
 void Webserver::triggerStart() {
     if (conf->getReceiverRadio() == 2 && c5RaceControl) {
-        c5RaceControl->requestStart();
+        c5RaceControl->completeCountdownStart();
         return;
     }
     sendSyncCommand(conf, "/timer/start");

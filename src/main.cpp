@@ -769,7 +769,9 @@ void loop() {
         }
         // Sync display with web timer actions (countdown overlay, STOPPED overlay)
         auto lcdEv = ws.consumePendingLcdEvent();
-        if (lcdEv == Webserver::PendingLcdEvent::Countdown) {
+        if (c5RaceControl.consumeCountdownRequest()) {
+            if (g_lcdUi) g_lcdUi->requestCountdown(true);
+        } else if (lcdEv == Webserver::PendingLcdEvent::Countdown) {
             g_lcdUi->requestCountdown(false);  // Web sends /timer/start separately
         } else if (lcdEv == Webserver::PendingLcdEvent::ShowFinish) {
             g_lcdUi->requestShowFinish();

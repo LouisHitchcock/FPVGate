@@ -134,7 +134,7 @@ void ElrsBackpack::service(uint32_t now) {
     const Command action = ElrsBackpackCore::decide(command, state, &reason);
     const char* name = command == Command::Start ? "start" : "stop";
     if (action == Command::Start) {
-        startPending_ = race_->requestStart();
+        startPending_ = race_->requestStartAfterCountdown();
         result(name, startPending_ ? "starting" : "notReady");
     } else if (action == Command::Stop) {
         race_->requestStop();

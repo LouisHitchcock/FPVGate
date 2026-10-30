@@ -40,6 +40,39 @@ bool C5RaceControl::requestStart(uint32_t timestamp) {
     return accepted;
 }
 
+bool C5RaceControl::requestStartAfterCountdown(uint32_t timestamp) {
+    if (!config_) return false;
+    portENTER_CRITICAL(&mux_);
+    const bool accepted = !status_.running && !status_.busy && !status_.saveFailed;
+    if (accepted) {
+        countdownRequested_ = true;
+        countdownActive_ = true;
+        status_.busy = true;
+        requestedTimestamp_ = timestamp;
+        countdownUntilMs_ = millis() + (config_->getRaceCountdownMode() == 0
+            ? 5000u + (uint32_t)random(0, 4001) : 10600u);
+        event_ = "starting";
+    }
+    portEXIT_CRITICAL(&mux_);
+    return accepted;
+}
+
+bool C5RaceControl::consumeCountdownRequest() {
+    portENTER_CRITICAL(&mux_);
+    const bool requested = countdownRequested_;
+    countdownRequested_ = false;
+    portEXIT_CRITICAL(&mux_);
+    return requested;
+}
+
+bool C5RaceControl::completeCountdownStart() {
+    portENTER_CRITICAL(&mux_);
+    const bool accepted = countdownActive_ && !status_.running && status_.busy && !status_.saveFailed;
+    if (accepted) countdownUntilMs_ = millis();
+    portEXIT_CRITICAL(&mux_);
+    return accepted;
+}
+
 bool C5RaceControl::requestStop() {
     portENTER_CRITICAL(&mux_);
     // A repeated stop is harmless, including while the first is being saved.
@@ -65,6 +98,13 @@ bool C5RaceControl::requestClear() {
 }
 
 void C5RaceControl::update() {
+    if (countdownActive_) {
+        if ((int32_t)(millis() - countdownUntilMs_) < 0) return;
+        countdownActive_ = false;
+        portENTER_CRITICAL(&mux_);
+        command_ = Command::Start;
+        portEXIT_CRITICAL(&mux_);
+    }
     Command command;
     uint32_t timestamp;
     portENTER_CRITICAL(&mux_);
