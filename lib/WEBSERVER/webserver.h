@@ -9,17 +9,41 @@
 #include "transport.h"
 #include "trackmanager.h"
 #include "webhook.h"
-#include "rotorhazard.h"
+#include "c5link.h"
+#include "c5multipilot.h"
+#include "c5racecontrol.h"
+#include "eventdirector.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
+#define WEB_C5_SEND_TIMEOUT_MS 100   // ESP32-C5 multi-pilot view, 10 per second
 #define WEB_RSSI_SEND_TIMEOUT_MS 200
+#define WEB_C5_FAST_SEND_MS 40       // C5 RSSI debug popout, 25 frames a second
 #define WEB_SSE_KEEPALIVE_MS 15000
+#define RH_LINK_TIMEOUT_MS 15000     // RotorHazard plugin polls the clock every 5 s
+#define WEB_RH_RSSI_SEND_MS 50       // RSSI to the RotorHazard plugin, 20 per second
+#define WEB_TCP_SEND_BUFFER (2 * 1436)   // per connection: two segments (TCP_MSS 1436), see capSendBuffer()
+#define WEB_FILE_BUFFER 512          // stdio buffer per file served, down from Arduino's 4 KB
+#define WEB_LOW_HEAP_BYTES 24576    // below this, new requests get 503 rather than run the heap out
+#define WEB_SSE_BACKLOG 4            // live RSSI/status skipped while a stream's clients have more waiting
+#define WEB_HEAP_SNAPSHOT_BYTES 20480   // a low below this records what was going on (/api/system/info lowHeap)
+#define EVENT_PATH "/event.json"     // race director event (SD if present, else LittleFS)
+#define EVENT_MAX_BYTES (512u * 1024u)
+#define C5_IMAGE_PATH "/c5fw.bin"          // LittleFS: C5 firmware waiting to be sent
+#define C5_IMAGE_TMP_PATH "/c5fw.tmp"
+#define C5_IMAGE_MAX_BYTES 0x1E0000u       // one C5 app partition (FPVGateC5MK partitions.csv)
 
 class Webserver : public TransportInterface {
    public:
-    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr = nullptr);
+    void init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr);
     void setTransportManager(TransportManager *tm);
+    void setC5Receiver(C5Link *link, C5MultiPilot *multiPilot);
+    void setC5RaceControl(C5RaceControl* control) { c5RaceControl = control; }
+    void setEventDirector(EventDirector* director) { eventDirector = director; }
+    void notifyGateRaceState(const char* state) {
+        pendingRaceState = state;
+        if (strcmp(state, "stopped") == 0) setPendingLcdEvent(PendingLcdEvent::ShowFinish);
+    }
     void recheckWifiMode();  // Re-evaluate WiFi mode after config changes
     /** Disconnect and re-apply AP/STA Wi-Fi mode (public so LCD/UI callers can force a radio reinit). */
     void requestWifiStackReinit();
@@ -51,6 +75,13 @@ class Webserver : public TransportInterface {
     void setPendingLcdEvent(PendingLcdEvent ev);
     PendingLcdEvent consumePendingLcdEvent();
 
+    // RotorHazard plugin 2: the plugin polls /api/rh/clock. While it has done
+    // so recently it owns lap timing, and every pass streams to it as an
+    // "rhPass" event (time in esp_timer microseconds).
+    bool rhLinked(uint32_t nowMs) const { return rhLinkMs_ && (nowMs - rhLinkMs_) < RH_LINK_TIMEOUT_MS; }
+    // RX5808 passes from LapTimer (millis()); C5 passes come from C5MultiPilot.
+    void queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak);
+
     /** True once WiFi (AP or STA) and web/DNS services are up. Used for boot overlay. */
     bool isServicesStarted() const { return servicesStarted; }
 
@@ -73,8 +104,11 @@ class Webserver : public TransportInterface {
     RX5808 *rx;
     TrackManager *trackManager;
     WebhookManager *webhooks;
-    RHManager *rhManager;
     TransportManager *transportMgr;
+    C5Link *c5Link = nullptr;
+    C5MultiPilot *c5MultiPilot = nullptr;
+    C5RaceControl* c5RaceControl = nullptr;
+    EventDirector* eventDirector = nullptr;
 
     wifi_mode_t wifiMode = WIFI_OFF;
     wl_status_t lastStatus = WL_IDLE_STATUS;
@@ -104,4 +138,39 @@ class Webserver : public TransportInterface {
 
     // Pending LCD overlay event (set by HTTP timer handlers, consumed by main loop)
     volatile PendingLcdEvent _pendingLcdEvent = PendingLcdEvent::None;
+
+    // RotorHazard plugin 2 link (see rhLinked()).
+    volatile uint32_t rhLinkMs_ = 0;
+    uint32_t rhRssiSentMs_ = 0;
+    struct RhPass {
+        uint8_t slot;
+        int64_t us;
+        uint8_t peak;
+    };
+    static constexpr uint8_t RH_PASS_QUEUE = 8;
+    RhPass rhPasses_[RH_PASS_QUEUE] = {};
+    uint8_t rhPassCount_ = 0;
+    portMUX_TYPE rhPassMux_ = portMUX_INITIALIZER_UNLOCKED;
+    // rawPeak: the C5's 0..1023 peak, or -1 for RX5808 passes (no raw scale).
+    void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1, int64_t levelUs = -1);
+    void sendRhUpdates(uint32_t currentTimeMs);
+
+    // Race director event (/api/event): written to EventDirector::UPLOAD as it
+    // arrives, then renamed over EVENT_PATH once complete.
+    bool eventUploadOk_ = false;
+    AsyncWebServerRequest* eventUploadRequest_ = nullptr;
+    std::shared_ptr<EventDirector::Lease> eventUploadLease_;
+    size_t eventUploadBytes_ = 0;
+
+    // C5 firmware image (/api/c5/firmware), for C5Link::requestUpdate().
+    struct C5Image {
+        bool ok = false;
+        uint32_t size = 0;
+        uint8_t sha256[32] = {};
+        char version[16] = {};   // "1.0.0"
+        char board[12] = {};     // "c5zero"
+        char error[48] = {};
+    };
+    C5Image c5Image_;
+    void c5ImageChunk(uint8_t *data, size_t len, size_t index, size_t total);
 };

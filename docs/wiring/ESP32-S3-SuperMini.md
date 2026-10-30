@@ -1,81 +1,41 @@
-# ESP32-S3 Super Mini (4MB Flash) - Wiring Diagram
+# ESP32-S3 Super Mini (4 MB) wiring
 
-**Compact form factor for FPVGate**
+Alpha branch mapping from `lib/CONFIG/config.h`. Environment: `ESP32S3SuperMini`.
+GPIO numbers are not physical header positions.
 
-## Pin Configuration
+## Pin configuration
 
+| Signal | Pin / GPIO |
+| --- | --- |
+| RX5808 RSSI | 3 |
+| RX5808 DATA / CH1 | 6 |
+| RX5808 SELECT / CH2 | 7 |
+| RX5808 CLOCK / CH3 | 4 |
+| SD CS / SCK / MOSI / MISO | 8 / 2 / 10 / 9 |
+| Status LED definition | 2 (conflicts with SD SCK) |
+| WS2812 data; count | 1; 2 LEDs |
+| Active buzzer | 5 |
+| Battery divider midpoint | 0 |
+
+## Board-specific notes
+
+Retained source target, outside the six-board Alpha 5 packages. It uses the 4 MB partition table (filesystem `0x290000`), CDC serial and Wi-Fi; it does not enable USB networking. GPIO2 is defined for both the status LED and SD SCK: this is an unresolved source conflict, not permission to attach both peripherals. GPIO0/3 are strapping pins. Board revisions vary, so check the module before using this mapping. Battery monitoring is not compiled by default. Prefer a shipping target for new builds.
+
+## Power and setup
+
+Use a regulated board supply, common ground and 3.3 V signal levels.
+SD cards need 3.3 V at the card; check whether the breakout includes a regulator.
+Match an RX5808 carrier's VCC to its regulator/input specification.
+Optional buzzers must stay within the GPIO drive rating or use a transistor.
+There is no GPIO Wi-Fi/RotorHazard mode switch in this firmware.
+
+Build and upload both firmware and web assets from the repository root:
+
+```sh
+pio run -e ESP32S3SuperMini -t upload
+pio run -e ESP32S3SuperMini -t uploadfs
 ```
-ESP32-S3        RX5808           SD Card          Optional
-GPIO3    ────── RSSI             
-GPIO6    ────── CH1 (DATA)       
-GPIO7    ────── CH2 (SELECT)     
-GPIO4    ────── CH3 (CLOCK)      
-GPIO8    ────────────────────── CS
-GPIO2    ────────────────────── SCK
-GPIO10   ────────────────────── MOSI
-GPIO9    ────────────────────── MISO
-GPIO1    ─────────────────────────────────── LED (External)
-GPIO48   ─────────────────────────────────── WS2812 RGB LED
-GPIO5    ─────────────────────────────────── Buzzer (3.3V-5V)
-GPIO0    ─────────────────────────────────── Battery Voltage (via divider)
-GPIO1    ─────────────────────────────────── Mode Switch
-GND      ────── GND           ─── GND      ─── GND
-5V       ────── +5V           ─── 5V       ─── 5V
-```
 
-## Component Requirements
-
-| Component | Required | Notes |
-|-----------|----------|-------|
-| **ESP32-S3 Super Mini** | Yes | 4MB Flash variant |
-| **RX5808 Module** | Yes | 5.8GHz receiver ([SPI mod required](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)) |
-| **MicroSD Card** | Yes | FAT32, 1GB+ for audio storage |
-| **5V Power Supply** | Yes | USB power or any 5V power source |
-| **WS2812 RGB LEDs** | Optional | 1-2 LEDs for visual feedback (GPIO48) |
-| **External LED** | Optional | Single LED for basic status (GPIO1) |
-| **Active Buzzer** | Optional | 3.3V-5V for audio beeps (GPIO5) |
-| **Mode Switch** | Optional | LOW=WiFi, HIGH=RotorHazard mode (GPIO1) |
-
-## Pin Details
-
-### RX5808 Module
-- **RSSI (GPIO3)**: Analog signal strength input
-- **CH1/DATA (GPIO6)**: SPI data line
-- **CH2/SELECT (GPIO7)**: SPI chip select
-- **CH3/CLOCK (GPIO4)**: SPI clock
-
-### SD Card (SPI)
-- **CS (GPIO8)**: Chip select
-- **SCK (GPIO2)**: SPI clock
-- **MOSI (GPIO10)**: Master out, slave in
-- **MISO (GPIO9)**: Master in, slave out
-
-### Visual Feedback
-- **GPIO48**: WS2812/NeoPixel RGB LED (addressable)
-- **GPIO1**: External single LED (basic status)
-
-### Audio & Control
-- **GPIO5**: Active buzzer output
-- **GPIO1**: Mode selection switch (LOW=WiFi, HIGH=RotorHazard)
-- **GPIO0**: Battery voltage input (requires 2:1 voltage divider for LiPo monitoring)
-
-## Power Supply
-
-The ESP32-S3 Super Mini requires a stable 5V power supply:
-- **USB Power**: Easiest option - powered via USB-C port
-- **External 5V**: Any regulated 5V power source (battery pack, bench supply, etc.)
-- **Current Draw**: ~200-400mA typical, up to 500mA peak with WiFi active
-
-## Notes
-
-- **Compact Design**: Smaller footprint than DevKitC-1, ideal for portable builds
-- **4MB Flash**: Limited storage compared to 8MB variant - sufficient for standard use
-- **SD Card**: Ensure FAT32 formatting and proper 5V power for reliable operation
-- **RX5808 SPI Mod**: Required for frequency control - [See guide](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)
-- **RGB LED**: Uses RMT peripheral on ESP32-S3 - compatible with WS2812/WS2812B/SK6812
-- **Battery Monitoring**: Requires 2:1 voltage divider (100K/100K resistors) from battery to GPIO0
-
-## References
-
-- [ESP32-S3 Super Mini Documentation](https://www.espboards.dev/esp32/esp32-s3-super-mini/)
-- [Complete Hardware Guide](../HARDWARE_GUIDE.md)
+Back up races before filesystem uploads. See the [hardware guide](../HARDWARE_GUIDE.md),
+[battery guide](../BATTERY_MONITORING.md) and
+[C5 receiver guide](../C5_MULTI_PILOT.md) for the rest of the procedure.

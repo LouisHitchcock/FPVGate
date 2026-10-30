@@ -38,12 +38,12 @@ The ESP32-S3 ADC cannot measure more than about 3.3 V. A LiPo pack is higher tha
 that, so a resistor divider scales the pack voltage down to something the pin can
 read, and the firmware multiplies back up.
 
-```
-Battery+ ──┬── R1 ──┬── ADC pin
-           │        │
-          GND       R2
-                    │
-                   GND
+```text
+Battery+ --- R1 ---+--- ADC pin
+                  |
+                  R2
+                  |
+Battery- -------- GND
 ```
 
 The pin sees `Vbat x R2 / (R1 + R2)`, so:
@@ -119,19 +119,27 @@ per-cell figure and equally healthy.
 
 ## Per-board defaults
 
-Defined in `lib/CONFIG/config.h`. `VBAT_SCALE` is the compiled-in default ratio
-and `VBAT_ADD` the calibration offset in tenths of a volt.
+Defined in `lib/CONFIG/config.h`. `VBAT_SCALE` is a fallback ratio;
+normal initialization uses the saved `batteryVoltageDivider`. `VBAT_ADD`
+is the offset in tenths of a volt. The LCD target raises ratios below 3.2
+to 3.3 during config handling/initialization.
+
+Monitoring is compiled by default for LilyGO, LCD, bare XIAO S3, Solo and
+XIAO S3 Plus. AIO, C5MK AIO, DevKitC, Super Mini and S3-ETH do not include
+it by default; a custom build needs `ENABLE_BATTERY_TEST`. A pin definition
+alone does not enable telemetry. A bare XIAO needs an external divider.
 
 | Board | ADC pin | Default ratio | Offset |
 |---|---|---|---|
-| FPVGate AIO | GPIO1 (D0) | 2.0 | +0.2 V |
+| FPVGate AIO / C5MK AIO | GPIO1 (D0) | 2.0 | +0.2 V |
 | FPVGate Solo | GPIO1 (D0) | 2.0 | +0.2 V |
 | XIAO ESP32S3 Plus | GPIO1 (D0) | 2.0 | +0.2 V |
-| Seeed XIAO ESP32S3 | GPIO0 | 2.0 | +0.2 V |
+| Seeed XIAO ESP32S3 | GPIO1 (D0), external divider | 2.0 | +0.2 V |
 | ESP32-S3 DevKitC-1 | GPIO1 | 2.0 | +0.2 V |
 | ESP32-S3 SuperMini | GPIO0 | 2.0 | +0.2 V |
 | LilyGO T-Energy S3 | GPIO3 | 2.0 | +0.2 V |
 | Waveshare ESP32-S3-LCD-2 | GPIO5 | 3.3 | 0 V |
+| Waveshare S3-ETH | GPIO2, external divider | 2.0 | +0.2 V |
 
 > **The default ratio of 2.0 suits a 1S pack only.** At 2.0 the pin reaches
 > 3.3 V when the pack is at 6.6 V, so a fully charged 2S pack at 8.4 V would put
@@ -153,14 +161,15 @@ reading is usually a little off even with the right ratio.
 2. Compare against the voltage in the web UI.
 3. Adjust **Voltage Divider Ratio** until they agree.
 
-Because the reading is proportional to the ratio, scale it:
+Allow for the fixed board offset when scaling:
 
 ```
-new ratio = current ratio x (multimeter voltage / displayed voltage)
+new ratio = current ratio x ((multimeter voltage - offset) / (displayed voltage - offset))
 ```
 
-For example, a ratio of 4.3 showing 11.8 V against a true 12.4 V needs
-`4.3 x (12.4 / 11.8)` = **4.52**.
+For zero offset, a ratio of 4.3 showing 11.8 V against 12.4 V needs
+`4.3 x (12.4 / 11.8)` = **4.52**. With a +0.2 V offset use the offset-aware
+formula and recheck after rounding to the UI's supported setting.
 
 Calibrate near the middle of the pack's range rather than at full charge, so the
 error is spread across the range you actually fly in.
@@ -174,14 +183,14 @@ the per-cell voltage against the **Low Battery Alarm (per cell)** setting and
 shows a warning, with 0.1 V of hysteresis so it does not flicker at the
 threshold.
 
-This has a consequence worth understanding: **if no browser is connected to the
+With the current default/UI alarm path, **if no browser is connected to the
 gate, nothing warns you.** The pack can run flat with no buzzer and no LED.
 
 The firmware contains an on-gate alarm — `BatteryMonitor::checkBatteryState()`
 beeps the buzzer and blinks the LED — but it only runs when its threshold is
 above zero, and the threshold is currently always zero. The config default is
 `conf.alarm = 0` and the web UI sends `alarm: 0`, marked *"Legacy alarm field (no
-longer used)"*. So that path never fires today.
+longer used)"*. So that path is not an enabled standalone alarm in the normal UI workflow.
 
 > If you need an alert that works without a browser open, this is the gap to
 > close. It is a firmware change, not a settings change.

@@ -117,7 +117,10 @@ void Config::load(void) {
     // Handle version migration
     if (version != CONFIG_VERSION) {
         DEBUG("EEPROM config version mismatch (found=%u, expected=%u)\n", version, CONFIG_VERSION);
-        
+        // The v24 fields sit in bytes the old 832-byte EEPROM didn't have
+        // (they read back as 0xFF), so every migration path fills them.
+        if (version >= 10 && version < 24) initC5PilotIdentity();
+
         // Migration from version 21 to 22: reinterpret maxHeatTime field from
         // minutes to 30-second blocks. Storage layout unchanged (both uint8_t
         // at the same offset); value is doubled so existing "1 min" stays
@@ -142,6 +145,29 @@ void Config::load(void) {
             modified = true;
             write();
             DEBUG("Migration complete, config preserved\n");
+        }
+        else if (version == 23) {
+            DEBUG("Migrating config from v23 to v24 (C5 pilot names, colours, race slots)\n");
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
+        }
+        else if (version == 22) {
+            // v23 adds C5 profiles in the existing reserved tail.
+            conf.c5PilotCount = 1;
+            conf.c5Frequencies[0] = conf.frequency;
+            conf.c5EnterRssi[0] = conf.enterRssi;
+            conf.c5ExitRssi[0] = conf.exitRssi;
+            for (uint8_t i = 1; i < 8; ++i) {
+                conf.c5Frequencies[i] = 0;
+                conf.c5EnterRssi[i] = conf.enterRssi;
+                conf.c5ExitRssi[i] = conf.exitRssi;
+            }
+            conf.c5Gain = 30;
+            initC5PilotIdentity();   // again, now slot 0 has a frequency
+            conf.version = CONFIG_VERSION | CONFIG_MAGIC;
+            modified = true;
+            write();
         }
         // Migration from version 19 to 22: add raceCountdownMode + maxHeatTime30s
         // (carved out of _reservedELRS padding). Preserve the post-merge
@@ -372,6 +398,63 @@ void Config::load(void) {
         modified = true;
     }
 
+    // Sanity: receiver type and the ESP32-C5 pilot slots. Configs migrated
+    // from before v23 never initialised the C5 fields (they reused old
+    // reserved bytes), so anything out of range goes back to defaults.
+    if (conf.receiverRadio > 2) {
+        conf.receiverRadio = 0;
+        modified = true;
+    }
+#ifdef FIXED_RECEIVER_RADIO
+    // Boards with only one receiver fitted (the C5MK AIO has no RX5808).
+    if (conf.receiverRadio != FIXED_RECEIVER_RADIO) {
+        conf.receiverRadio = FIXED_RECEIVER_RADIO;
+        modified = true;
+    }
+#endif
+    if (conf.c5Gain > 89) {
+        conf.c5Gain = 30;
+        modified = true;
+    }
+    {
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < 8; ++i) {
+            uint16_t f = conf.c5Frequencies[i];
+            if (f && (f < C5_MIN_MHZ || f > C5_MAX_MHZ)) {
+                conf.c5Frequencies[i] = 0;
+                modified = true;
+            }
+            if (conf.c5EnterRssi[i] < 1 || conf.c5EnterRssi[i] == 0xFF || conf.c5ExitRssi[i] >= conf.c5EnterRssi[i]) {
+                conf.c5EnterRssi[i] = 72;
+                conf.c5ExitRssi[i] = 68;
+                modified = true;
+            }
+            if (conf.c5Frequencies[i]) count = i + 1;
+        }
+        if (conf.c5PilotCount != count) {
+            conf.c5PilotCount = count;
+            modified = true;
+        }
+        // Pilot names: NUL-terminated printable text, else cleared.
+        for (uint8_t i = 0; i < 8; ++i) {
+            for (char* s : {conf.c5PilotName[i], conf.c5PilotPhonetic[i]}) {
+                bool ok = false;
+                for (uint8_t k = 0; k < 21; ++k) {
+                    if (s[k] == 0) { ok = true; break; }
+                    if ((uint8_t)s[k] < 0x20 || (uint8_t)s[k] == 0xFF) break;
+                }
+                if (!ok) {
+                    memset(s, 0, 21);
+                    modified = true;
+                }
+            }
+            if (conf.c5PilotColor[i] > 0xFFFFFF) {
+                conf.c5PilotColor[i] = 0xFF6B6B;
+                modified = true;
+            }
+        }
+    }
+
     const char* normalizedVoice = normalizeSelectedVoiceValue(conf.selectedVoice);
     if (strcmp(normalizedVoice, conf.selectedVoice) != 0) {
         DEBUG("Normalizing selectedVoice from '%s' to '%s'\n", conf.selectedVoice, normalizedVoice);
@@ -467,7 +550,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     // Race sync settings
     DEBUG("toJson: sending timerNumber=%d\n", conf.timerNumber);
     config["timerNumber"] = conf.timerNumber;
-    config["raceSyncMode"] = conf.raceSyncMode;
+    config["raceSyncMode"] = getRaceSyncMode();
     config["syncedTimerCount"] = conf.syncedTimerCount;
     JsonArray syncTimers = config["syncedTimers"].to<JsonArray>();
     for (uint8_t i = 0; i < conf.syncedTimerCount; i++) {
@@ -481,7 +564,22 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     
     // Receiver radio
     config["receiverRadio"] = conf.receiverRadio;
-    
+    // All 8 slots, so names and colours survive while a slot is off.
+    JsonArray c5Pilots = config["c5Pilots"].to<JsonArray>();
+    for (uint8_t i = 0; i < 8; ++i) {
+        JsonObject pilot = c5Pilots.add<JsonObject>();
+        pilot["id"] = i;
+        pilot["frequency"] = conf.c5Frequencies[i];
+        pilot["enterRssi"] = conf.c5EnterRssi[i];
+        pilot["exitRssi"] = conf.c5ExitRssi[i];
+        pilot["name"] = conf.c5PilotName[i];
+        pilot["phonetic"] = conf.c5PilotPhonetic[i];
+        pilot["color"] = conf.c5PilotColor[i];
+        pilot["race"] = (conf.c5RaceMask >> i) & 1;
+    }
+    config["c5Gain"] = conf.c5Gain;
+    config["eventMode"] = getEventMode();
+
     // Novacore filter config
     config["novaFilterKalman"] = conf.novaFilterKalman;
     config["novaFilterMedian"] = conf.novaFilterMedian;
@@ -499,11 +597,6 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
 #else
     config["hasI2SAudio"] = 0;
 #endif
-    
-    // RotorHazard integration
-    config["rhEnabled"] = conf.rhEnabled;
-    config["rhHostIP"] = conf.rhHostIP;
-    config["rhNodeIndex"] = conf.rhNodeIndex;
 
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     config["raceCountdownMode"] = conf.raceCountdownMode;
@@ -823,7 +916,7 @@ void Config::fromJson(JsonObject source) {
     }
     if (!source["raceSyncMode"].isNull() && source["raceSyncMode"] != conf.raceSyncMode) {
         uint8_t mode = source["raceSyncMode"].as<uint8_t>();
-        if (mode <= 2) {
+        if (mode <= 3) {
             conf.raceSyncMode = mode;
             modified = true;
         }
@@ -883,12 +976,41 @@ void Config::fromJson(JsonObject source) {
         modified = true;
     }
     // Receiver radio
-    if (!source["receiverRadio"].isNull() && source["receiverRadio"] != conf.receiverRadio) {
-        uint8_t val = source["receiverRadio"].as<uint8_t>();
-        if (val <= 1) {
-            conf.receiverRadio = val;
-            modified = true;
+    if (!source["receiverRadio"].isNull()) {
+        setReceiverRadio(source["receiverRadio"].as<uint8_t>());   // 0 RX5808, 1 Novacore, 2 ESP32-C5
+    }
+    if (!source["c5Gain"].isNull()) {
+        setC5Gain(source["c5Gain"].as<uint8_t>());
+    }
+    if (!source["eventMode"].isNull()) {
+        const uint8_t on = source["eventMode"].as<uint8_t>() ? 1 : 0;
+        if (conf.eventMode != on) { conf.eventMode = on; modified = true; }
+    }
+    if (!source["c5Pilots"].isNull()) {
+        // The list is the complete set of 8 slots: a slot that isn't in it
+        // (or has frequency 0) is switched off, so clearing a pilot sticks.
+        JsonArray pilots = source["c5Pilots"].as<JsonArray>();
+        bool given[8] = {};
+        uint8_t index = 0;
+        for (JsonObject pilot : pilots) {
+            uint8_t id = pilot["id"] | index;
+            ++index;
+            if (id >= 8) continue;
+            given[id] = true;
+            setC5Profile(id, pilot["frequency"] | 0, pilot["enterRssi"] | 72, pilot["exitRssi"] | 68);
+            // Older pages send no identity: keep what's stored.
+            if (!pilot["name"].isNull() || !pilot["race"].isNull()) {
+                setC5PilotIdentity(id, pilot["name"] | conf.c5PilotName[id], pilot["phonetic"] | conf.c5PilotPhonetic[id],
+                                   pilot["color"] | conf.c5PilotColor[id],
+                                   pilot["race"].isNull() ? ((conf.c5RaceMask >> id) & 1) : (pilot["race"].as<int>() != 0));
+            }
         }
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < 8; ++i) {
+            if (!given[i]) setC5Profile(i, 0, conf.c5EnterRssi[i], conf.c5ExitRssi[i]);
+            if (conf.c5Frequencies[i]) count = i + 1;
+        }
+        setC5PilotCount(count);
     }
     // Novacore filter config
     if (!source["novaFilterKalman"].isNull() && source["novaFilterKalman"] != conf.novaFilterKalman) {
@@ -937,28 +1059,6 @@ void Config::fromJson(JsonObject source) {
         uint8_t val = source["speakerEnabled"].as<uint8_t>();
         if (val <= 1) {
             conf.speakerEnabled = val;
-            modified = true;
-        }
-    }
-    // RotorHazard integration
-    if (!source["rhEnabled"].isNull() && source["rhEnabled"] != conf.rhEnabled) {
-        uint8_t val = source["rhEnabled"].as<uint8_t>();
-        if (val <= 1) {
-            conf.rhEnabled = val;
-            modified = true;
-        }
-    }
-    if (!source["rhHostIP"].isNull()) {
-        const char* v = source["rhHostIP"] | "";
-        if (strcmp(v, conf.rhHostIP) != 0) {
-            strlcpy(conf.rhHostIP, v, sizeof(conf.rhHostIP));
-            modified = true;
-        }
-    }
-    if (!source["rhNodeIndex"].isNull() && source["rhNodeIndex"] != conf.rhNodeIndex) {
-        uint8_t val = source["rhNodeIndex"].as<uint8_t>();
-        if (val <= 7) {
-            conf.rhNodeIndex = val;
             modified = true;
         }
     }
@@ -1015,6 +1115,17 @@ char* Config::getPassword() {
 
 uint8_t Config::getMaxLaps() {
     return conf.maxLaps;
+}
+
+bool Config::setRaceLimits(uint8_t laps, uint16_t minLapTenths, uint8_t heatBlocks) {
+    if (laps > 63 || minLapTenths < 1 || minLapTenths > 200 || heatBlocks > 60) return false;
+    if (conf.maxLaps != laps || conf.minLap != minLapTenths || conf.maxHeatTime30s != heatBlocks) {
+        conf.maxLaps = laps;
+        conf.minLap = minLapTenths;
+        conf.maxHeatTime30s = heatBlocks;
+        modified = true;
+    }
+    return true;
 }
 
 uint8_t Config::getLedMode() {
@@ -1390,11 +1501,11 @@ void Config::setTimerNumber(uint8_t number) {
 }
 
 uint8_t Config::getRaceSyncMode() {
-    return conf.raceSyncMode;
+    return conf.receiverRadio == 2 ? 3 : (conf.raceSyncMode == 3 ? 0 : conf.raceSyncMode);
 }
 
 void Config::setRaceSyncMode(uint8_t mode) {
-    if (mode <= 2 && conf.raceSyncMode != mode) {
+    if (mode <= 3 && conf.raceSyncMode != mode) {
         conf.raceSyncMode = mode;
         modified = true;
     }
@@ -1502,10 +1613,79 @@ uint8_t Config::getReceiverRadio() {
 }
 
 void Config::setReceiverRadio(uint8_t radio) {
-    if (radio <= 1 && conf.receiverRadio != radio) {
+#ifdef FIXED_RECEIVER_RADIO
+    radio = FIXED_RECEIVER_RADIO;
+#endif
+    if (radio <= 2 && conf.receiverRadio != radio) {
         conf.receiverRadio = radio;
         modified = true;
     }
+}
+
+uint8_t Config::getC5PilotCount() { return conf.c5PilotCount; }
+uint16_t Config::getC5Frequency(uint8_t pilot) { return pilot < 8 ? conf.c5Frequencies[pilot] : 0; }
+uint8_t Config::getC5EnterRssi(uint8_t pilot) { return pilot < 8 ? conf.c5EnterRssi[pilot] : 72; }
+uint8_t Config::getC5ExitRssi(uint8_t pilot) { return pilot < 8 ? conf.c5ExitRssi[pilot] : 68; }
+uint8_t Config::getC5Gain() { return conf.c5Gain; }
+void Config::setC5PilotCount(uint8_t count) {
+    uint8_t safe = count > 8 ? 8 : count;
+    if (conf.c5PilotCount != safe) { conf.c5PilotCount = safe; modified = true; }
+}
+void Config::setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi) {
+    if (pilot >= 8) return;
+    if (frequency > 0 && (frequency < C5_MIN_MHZ || frequency > C5_MAX_MHZ)) frequency = 0;
+    if (enterRssi < 1) enterRssi = 1;
+    if (exitRssi >= enterRssi) exitRssi = enterRssi > 1 ? enterRssi - 1 : 0;
+    if (conf.c5Frequencies[pilot] != frequency || conf.c5EnterRssi[pilot] != enterRssi || conf.c5ExitRssi[pilot] != exitRssi) {
+        conf.c5Frequencies[pilot] = frequency;
+        conf.c5EnterRssi[pilot] = enterRssi;
+        conf.c5ExitRssi[pilot] = exitRssi;
+        modified = true;
+    }
+}
+const char* Config::getC5PilotName(uint8_t pilot) { return pilot < 8 ? conf.c5PilotName[pilot] : ""; }
+const char* Config::getC5PilotPhonetic(uint8_t pilot) { return pilot < 8 ? conf.c5PilotPhonetic[pilot] : ""; }
+uint32_t Config::getC5PilotColor(uint8_t pilot) { return pilot < 8 ? conf.c5PilotColor[pilot] : 0; }
+uint8_t Config::getC5RaceMask() { return conf.c5RaceMask; }
+uint8_t Config::getEventMode() { return conf.eventMode ? 1 : 0; }
+
+void Config::setC5PilotIdentity(uint8_t pilot, const char* name, const char* phonetic, uint32_t color, bool races) {
+    if (pilot >= 8) return;
+    char n[21], p[21];
+    strlcpy(n, name ? name : "", sizeof(n));
+    strlcpy(p, phonetic ? phonetic : "", sizeof(p));
+    color &= 0xFFFFFF;
+    const uint8_t mask = races ? (conf.c5RaceMask | (1u << pilot)) : (conf.c5RaceMask & ~(1u << pilot));
+    if (strcmp(n, conf.c5PilotName[pilot]) || strcmp(p, conf.c5PilotPhonetic[pilot]) ||
+        color != conf.c5PilotColor[pilot] || mask != conf.c5RaceMask) {
+        memcpy(conf.c5PilotName[pilot], n, sizeof(n));
+        memcpy(conf.c5PilotPhonetic[pilot], p, sizeof(p));
+        conf.c5PilotColor[pilot] = color;
+        conf.c5RaceMask = mask;
+        modified = true;
+    }
+}
+
+void Config::initC5PilotIdentity() {
+    static const uint32_t kColors[8] = {0xFF6B6B, 0xF7B32B, 0x06D6A0, 0x4CC9F0, 0xA78BFA, 0xF78C6B, 0x7BD389, 0xF472B6};
+    memset(conf.c5PilotName, 0, sizeof(conf.c5PilotName));
+    memset(conf.c5PilotPhonetic, 0, sizeof(conf.c5PilotPhonetic));
+    memcpy(conf.c5PilotColor, kColors, sizeof(kColors));
+    conf.eventMode = 0;
+    memset(conf._reservedC5, 0, sizeof(conf._reservedC5));
+    uint8_t mask = 0, enabled = 0;
+    for (uint8_t i = 0; i < 8; ++i) {
+        const uint16_t f = conf.c5Frequencies[i];
+        if (f < C5_MIN_MHZ || f > C5_MAX_MHZ) continue;
+        enabled |= (uint8_t)(1u << i);
+        if (!mask && f == conf.frequency) mask = (uint8_t)(1u << i);
+    }
+    conf.c5RaceMask = mask ? mask : enabled;
+}
+
+void Config::setC5Gain(uint8_t gain) {
+    if (gain > 89) gain = 89;
+    if (conf.c5Gain != gain) { conf.c5Gain = gain; modified = true; }
 }
 
 uint8_t Config::getNovaFilterKalman() { return conf.novaFilterKalman; }
@@ -1523,29 +1703,6 @@ uint8_t Config::getSpeakerEnabled() { return conf.speakerEnabled; }
 void Config::setSpeakerEnabled(uint8_t enabled) {
     if (enabled <= 1 && conf.speakerEnabled != enabled) {
         conf.speakerEnabled = enabled;
-        modified = true;
-    }
-}
-
-// RotorHazard integration
-uint8_t Config::getRhEnabled() { return conf.rhEnabled; }
-void Config::setRhEnabled(uint8_t enabled) {
-    if (enabled <= 1 && conf.rhEnabled != enabled) {
-        conf.rhEnabled = enabled;
-        modified = true;
-    }
-}
-char* Config::getRhHostIP() { return conf.rhHostIP; }
-void Config::setRhHostIP(const char* ip) {
-    if (strcmp(ip, conf.rhHostIP) != 0) {
-        strlcpy(conf.rhHostIP, ip, sizeof(conf.rhHostIP));
-        modified = true;
-    }
-}
-uint8_t Config::getRhNodeIndex() { return conf.rhNodeIndex; }
-void Config::setRhNodeIndex(uint8_t index) {
-    if (index <= 7 && conf.rhNodeIndex != index) {
-        conf.rhNodeIndex = index;
         modified = true;
     }
 }
@@ -1621,7 +1778,17 @@ void Config::setDefaults(void) {
     strlcpy(conf.masterHostname, "", sizeof(conf.masterHostname));  // Empty master hostname
     conf.autoThresholdEnabled = 0;  // Manual threshold mode by default
     conf.autoThresholdOffset = 65;  // Default baseline RSSI (ambient floor)
+#ifdef FIXED_RECEIVER_RADIO
+    conf.receiverRadio = FIXED_RECEIVER_RADIO;
+#else
     conf.receiverRadio = 0;  // Default to RX5808
+#endif
+    conf.c5PilotCount = 1;
+    conf.c5Frequencies[0] = conf.frequency;
+    conf.c5EnterRssi[0] = conf.enterRssi;
+    conf.c5ExitRssi[0] = conf.exitRssi;
+    conf.c5Gain = 30;  // the C5's bench-tested gain; a close quad clips above it
+    initC5PilotIdentity();
     // Novacore filter defaults
     conf.novaFilterKalman = 1;       // Kalman on
     conf.novaFilterMedian = 0;       // Median off
@@ -1632,10 +1799,10 @@ void Config::setDefaults(void) {
     conf.novaEmaAlpha = 15;          // alpha=0.15
     conf.novaStepMax = 20;           // max step per sample
     conf.speakerEnabled = 1;         // Speaker enabled by default
-    // RotorHazard integration defaults
-    conf.rhEnabled = 0;              // Disabled by default
-    memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));  // Empty host
-    conf.rhNodeIndex = 0;            // Seat 0 by default
+    // Unused version 1 RotorHazard settings, kept zeroed
+    conf.rhEnabled = 0;
+    memset(conf.rhHostIP, 0, sizeof(conf.rhHostIP));
+    conf.rhNodeIndex = 0;
     // Pre-race countdown defaults: keep the post-merge 10-second visible countdown
     conf.raceCountdownMode = 1;
     // Maximum heat time: 0 = unlimited (no auto-stop), else N * 30 seconds

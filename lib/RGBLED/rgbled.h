@@ -171,6 +171,16 @@ class RgbLed {
     void applyPreset(led_preset_e preset);
     void saveCurrentState();
     void restoreSavedState();
+
+    // Every FastLED.show() goes through here. FastLED is not thread-safe:
+    // the web server (flash on page load, LED settings), the lap timer and
+    // the LED task all draw, and two show() calls at once deadlock inside
+    // its RMT driver, hanging the web server until the task watchdog reboots
+    // the gate. A caller that can't get the lock in 50 ms skips the frame and
+    // the LED task (handleRgbLed) shows it on its next pass.
+    SemaphoreHandle_t showMutex = nullptr;
+    volatile bool showPending = false;
+    void show();
 };
 
 #endif // HAS_RGB_LED

@@ -91,6 +91,15 @@ bool Storage::initSD() {
     bool sdOk = SD.begin(PIN_SD_CS, *spi, 10000000);
     spiMutexGive();
     if (!sdOk) {
+        // Some cards/socket revisions need a slower first negotiation even
+        // though normal transfers are reliable at 10 MHz.
+        DEBUG("SD.begin() failed at 10MHz; retrying at 1MHz...\n");
+        SD.end();
+        spiMutexTake();
+        sdOk = SD.begin(PIN_SD_CS, *spi, 1000000);
+        spiMutexGive();
+    }
+    if (!sdOk) {
         DEBUG("ERROR: SD.begin() failed!\n");
         DEBUG("Possible causes:\n");
         DEBUG("  1. Card not inserted\n");
@@ -308,6 +317,23 @@ bool Storage::readBinaryFile(const String& path, std::vector<uint8_t>& out) {
     return true;
 }
 
+size_t Storage::readBinaryRange(const String& path, size_t offset, uint8_t* out, size_t len) {
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return 0;
+        File file = SD.open(path, FILE_READ);
+        size_t got = file && file.seek(offset) ? file.read(out, len) : 0;
+        if (file) file.close();
+        spiMutexGive();
+        return got;
+    }
+#endif
+    File file = LittleFS.open(path, "r");
+    size_t got = file && file.seek(offset) ? file.read(out, len) : 0;
+    if (file) file.close();
+    return got;
+}
+
 bool Storage::patchBinaryFile(const String& path, size_t offset, const uint8_t* data, size_t len) {
     if (!data || len == 0) {
         return true;
@@ -385,6 +411,48 @@ bool Storage::renameFile(const String& fromPath, const String& toPath) {
         LittleFS.remove(toPath);
     }
     return LittleFS.rename(fromPath, toPath);
+}
+
+bool Storage::recoverFile(const String& path) {
+    fs::FS* fs = &LittleFS;
+    bool locked = false;
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return false;
+        locked = true;
+        fs = &SD;
+    }
+#endif
+    const String backup = path + ".bak";
+    const bool ok = fs->exists(path) ? (!fs->exists(backup) || fs->remove(backup)) :
+        (!fs->exists(backup) || fs->rename(backup, path));
+    if (locked) spiMutexGive();
+    return ok;
+}
+
+bool Storage::replaceFileSafely(const String& fromPath, const String& toPath) {
+    fs::FS* fs = &LittleFS;
+    bool locked = false;
+#ifdef HAS_SD_CARD_SUPPORT
+    if (sdAvailable) {
+        if (!spiMutexTake(pdMS_TO_TICKS(500))) return false;
+        locked = true;
+        fs = &SD;
+    }
+#endif
+    const String backup = toPath + ".bak";
+    bool ok = true;
+    if (!fs->exists(toPath) && fs->exists(backup)) ok = fs->rename(backup, toPath);
+    if (ok && fs->exists(toPath)) {
+        if (fs->exists(backup)) ok = fs->remove(backup);
+        if (ok) ok = fs->rename(toPath, backup);
+    }
+    if (ok) ok = fs->rename(fromPath, toPath);
+    if (!ok && !fs->exists(toPath) && fs->exists(backup)) fs->rename(backup, toPath);
+    // Failure to remove an obsolete backup is harmless: the destination won.
+    if (ok && fs->exists(backup)) fs->remove(backup);
+    if (locked) spiMutexGive();
+    return ok;
 }
 
 bool Storage::readFile(const String& path, String& data) {

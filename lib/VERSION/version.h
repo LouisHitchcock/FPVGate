@@ -2,8 +2,12 @@
 #define VERSION_H
 
 // FPVGate Firmware Version
-#define FPVGATE_VERSION "1.8.4"
-#define FPVGATE_VERSION_STAGE ""  // Options: "dev", "alpha", "beta", "rc-N", "" (empty for release)
+#define FPVGATE_VERSION "1.9.0"
+#ifdef C5_TIMING_DIAGNOSTIC_NO_S3_EMA
+#define FPVGATE_VERSION_STAGE "Alpha-6-ema-probe"
+#else
+#define FPVGATE_VERSION_STAGE "Alpha-6"
+#endif
 
 // Build version string helper
 #define FPVGATE_VERSION_STRING() \

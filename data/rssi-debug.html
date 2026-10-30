@@ -92,12 +92,44 @@
         width: 100%;
         height: 100%;
       }
+      /* ESP32-C5 multi-pilot mode: one chip per pilot; click to select. */
+      .rssi-debug-legend {
+        display: none;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .c5-mode .rssi-debug-legend { display: flex; }
+      .rssi-debug-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 14px;
+        border: 1px solid #1f2a36;
+        background: #0f1620;
+        font-size: 13px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .rssi-debug-chip.selected { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
+      .rssi-debug-chip .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+      .rssi-debug-chip .nm { font-weight: 600; }
+      .rssi-debug-chip .val { font-family: "JetBrains Mono", "SF Mono", Consolas, monospace; min-width: 3ch; text-align: right; }
+      .rssi-debug-chip .race { font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--c); color: #111; }
+      .rssi-debug-chip .rssi-debug-crossing { margin-left: 0; }
+      .rssi-debug-toggle { display: none; font-size: 13px; color: #9aa7b2; cursor: pointer; }
+      .c5-mode .rssi-debug-toggle { display: inline-flex; align-items: center; gap: 4px; }
+      .c5-mode .rssi-debug-stat.pilot { display: inline; }
+      .rssi-debug-stat.pilot { display: none; }
+      .rssi-debug-stat.pilot b { color: var(--c, #e6edf3); }
     </style>
   </head>
   <body>
     <div class="rssi-debug-root">
       <div class="rssi-debug-header">
         <span class="rssi-debug-title">RSSI DEBUG</span>
+        <span class="rssi-debug-stat pilot" id="pilotStat">Pilot:<b id="pilotValue">--</b></span>
         <span class="rssi-debug-stat live">Live:<b id="liveValue">--</b></span>
         <span class="rssi-debug-stat enter">Enter:<b id="enterValue">--</b></span>
         <span class="rssi-debug-stat exit">Exit:<b id="exitValue">--</b></span>
@@ -106,11 +138,13 @@
         <span class="rssi-debug-stat">
           Crossing<span id="crossingDot" class="rssi-debug-crossing"></span>
         </span>
+        <label class="rssi-debug-toggle"><input type="checkbox" id="racersOnly"> Racers only</label>
         <span class="rssi-debug-conn">
           <span id="connDot" class="rssi-debug-conn-dot"></span>
           <span id="connLabel">Connecting...</span>
         </span>
       </div>
+      <div class="rssi-debug-legend" id="legend"></div>
       <div class="rssi-debug-chart-wrap">
         <canvas id="rssiChart"></canvas>
       </div>

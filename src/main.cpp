@@ -3,8 +3,11 @@
 #include "debug.h"
 #include "led.h"
 #include "webserver.h"
+#include "elrs_backpack.h"
 #include "racehistory.h"
 #include "race_rssi_recorder.h"
+#include "c5link.h"
+#include "c5multipilot.h"
 #include "storage.h"
 #include <time.h>
 #include <algorithm>
@@ -16,9 +19,11 @@
 #include "usbnet.h"
 #include "usbnet_boot.h"
 #endif
+#ifdef FPVGATE_ETH_W5500
+#include "ethnet.h"
+#endif
 #include "trackmanager.h"
 #include "webhook.h"
-#include "rotorhazard.h"
 // DISABLED FOR NOW: #include "nodemode.h"
 #include <ElegantOTA.h>
 #include "esp_log.h"
@@ -69,6 +74,8 @@ extern bool loopTaskWDTEnabled;
 // - Setting is stored in EEPROM and persists across reboots
 
 static RX5808 rx(PIN_RX5808_RSSI, PIN_RX5808_DATA, PIN_RX5808_SELECT, PIN_RX5808_CLOCK);
+static C5Link c5Link;
+static C5MultiPilot c5MultiPilot;
 static Config config;
 static Storage storage;
 static SelfTest selfTest;
@@ -80,7 +87,6 @@ static RaceHistory raceHistory;
 static RaceRssiRecorder raceRssiRecorder;
 static TrackManager trackManager;
 static WebhookManager webhookManager;
-static RHManager rhManager;
 #ifdef HAS_RGB_LED
 static RgbLed rgbLed;
 RgbLed* g_rgbLed = &rgbLed;
@@ -94,6 +100,8 @@ AudioAnnouncer* g_audioAnnouncer = &audioAnnouncer;
 void* g_audioAnnouncer = nullptr;
 #endif
 static LapTimer timer;
+static C5RaceControl c5RaceControl;
+static EventDirector eventDirector;
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
 static Qmi8658 g_qmi8658;
 static FpvLcdUI* g_lcdUi = nullptr;
@@ -167,7 +175,7 @@ static void parallelTask(void *pvArgs) {
 #endif
         ws.handleWebUpdate(currentTimeMs);
         config.handleEeprom(currentTimeMs);
-        rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
+        if (config.getReceiverRadio() != 2) rx.handleFrequencyChange(currentTimeMs, config.getFrequency());
 #ifdef HAS_BATTERY_MONITOR
         monitor.checkBatteryState(currentTimeMs, config.getAlarmThreshold());
 #endif
@@ -179,6 +187,41 @@ static void parallelTask(void *pvArgs) {
 static void initParallelTask() {
     disableCore0WDT();
     xTaskCreatePinnedToCore(parallelTask, "parallelTask", 8192, NULL, 0, &xTimerTask, 0);
+}
+
+// The C5 link at ~8k samples/s: serviced every millisecond, above loop()'s
+// priority on the same core, so a slow loop pass (web, SD, JSON) can't let
+// the per-pilot sample queues overflow. The web server's task (priority 10)
+// is pinned to core 0 by CONFIG_ASYNC_TCP_RUNNING_CORE, as a slow request
+// there (saving a race to flash) held this task off for ~1 s.
+static void c5Task(void *) {
+    for (;;) {
+        if (config.getReceiverRadio() == 2) {
+            const uint32_t nowMs = millis();
+            if (!c5Link.started()) {
+                c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
+                c5MultiPilot.begin(&config, &c5Link);
+            }
+            // A backlog after a stall is read a piece at a time, with lap
+            // detection draining the sample queues in between.
+            bool more;
+            do {
+                more = c5Link.poll(nowMs);
+                c5MultiPilot.update(nowMs);
+            } while (more);
+        }
+        vTaskDelay(1);
+    }
+}
+
+// Created once the C5 receiver is selected (at boot or later from the UI),
+// so a gate that never uses one keeps the task's stack for the web server.
+static TaskHandle_t c5TaskHandle = nullptr;
+
+static void startC5Task() {
+    if (c5TaskHandle) return;
+    // loop() runs at priority 1 on core 1.
+    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, 3, &c5TaskHandle, 1);
 }
 
 static void onSdCardReady() {
@@ -249,12 +292,6 @@ void setup() {
     powerManager.init(PIN_POWER_SWITCH, LCD_BACKLIGHT);
 #endif
 #endif
-#if defined(WAVESHARE_ESP32S3_LCD2) && defined(PIN_RX5808_POWER_CTRL)
-    // PNP high-side: LOW powers RX5808; assert before LCD/storage init (rx.init() repeats for safety).
-    pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
-    digitalWrite(PIN_RX5808_POWER_CTRL, LOW);
-#endif
-
     // ====================================================================
     // ROTORHAZARD MODE DETECTION - CURRENTLY DISABLED
     // Mode switching has been disabled - system now runs in WiFi mode only
@@ -270,6 +307,14 @@ void setup() {
     // Initialize config and connect to storage for SD backup/restore
     config.setStorage(&storage);
     config.init();
+
+#if defined(WAVESHARE_ESP32S3_LCD2) && defined(PIN_RX5808_POWER_CTRL)
+    if (config.getReceiverRadio() != 2) {
+        // PNP high-side: LOW powers RX5808; assert before peripheral init.
+        pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
+        digitalWrite(PIN_RX5808_POWER_CTRL, LOW);
+    }
+#endif
     
     /* DISABLED: RotorHazard mode detection
     uint8_t configMode = config.getOperationMode();
@@ -368,7 +413,7 @@ void setup() {
     esp_task_wdt_deinit();
     loopTaskWDTEnabled = false;
 #endif
-    rx.init();
+    if (config.getReceiverRadio() != 2) rx.init();
     buzzer.init(PIN_BUZZER, BUZZER_INVERTED);
     buzzer.setVolume(config.getBeepVolume());  // Apply saved volume
     led.init(PIN_LED, false);
@@ -437,14 +482,13 @@ void setup() {
             DEBUG("Loaded webhook: %s\n", ip);
         }
     }
-    
-    // Initialize RotorHazard integration
-    rhManager.init(&config);
-    
+
+    // Before the web server: its Wi-Fi setup depends on the backpack settings.
+    elrsBackpack.begin(&config, &timer, &c5RaceControl);
 #ifdef HAS_BATTERY_MONITOR
-    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, &monitor, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager);
 #else
-    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager, &rhManager);
+    ws.init(&config, &timer, nullptr, &buzzer, &led, &raceHistory, &storage, &selfTest, &rx, &trackManager, &webhookManager);
 #endif
     
     // Register transports with TransportManager
@@ -460,6 +504,14 @@ void setup() {
     esp_err_t usbNetResult = usbnet_begin();
     usbnet_boot_mark(USBNET_BOOT_USBNET_RETURNED);
     DEBUG("USB networking: %s (http://192.168.7.1/)\n", esp_err_to_name(usbNetResult));
+#endif
+#ifdef FPVGATE_ETH_W5500
+    DEBUG("Ethernet: %s (DHCP, else http://192.168.8.1/)\n", esp_err_to_name(ethnet_begin()));
+#ifdef FPVGATE_USB_NET
+    // Held off until loop() knows whether Ethernet is connected, so the host
+    // doesn't take a USB address it is about to lose.
+    usbnet_set_active(false);
+#endif
 #endif
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
@@ -501,6 +553,20 @@ void setup() {
 #ifdef FPVGATE_USB_NET
     usbnet_boot_mark(USBNET_BOOT_SETUP_COMPLETE);
 #endif
+    ws.setC5Receiver(&c5Link, &c5MultiPilot);
+    c5RaceControl.begin(&config, &timer, &c5MultiPilot, &raceHistory);
+    eventDirector.begin(&config, &storage, &raceHistory);
+    c5RaceControl.setEvents(&eventDirector);
+    ws.setEventDirector(&eventDirector);
+    ws.setC5RaceControl(&c5RaceControl);
+
+    // Start the C5 UART last so no later peripheral initialization can reclaim
+    // its pins. XIAO D3/D4 are also the legacy RX5808 clock/data pins.
+    if (config.getReceiverRadio() == 2) {
+        c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
+        c5MultiPilot.begin(&config, &c5Link);
+        startC5Task();
+    }
 }
 
 #ifdef ENABLE_POWER_SWITCH
@@ -530,11 +596,13 @@ static void shutdownForDeepSleep() {
         vTaskSuspend(xTimerTask);
         delay(10);
     }
-    rx.setFrequency(POWER_DOWN_FREQ_MHZ);
+    if (config.getReceiverRadio() != 2) rx.setFrequency(POWER_DOWN_FREQ_MHZ);
 #if defined(PIN_RX5808_POWER_CTRL)
     // PNP high-side: HIGH turns transistor off — remove VCC from RX5808 (lower deep-sleep drain).
-    pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
-    digitalWrite(PIN_RX5808_POWER_CTRL, HIGH);
+    if (config.getReceiverRadio() != 2) {
+        pinMode(PIN_RX5808_POWER_CTRL, OUTPUT);
+        digitalWrite(PIN_RX5808_POWER_CTRL, HIGH);
+    }
 #endif
 
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
@@ -554,14 +622,22 @@ void loop() {
 #endif
     uint32_t nowMs = millis();
     uint32_t currentTimeMs = nowMs;
-    
+    if (config.getReceiverRadio() == 2) startC5Task();
+    c5RaceControl.update();
+    if (sdInitAttempted) eventDirector.update();
+    if (eventDirector.takeChanged()) ws.triggerConfigUpdated();
+    if (const char* state = c5RaceControl.takeStateEvent()) ws.notifyGateRaceState(state);
+    elrsBackpack.service(currentTimeMs);
+
     // Debug: Periodic "alive" message every 5 seconds with detailed memory stats
     static uint32_t lastAliveMs = 0;
     if (currentTimeMs - lastAliveMs > 5000) {
         lastAliveMs = currentTimeMs;
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t minFreeHeap = ESP.getMinFreeHeap();
-        uint32_t heapSize = ESP.getHeapSize();
+        // The total never changes. ESP.getHeapSize() works it out by walking
+        // every heap block with the heap locked, every 5 s for no reason.
+        uint32_t heapSize = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
         uint32_t usedHeap = heapSize - freeHeap;
         float usedPercent = (usedHeap * 100.0f) / heapSize;
         
@@ -593,7 +669,17 @@ void loop() {
     // External LEDs on GPIO5 are handled by rgbLed instead
     
     // Timing always runs
-    timer.handleLapTimerUpdate(currentTimeMs);
+    if (config.getReceiverRadio() != 2) timer.handleLapTimerUpdate(currentTimeMs);
+    // The C5 receiver (receiverRadio 2) is serviced by c5Task.
+    if (config.getReceiverRadio() == 2 && timer.isRaceRunning()) {
+        static uint32_t lastCaptureMs = 0;
+        if (currentTimeMs - lastCaptureMs >= RACE_RSSI_INTERVAL_MS) {
+            lastCaptureMs = currentTimeMs;
+            uint8_t frame[8];
+            c5MultiPilot.takeCaptureFrame(frame);
+            raceRssiRecorder.addFrame(frame, currentTimeMs);
+        }
+    }
     
 #if ENABLE_LCD_UI && defined(WAVESHARE_ESP32S3_LCD2)
     // Feed live RSSI and timing data to LCD UI
@@ -647,7 +733,7 @@ void loop() {
             // so we don't hold shared SPI mutex during stop transition (avoids crash/use-after-free)
             std::vector<uint32_t> laps;
             timer.getLapTimesForSave(laps);
-            if (!laps.empty()) {
+            if (config.getReceiverRadio() != 2 && !laps.empty()) {
                 s_pendingLcdRaceSave = {};
                 s_pendingLcdRaceSave.timestamp = (uint32_t)time(nullptr);
                 s_pendingLcdRaceSave.lapTimes = laps;
@@ -683,7 +769,9 @@ void loop() {
         }
         // Sync display with web timer actions (countdown overlay, STOPPED overlay)
         auto lcdEv = ws.consumePendingLcdEvent();
-        if (lcdEv == Webserver::PendingLcdEvent::Countdown) {
+        if (c5RaceControl.consumeCountdownRequest()) {
+            if (g_lcdUi) g_lcdUi->requestCountdown(true);
+        } else if (lcdEv == Webserver::PendingLcdEvent::Countdown) {
             g_lcdUi->requestCountdown(false);  // Web sends /timer/start separately
         } else if (lcdEv == Webserver::PendingLcdEvent::ShowFinish) {
             g_lcdUi->requestShowFinish();
@@ -820,6 +908,14 @@ void loop() {
     }
 #endif
     
+    // ESP32-C5: the race pilot's gate crossings (c5Task finds them) become
+    // laps here, one per pass so each is broadcast before the next.
+    uint32_t c5CrossingUs;
+    if (config.getReceiverRadio() == 2 && !timer.isLapAvailable() && c5MultiPilot.takeRaceCrossing(c5CrossingUs)) {
+        // micros() to millis() by age; the two clocks wrap differently.
+        timer.recordCrossing(millis() - (micros() - c5CrossingUs) / 1000u);
+    }
+
     // Broadcast lap events to all transports (WiFi + USB)
     if (timer.isLapAvailable()) {
         uint32_t lapTime = timer.getLapTime();
@@ -831,8 +927,10 @@ void loop() {
         }
 #endif
 
-        // Report crossing to RotorHazard with raw millis() timestamps for clock sync
-        rhManager.triggerLap(timer.getLastCrossingAbsoluteMs(), timer.getRaceStartMs());
+        // Report the crossing to a linked RotorHazard plugin as an event (the
+        // C5's passes go straight from C5MultiPilot).
+        if (ws.rhLinked(millis()) && config.getReceiverRadio() != 2)
+            ws.queueRhPass(0, timer.getLastCrossingAbsoluteMs(), 0);
         
 #ifdef HAS_I2S_AUDIO
         // Announce lap on speaker
@@ -850,10 +948,16 @@ void loop() {
     
     // Process queued webhooks (non-blocking)
     webhookManager.process();
-    
-    // Process RotorHazard connection and queued lap events
-    rhManager.process();
-    
+
+#ifdef FPVGATE_ETH_W5500
+    ethnet_update(currentTimeMs);
+#ifdef FPVGATE_USB_NET
+    // USB networking only while Ethernet is unplugged. At boot the link gets
+    // until ETHNET_USB_WAIT_MS to come up first.
+    if (ethnet_link_up() || currentTimeMs >= ETHNET_USB_WAIT_MS) usbnet_set_active(!ethnet_link_up());
+#endif
+#endif
+
     // WiFi mode - original behavior (RotorHazard mode disabled)
     ElegantOTA.loop();
     

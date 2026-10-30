@@ -86,6 +86,7 @@
 #ifndef BUZZER_PASSIVE
 #define BUZZER_PASSIVE 1
 #endif
+
 // MLT-8530 passive: resonant ~2.7 kHz (loudest / spec SPL usually at square wave ~2700 Hz). Override if you use another part.
 #ifndef BUZZER_PWM_FREQ_HZ
 #define BUZZER_PWM_FREQ_HZ 2700
@@ -127,6 +128,33 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
+// SD Card SPI pins
+#define PIN_SD_CS 2            // D1
+#define PIN_SD_SCK 7           // D8
+#define PIN_SD_MOSI 8          // D9 (GPIO8)
+#define PIN_SD_MISO 9          // D10 (GPIO9)
+
+// FPVGate C5MK AIO (XIAO ESP32S3 + XIAO ESP32C5). The C5 takes the RX5808's
+// place: S3 D3 -> C5 D4 (C5 RX), S3 D4 -> C5 D5 (C5 TX), so there is no RX5808
+// and the receiver is fixed to the C5 (FIXED_RECEIVER_RADIO).
+#elif defined(FPVGATE_C5MK_AIO)
+#define PIN_LED 21             // XIAO onboard user LED
+#define PIN_RGB_LED 44         // D7 - NeoPixel signal
+#define NUM_LEDS 3
+#define PIN_VBAT 1             // D0 - BATSENSE
+#define VBAT_SCALE 2
+#define VBAT_ADD 2
+#define PIN_RX5808_RSSI 3      // D2 (no RX5808 fitted)
+#define PIN_RX5808_DATA 5      // D4 (C5 link, unused for the RX5808)
+#define PIN_RX5808_SELECT 6    // D5 (no RX5808 fitted)
+#define PIN_RX5808_CLOCK 4     // D3 (C5 link, unused for the RX5808)
+#define PIN_BUZZER 43          // D6
+#define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 D4 (GPIO23, RX)
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 D5 (GPIO24, TX)
+#define FIXED_RECEIVER_RADIO 2 // ESP32-C5 only
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
@@ -148,6 +176,8 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1
 #define PIN_SD_SCK 7           // D8
@@ -169,6 +199,8 @@
 #define PIN_RX5808_CLOCK 4     // D3 (GPIO4)
 #define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins
 #define PIN_SD_CS 2            // D1 (GPIO2)
 #define PIN_SD_SCK 7           // D8 (GPIO7)
@@ -190,6 +222,8 @@
 #define PIN_RX5808_CLOCK 4     // D3
 #define PIN_BUZZER 43          // D6 (GPIO43)
 #define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 4       // D3: S3 TX -> C5 RX
+#define C5_UART_RX_PIN 5       // D4: S3 RX <- C5 TX
 // SD Card SPI pins (XIAO S3 per user wiring)
 #define PIN_SD_CS 2            // D1 (CS)
 #define PIN_SD_SCK 7           // D8 (SCK)
@@ -226,6 +260,53 @@
 // #define PIN_I2S_LRC  17
 // #define PIN_I2S_DOUT 18
 
+// Waveshare ESP32-S3-ETH (targets/WaveshareS3ETH.ini). The board uses GPIO9-14
+// (W5500), GPIO4-7 (microSD), GPIO33-37 (octal PSRAM) and GPIO19/20 (USB);
+// GPIO0/3/45/46 are strapping pins. Everything below is on the left header.
+#elif defined(WAVESHARE_S3_ETH)
+
+#define PIN_LED -1             // No plain user LED
+#define PIN_RGB_LED 21         // Onboard WS2812 (also header pin 35)
+#define NUM_LEDS 1
+#define PIN_VBAT 2             // Header pin 26 (ADC1_CH1); needs an external divider
+#define VBAT_SCALE 2
+#define VBAT_ADD 2
+#define PIN_RX5808_RSSI 1      // Header pin 25 (ADC1_CH0)
+#define PIN_RX5808_DATA 15     // Header pin 29 (CH1)
+#define PIN_RX5808_SELECT 16   // Header pin 32 (CH2, LE)
+#define PIN_RX5808_CLOCK 17    // Header pin 34 (CH3)
+#define PIN_BUZZER 18          // Header pin 31
+#define BUZZER_INVERTED false
+#define C5_UART_TX_PIN 43      // Header pin 21: S3 TX -> C5 RX (UART0; console is on USB)
+#define C5_UART_RX_PIN 44      // Header pin 22: S3 RX <- C5 TX
+// Onboard microSD (SPI)
+#define PIN_SD_CS 4
+#define PIN_SD_SCK 7
+#define PIN_SD_MOSI 6
+#define PIN_SD_MISO 5
+// Onboard W5500 Ethernet (lib/ETHNET), on its own SPI controller (SPI2/FSPI;
+// the SD card uses HSPI).
+#define PIN_ETH_MOSI 11
+#define PIN_ETH_MISO 12
+#define PIN_ETH_SCLK 13
+#define PIN_ETH_CS 14
+#define PIN_ETH_INT 10
+#define PIN_ETH_RST 9
+
+#endif
+
+// Frequencies the ESP32-C5 RF node accepts (docs/C5_RF_NODE_AGENT_SPEC.md);
+// it answers ERR_FREQ outside this range.
+#define C5_MIN_MHZ 5180
+#define C5_MAX_MHZ 5917
+
+// Optional ESP32-C5 RF-node UART. Override in a board target when the carrier
+// routes the co-processor to different pins.
+#ifndef C5_UART_RX_PIN
+#define C5_UART_RX_PIN 44
+#endif
+#ifndef C5_UART_TX_PIN
+#define C5_UART_TX_PIN 43
 #endif
 
 // ====================================================================
@@ -242,6 +323,8 @@
 
 #if defined(FPVGATE_AIO)
     #define FPVGATE_BOARD_ID "FPVGateAIO"
+#elif defined(FPVGATE_C5MK_AIO)
+    #define FPVGATE_BOARD_ID "FPVGateC5MKAIO"
 #elif defined(FPVGATE_SOLO)
     #define FPVGATE_BOARD_ID "FPVGateSolo"
 #elif defined(ESP32S3_SUPERMINI)
@@ -256,6 +339,8 @@
     #define FPVGATE_BOARD_ID "SeeedXIAOESP32S3"
 #elif defined(ESP32S3)
     #define FPVGATE_BOARD_ID "ESP32S3"
+#elif defined(WAVESHARE_S3_ETH)
+    #define FPVGATE_BOARD_ID "WaveshareS3ETH"
 #else
     // An unrecognised board must not silently claim to be something else. An
     // updater seeing this should refuse to offer an image rather than guess.
@@ -268,7 +353,7 @@
 // ====================================================================
 
 // ESP32-S3 family boards (SD card support, SPI, USB CDC)
-#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS)
+#if defined(ESP32S3) || defined(ESP32S3_SUPERMINI) || defined(LILYGO_TENERGY_S3) || defined(SEEED_XIAO_ESP32S3) || defined(WAVESHARE_ESP32S3_LCD2) || defined(FPVGATE_AIO) || defined(FPVGATE_C5MK_AIO) || defined(FPVGATE_SOLO) || defined(XIAO_ESP32S3_PLUS) || defined(WAVESHARE_S3_ETH)
     #define HAS_SD_CARD_SUPPORT 1
     #define HAS_SPI_CLASS 1
 #endif
@@ -288,10 +373,10 @@
     #define HAS_I2S_AUDIO 1
 #endif
 
-#define EEPROM_RESERVED_SIZE 832
+#define EEPROM_RESERVED_SIZE 1280
 #define CONFIG_MAGIC_MASK (0b11U << 30)
 #define CONFIG_MAGIC (0b01U << 30)
-#define CONFIG_VERSION 22U
+#define CONFIG_VERSION 24U
 
 // Race sync mode constants
 #define RACE_SYNC_DISABLED 0
@@ -350,7 +435,7 @@ typedef struct {
     uint8_t batteryAlarmEnabled;   // Battery alarm enabled (0=disabled, 1=enabled)
     float batteryVoltageDivider;   // Voltage divider ratio (e.g., 2.0 for 2:1, 5.5 for 11:2)
     uint8_t timerNumber;           // LEGACY: Timer number (no longer used for hostname, kept for config compatibility)
-    uint8_t raceSyncMode;          // Race sync mode: 0=disabled, 1=master, 2=slave
+    uint8_t raceSyncMode;          // Race sync mode: 0=personal, 1=master, 2=slave, 3=C5 multi
     char syncedTimers[5][32];      // Up to 5 synced timer hostnames (for master mode)
     uint8_t syncedTimerCount;      // Number of configured synced timers
     uint8_t beepVolume;            // Buzzer volume 0-100 (percentage)
@@ -368,10 +453,11 @@ typedef struct {
     uint8_t novaEmaAlpha;           // EMA alpha * 100 (5-80, lower = more smoothing)
     uint8_t novaStepMax;            // Step limiter max per sample (5-50)
     uint8_t speakerEnabled;         // I2S speaker output enabled (0=disabled, 1=enabled)
-    // RotorHazard integration
-    uint8_t rhEnabled;               // RH integration enabled (0=disabled, 1=enabled)
-    char rhHostIP[32];               // RH server IP or hostname
-    uint8_t rhNodeIndex;             // Node/seat index on RH (0-7)
+    // Version 1 RotorHazard mode (removed in 1.9; the plugin now connects to
+    // the gate). Unused, kept so the EEPROM layout doesn't change.
+    uint8_t rhEnabled;
+    char rhHostIP[32];
+    uint8_t rhNodeIndex;
     // Pre-race countdown style: 0="Less than 5" (classic TTS + random 1-5s delay),
     // 1="10 Second Countdown" (visible 10s countdown overlay matching LCD).
     uint8_t raceCountdownMode;
@@ -383,7 +469,22 @@ typedef struct {
     // preserve EEPROM layout for already-deployed devices). Active ELRS
     // development lives on the feature/ELRSBackpack branch; when it is
     // merged back these bytes will be re-reintroduced as typed fields.
-    uint8_t _reservedELRS[36];
+    // ESP32-C5 single-radio multi-pilot profiles.  These fields deliberately
+    // occupy the old reserved tail so the EEPROM footprint stays unchanged.
+    uint8_t c5PilotCount;
+    uint16_t c5Frequencies[8];
+    uint8_t c5EnterRssi[8];
+    uint8_t c5ExitRssi[8];
+    uint8_t c5Gain;
+    uint8_t _reservedELRS[2];
+    // v24: who flies each ESP32-C5 slot (EEPROM grown from 832 to 1280
+    // bytes; the Arduino EEPROM library keeps the old contents when it grows).
+    char c5PilotName[8][21];
+    char c5PilotPhonetic[8][21];   // for announcements; empty = use the name
+    uint32_t c5PilotColor[8];      // 0xRRGGBB
+    uint8_t c5RaceMask;            // bit i: slot i's laps count in races
+    uint8_t eventMode;             // 1 = race director Event tab shown (was reserved, zero)
+    uint8_t _reservedC5[2];
 } laptimer_config_t;
 
 class Storage;  // Forward declaration
@@ -414,6 +515,7 @@ class Config {
     uint8_t getAutoThresholdEnabled();
     uint8_t getAutoThresholdOffset();
     uint8_t getMaxLaps();
+    bool setRaceLimits(uint8_t laps, uint16_t minLapTenths, uint8_t heatBlocks);
     uint8_t getLedMode();
     uint8_t getLedBrightness();
     uint32_t getLedColor();
@@ -515,14 +617,6 @@ class Config {
     // Speaker output
     uint8_t getSpeakerEnabled();
     void setSpeakerEnabled(uint8_t enabled);
-    
-    // RotorHazard integration
-    uint8_t getRhEnabled();
-    void setRhEnabled(uint8_t enabled);
-    char* getRhHostIP();
-    void setRhHostIP(const char* ip);
-    uint8_t getRhNodeIndex();
-    void setRhNodeIndex(uint8_t index);
 
     // Pre-race countdown mode (0=Less than 5, 1=10 Second Countdown)
     uint8_t getRaceCountdownMode();
@@ -531,6 +625,22 @@ class Config {
     // Maximum heat time in 30-second blocks (0 = unlimited)
     uint8_t getMaxHeatTime30s();
     void setMaxHeatTime30s(uint8_t blocks);
+
+    // ESP32-C5 multi-pilot receiver profiles
+    uint8_t getC5PilotCount();
+    uint16_t getC5Frequency(uint8_t pilot);
+    uint8_t getC5EnterRssi(uint8_t pilot);
+    uint8_t getC5ExitRssi(uint8_t pilot);
+    uint8_t getC5Gain();
+    void setC5PilotCount(uint8_t count);
+    void setC5Profile(uint8_t pilot, uint16_t frequency, uint8_t enterRssi, uint8_t exitRssi);
+    const char* getC5PilotName(uint8_t pilot);
+    const char* getC5PilotPhonetic(uint8_t pilot);
+    uint32_t getC5PilotColor(uint8_t pilot);
+    uint8_t getC5RaceMask();
+    uint8_t getEventMode();
+    void setC5PilotIdentity(uint8_t pilot, const char* name, const char* phonetic, uint32_t color, bool races);
+    void setC5Gain(uint8_t gain);
     
     // Novacore filter config
     uint8_t getNovaFilterKalman();
@@ -548,6 +658,9 @@ class Config {
     volatile uint32_t checkTimeMs = 0;
     Storage* storage = nullptr;
     void setDefaults();
+    // v24 C5 pilot fields: empty names, the Calibration tab's slot colours,
+    // and the slot on the main frequency racing (all slots if none is).
+    void initC5PilotIdentity();
 };
 
 #endif // CONFIG_H

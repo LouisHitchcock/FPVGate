@@ -1,6 +1,15 @@
 #include "webserver.h"
+#include "elrs_backpack.h"
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <esp_timer.h>
+#include <esp_core_dump.h>
+#ifdef FPVGATE_ETH_W5500
+#include "ethnet.h"
+#endif
+#ifdef FPVGATE_USB_NET
+#include "usbnet.h"
+#endif
 #include "version.h"
 #include "race_rssi_recorder.h"
 #include <ElegantOTA.h>
@@ -8,6 +17,9 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <LittleFS.h>
+#include <lwip/priv/tcpip_priv.h>
+#include <lwip/tcp.h>
+#include <mbedtls/sha256.h>
 #include <esp_wifi.h>
 #include <HTTPClient.h>
 #include <memory>
@@ -39,6 +51,10 @@ static DNSServer dnsServer;
 static IPAddress ipAddress;
 static AsyncWebServer server(80);
 static AsyncEventSource events("/events");
+// The RotorHazard plugin's own stream: passes and RSSI only. On /events it
+// also got the browser's C5 diagnostics, several times its own traffic, which
+// on USB networking (full speed, a few hundred KB/s) crowded out the rest.
+static AsyncEventSource rhEvents("/api/rh/events");
 
 // Hostname is always fpvgate.local (timerNumber-based hostnames removed for iOS compatibility)
 static char wifi_hostname[16] = "fpvgate";
@@ -48,10 +64,12 @@ static const char *wifi_ap_address = "192.168.4.1";
 String wifi_ap_ssid;
 
 static wifi_mode_t effectiveWifiModeForRole(bool primaryAp, Config* /*cfg*/) {
-    return primaryAp ? WIFI_AP : WIFI_STA;
+    // ESP-NOW to an ELRS backpack needs the station interface as well.
+    return primaryAp ? (elrsBackpack.enabled() ? WIFI_AP_STA : WIFI_AP) : WIFI_STA;
 }
 
 void Webserver::requestWifiStackReinit() {
+    elrsBackpack.stop();
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true, true);
     wifiMode = WIFI_OFF;
@@ -64,7 +82,76 @@ void Webserver::requestWifiStackReinit() {
     DEBUG("WiFi stack reinit requested\n");
 }
 
-void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr, RHManager *rhMgr) {
+// Lowest free internal heap since the last reset of this mark, sampled every
+// 2 ms. ESP.getMinFreeHeap() covers the whole uptime and can't be reset, so
+// it can't say which load took the heap down. /api/system/info reports it;
+// ?resetHeapLow starts a new measurement.
+static volatile uint32_t heapLow = UINT32_MAX;
+
+// What was going on at the lowest point below WEB_HEAP_SNAPSHOT_BYTES: the
+// sampler flags a new low, and handleWebUpdate() fills the rest in a few ms
+// later (the stream counts take locks the timer task shouldn't wait on).
+struct LowHeapSnapshot {
+    uint32_t free = UINT32_MAX;   // at the low
+    uint32_t largest = 0;         // largest free block, just after
+    uint32_t atMs = 0;
+    int requests = 0;             // HTTP requests in progress (event streams included)
+    int files = 0;                // of those, not event streams or /api
+    size_t eventClients = 0, eventWaiting = 0;   // /events: clients, avg messages queued
+    size_t rhClients = 0, rhWaiting = 0;         // /api/rh/events
+    int wifiRssi = 0;
+};
+static LowHeapSnapshot lowHeap;
+static volatile uint32_t lowHeapPending = 0;   // the free value to record, 0 = none
+static volatile int activeRequests = 0;
+static volatile int activeFiles = 0;
+
+static void sampleHeap(void *) {
+    const uint32_t free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (free < heapLow) heapLow = free;
+    if (free < WEB_HEAP_SNAPSHOT_BYTES && free < lowHeap.free && (!lowHeapPending || free < lowHeapPending)) {
+        lowHeapPending = free;
+    }
+}
+
+// Requests refused because the heap was nearly gone (/api/system/info).
+static volatile uint32_t busyRefusals = 0;
+
+// A response is sent a TCP send buffer at a time (5760 bytes), and that much
+// is held three times over until acknowledged: the web server's buffer,
+// lwIP's copy, and over Wi-Fi the driver's frames. ~22 KB per file in
+// flight, so a browser's six parallel requests ran the XIAO out of heap.
+// Two segments keeps it to about half without slowing anything: a receiver
+// acknowledges every second segment at once, but waits (up to 200 ms on
+// Windows) to acknowledge a single one. Only sending is limited; uploads
+// (OTA, C5 firmware, events) are unaffected.
+struct SendBufferCap {
+    struct tcpip_api_call_data call;
+    AsyncClient *client;
+};
+
+static err_t applySendBufferCap(struct tcpip_api_call_data *data) {
+    // On lwIP's thread, where the connection can't change under us.
+    auto *cap = reinterpret_cast<SendBufferCap *>(data);
+    tcp_pcb *pcb = cap->client->pcb();
+    if (pcb && pcb->snd_buf > WEB_TCP_SEND_BUFFER) pcb->snd_buf = WEB_TCP_SEND_BUFFER;
+    return ERR_OK;
+}
+
+static void capSendBuffer(AsyncWebServerRequest *request) {
+    AsyncClient *client = request->client();
+    if (!client || !client->pcb()) return;
+    SendBufferCap cap = {};
+    cap.client = client;
+    tcpip_api_call(applySendBufferCap, &cap.call);
+}
+
+void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMonitor, Buzzer *buzzer, Led *l, RaceHistory *raceHist, Storage *stor, SelfTest *test, RX5808 *rx5808, TrackManager *trackMgr, WebhookManager *webhookMgr) {
+    esp_timer_create_args_t heapTimer = {};
+    heapTimer.callback = sampleHeap;
+    heapTimer.name = "heapLow";
+    esp_timer_handle_t heapTimerHandle = nullptr;
+    if (esp_timer_create(&heapTimer, &heapTimerHandle) == ESP_OK) esp_timer_start_periodic(heapTimerHandle, 2000);
 
     ipAddress.fromString(wifi_ap_address);
 
@@ -85,7 +172,6 @@ void Webserver::init(Config *config, LapTimer *lapTimer, BatteryMonitor *batMoni
     rx = rx5808;
     trackManager = trackMgr;
     webhooks = webhookMgr;
-    rhManager = rhMgr;
     transportMgr = nullptr;
 
     wifi_ap_ssid = String(wifi_ap_ssid_prefix) + "_" + WiFi.macAddress().substring(WiFi.macAddress().length() - 6);
@@ -114,6 +200,11 @@ void Webserver::setTransportManager(TransportManager *tm) {
     transportMgr = tm;
 }
 
+void Webserver::setC5Receiver(C5Link *link, C5MultiPilot *multiPilot) {
+    c5Link = link;
+    c5MultiPilot = multiPilot;
+}
+
 void Webserver::recheckWifiMode() {
     // Re-evaluate WiFi mode based on current config
     // Called after config is restored from SD backup
@@ -133,8 +224,17 @@ void Webserver::sendLapEvent(uint32_t lapTimeMs) {
     events.send(buf, "lap");
 }
 
+// Live RSSI and status are superseded within 50-200 ms. While a stream's
+// clients already have messages waiting (a busy network), skip them rather
+// than queue more: AsyncEventSource keeps up to 32 copies per client, and
+// three streams backed up behind page loads took the XIAO's heap to ~3 KB.
+// Passes, laps, race state and config notices always go out.
+static bool streamBusy(AsyncEventSource &stream) {
+    return stream.count() && stream.avgPacketsWaiting() > WEB_SSE_BACKLOG;
+}
+
 void Webserver::sendRssiEvent(uint8_t rssi) {
-    if (!servicesStarted) return;
+    if (!servicesStarted || streamBusy(events)) return;
     char buf[16];
     snprintf(buf, sizeof(buf), "%u", rssi);
     events.send(buf, "rssi");
@@ -259,18 +359,30 @@ static void sendSyncCommand(Config* config, const char* endpoint) {
 // Timer actions happen immediately; SSE broadcast is deferred to core 0
 // via pendingRaceState, which handleWebUpdate() picks up.
 void Webserver::triggerStart() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->completeCountdownStart();
+        return;
+    }
     sendSyncCommand(conf, "/timer/start");
     timer->start();
     pendingRaceState = "started";
 }
 
 void Webserver::triggerStop() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->requestStop();
+        return;
+    }
     sendSyncCommand(conf, "/timer/stop");
     timer->stop();
     pendingRaceState = "stopped";
 }
 
 void Webserver::triggerClearLaps() {
+    if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+        c5RaceControl->requestClear();
+        return;
+    }
     sendSyncCommand(conf, "/timer/clearLaps");
     pendingRaceState = "cleared";
 }
@@ -316,7 +428,246 @@ void Webserver::update(uint32_t currentTimeMs) {
     handleWebUpdate(currentTimeMs);
 }
 
+// Called from loop(): LapTimer's crossings are in millis(), which is
+// esp_timer's microseconds / 1000 cut to 32 bits.
+void Webserver::queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak) {
+    const int64_t now = esp_timer_get_time();
+    const int64_t us = now - (int64_t)(uint32_t)((uint32_t)(now / 1000) - crossingMs) * 1000;
+    portENTER_CRITICAL(&rhPassMux_);
+    if (rhPassCount_ < RH_PASS_QUEUE) rhPasses_[rhPassCount_++] = {slot, us, peak};
+    portEXIT_CRITICAL(&rhPassMux_);
+}
+
+void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak, int64_t levelUs) {
+    char body[128];
+    int n = snprintf(body, sizeof(body), "{\"node\":%u,\"us\":%lld,\"peak\":%u", slot, (long long)us, peak);
+    if (rawPeak >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"rawPeak\":%d", rawPeak);
+    if (levelUs >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"levelUs\":%lld", (long long)levelUs);
+    snprintf(body + n, sizeof(body) - n, "}");
+    rhEvents.send(body, "rhPass");
+}
+
+// Passes as they happen and every node's RSSI 20 times a second, while the
+// RotorHazard plugin is linked. C5 RSSI is 0..1023; "rssi" and "peak" are
+// 0..255, the scale of the enter and exit levels, and "raw" and "rawPeak"
+// carry the full 0..1023 for plugins that show it (rawMax in /api/rh/info).
+// A C5 pass's "us" is the middle of its peak at 0..1023 and "levelUs" at
+// 0..255; each RSSI message's "us" is when it was taken, and "peakAge" and
+// "levelPeakAge" hold, per node, how many us before that the first and last
+// samples at its value were, so RotorHazard's history (and Marshal
+// recalculation) has each peak at its sample time.
+void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
+    const bool linked = servicesStarted && rhLinked(currentTimeMs);
+    const bool c5 = c5MultiPilot && conf->getReceiverRadio() == 2;
+    if (c5MultiPilot) c5MultiPilot->setPassStream(linked && c5);
+    if (!linked) {
+        portENTER_CRITICAL(&rhPassMux_);
+        rhPassCount_ = 0;
+        portEXIT_CRITICAL(&rhPassMux_);
+        return;
+    }
+    if (c5) {
+        C5Pass pass;
+        while (c5MultiPilot->takePass(pass)) {
+            const int64_t now = esp_timer_get_time();
+            sendRhPass(pass.pilot, now - (int64_t)(uint32_t)((uint32_t)now - pass.crossingUs), pass.peak / 4, pass.peak,
+                       now - (int64_t)(uint32_t)((uint32_t)now - pass.levelUs));
+        }
+    }
+    RhPass pass;
+    for (;;) {
+        portENTER_CRITICAL(&rhPassMux_);
+        const bool got = rhPassCount_ > 0;
+        if (got) {
+            pass = rhPasses_[0];
+            for (uint8_t i = 1; i < rhPassCount_; ++i) rhPasses_[i - 1] = rhPasses_[i];
+            --rhPassCount_;
+        }
+        portEXIT_CRITICAL(&rhPassMux_);
+        if (!got) break;
+        sendRhPass(pass.slot, pass.us, pass.peak);
+    }
+    if ((currentTimeMs - rhRssiSentMs_) < WEB_RH_RSSI_SEND_MS) return;
+    // Before the peaks are taken: a skipped message's peaks go in the next.
+    if (streamBusy(rhEvents)) return;
+    rhRssiSentMs_ = currentTimeMs;
+    // Worst case ~500 bytes: 32 ten-digit ages for slots not sampled lately.
+    // Static: only parallelTask (8 KB stack) sends these.
+    static char body[768];
+    int n = snprintf(body, sizeof(body), "{\"rssi\":[");
+    uint8_t inside = 0;
+    if (c5) {
+        // The highest value since the last message, so RotorHazard's RSSI
+        // history (and its Marshal page) has every pass's peak, and when it was.
+        C5Peak peaks[C5Link::C5_MAX_PILOTS];
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            peaks[i] = c5MultiPilot->takeRhPeak(i);
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].level);
+            if (c5MultiPilot->inside(i)) inside |= (uint8_t)(1u << i);
+        }
+        n += snprintf(body + n, sizeof(body) - n, "],\"raw\":[");
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%u" : "%u", peaks[i].value);
+        // update() may collect newer samples while these snapshots are taken.
+        // Read the clock afterwards so none of their unsigned ages wrap and
+        // make the plugin fall back to message time instead of sample time.
+        const int64_t now = esp_timer_get_time();
+        const uint32_t nowUs = (uint32_t)now;
+        n += snprintf(body + n, sizeof(body) - n, "],\"us\":%lld,\"peakAge\":[", (long long)now);
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%lu,%lu" : "%lu,%lu",
+                          (unsigned long)(nowUs - peaks[i].firstUs), (unsigned long)(nowUs - peaks[i].lastUs));
+        n += snprintf(body + n, sizeof(body) - n, "],\"levelPeakAge\":[");
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+            n += snprintf(body + n, sizeof(body) - n, i ? ",%lu,%lu" : "%lu,%lu",
+                          (unsigned long)(nowUs - peaks[i].levelFirstUs), (unsigned long)(nowUs - peaks[i].levelLastUs));
+    } else if (timer) {
+        n += snprintf(body + n, sizeof(body) - n, "%u", timer->getRssi());
+    }
+    snprintf(body + n, sizeof(body) - n, "],\"in\":%u}", inside);
+    rhEvents.send(body, "rhRssi");
+}
+
+// One piece of a C5 firmware upload. The image is an ESP-IDF application:
+// byte 0 is 0xE9, bytes 12-13 the chip id (ESP32-C5 = 23), and its app
+// description starts at byte 32 (magic 0xABCD5432) with the version, which
+// FPVGateC5MK sets to "<version>+<board>", at byte 48.
+void Webserver::c5ImageChunk(uint8_t *data, size_t len, size_t index, size_t total) {
+    static File file;
+    static mbedtls_sha256_context sha;
+    static uint8_t head[80];
+    auto fail = [&](const char *why) {
+        if (file) file.close();
+        LittleFS.remove(C5_IMAGE_TMP_PATH);
+        strlcpy(c5Image_.error, why, sizeof(c5Image_.error));
+        c5Image_.ok = false;
+    };
+    if (index == 0) {
+        c5Image_ = C5Image();
+        if (c5Link && c5Link->updating()) return fail("A C5 update is running");
+        if (total < sizeof(head) || total > C5_IMAGE_MAX_BYTES) return fail("That isn't a C5 firmware file");
+        LittleFS.remove(C5_IMAGE_PATH);   // room for the new one
+        file = LittleFS.open(C5_IMAGE_TMP_PATH, "w");
+        if (!file) return fail("Couldn't store the file");
+        mbedtls_sha256_init(&sha);
+        mbedtls_sha256_starts(&sha, 0);
+    } else if (!file) {
+        return;   // already failed
+    }
+    if (index < sizeof(head)) memcpy(head + index, data, min(len, sizeof(head) - index));
+    if (file.write(data, len) != len) return fail("Not enough space for the file");
+    mbedtls_sha256_update(&sha, data, len);
+    if (index + len < total) return;
+
+    file.close();
+    mbedtls_sha256_finish(&sha, c5Image_.sha256);
+    mbedtls_sha256_free(&sha);
+    uint32_t magic;
+    memcpy(&magic, head + 32, 4);
+    const uint16_t chip = (uint16_t)(head[12] | head[13] << 8);
+    char version[33] = {};
+    memcpy(version, head + 48, 32);
+    char *plus = strchr(version, '+');
+    if (head[0] != 0xE9 || chip != 23 || magic != 0xABCD5432) return fail("That isn't ESP32-C5 firmware");
+    if (!plus || !plus[1]) return fail("That firmware doesn't say which C5 board it is for");
+    *plus++ = 0;
+    if (!LittleFS.rename(C5_IMAGE_TMP_PATH, C5_IMAGE_PATH)) return fail("Couldn't store the file");
+    strlcpy(c5Image_.version, version, sizeof(c5Image_.version));
+    strlcpy(c5Image_.board, plus, sizeof(c5Image_.board));
+    c5Image_.size = (uint32_t)total;
+    c5Image_.ok = true;
+}
+
 void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
+    if (const uint32_t free = lowHeapPending) {
+        lowHeapPending = 0;
+        if (free < lowHeap.free) {
+            lowHeap.free = free;
+            lowHeap.largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            lowHeap.atMs = currentTimeMs;
+            lowHeap.requests = activeRequests;
+            lowHeap.files = activeFiles;
+            lowHeap.eventClients = events.count();
+            lowHeap.eventWaiting = events.avgPacketsWaiting();
+            lowHeap.rhClients = rhEvents.count();
+            lowHeap.rhWaiting = rhEvents.avgPacketsWaiting();
+            lowHeap.wifiRssi = WiFi.RSSI();
+        }
+    }
+    sendRhUpdates(currentTimeMs);
+    static uint32_t lastC5EventMs = 0;
+    if (c5Link && c5MultiPilot && servicesStarted && conf->getReceiverRadio() == 2 &&
+        (currentTimeMs - lastC5EventMs) >= WEB_C5_SEND_TIMEOUT_MS) {
+        lastC5EventMs = currentTimeMs;
+        // All 8 slots (frequency 0 = off), the filtered RSSI the lap
+        // detector uses, who is in the gate, and the link's state. Skipped
+        // while the stream is backed up; the laps below still go out.
+        if (!streamBusy(events)) {
+        JsonDocument rssiDoc;
+        JsonArray values = rssiDoc["rssi"].to<JsonArray>();
+        JsonArray freqs = rssiDoc["freq"].to<JsonArray>();
+        JsonArray inside = rssiDoc["in"].to<JsonArray>();
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            values.add(c5MultiPilot->rssi(i));
+            freqs.add(conf->getC5Frequency(i));
+            inside.add(c5MultiPilot->inside(i) ? 1 : 0);
+        }
+        rssiDoc["on"] = c5Link->online(currentTimeMs);
+        rssiDoc["started"] = c5Link->started();
+        rssiDoc["st"] = c5Link->state();
+        rssiDoc["mhz"] = c5Link->tunedFrequency();
+        rssiDoc["gain"] = c5Link->reportedGain();
+        rssiDoc["race"] = c5MultiPilot->running();
+        rssiDoc["pilot"] = c5Link->currentPilot();
+        rssiDoc["ready"] = c5Link->tuningReady();
+        rssiDoc["samples"] = c5Link->acceptedSamples();
+        rssiDoc["seqGaps"] = c5Link->sampleSequenceGaps();
+        rssiDoc["queueDrops"] = c5Link->sampleQueueDrops();
+        rssiDoc["scan"] = c5Link->scanMode();
+        rssiDoc["racers"] = c5MultiPilot->racerMask();
+        rssiDoc["multi"] = c5MultiPilot->multiRace();
+        rssiDoc["records"] = c5Link->scanRecords();
+        rssiDoc["badRecords"] = c5Link->badRecords();
+        rssiDoc["pollGapMaxUs"] = c5Link->takePollGapMaxUs();
+        rssiDoc["pollBytesMax"] = c5Link->takePollBytesMax();
+        String payload;
+        serializeJson(rssiDoc, payload);
+        events.send(payload.c_str(), "c5Rssi");
+        char timingPayload[128];
+        snprintf(timingPayload, sizeof(timingPayload),
+                 "{\"tuneToTuningUs\":%lu,\"tuningToReadyUs\":%lu,\"readyToFirstSampleUs\":%lu,\"tuneToFirstSampleUs\":%lu}",
+                 (unsigned long)c5Link->tuneToTuningUs(),
+                 (unsigned long)c5Link->tuningToReadyUs(),
+                 (unsigned long)c5Link->readyToFirstSampleUs(),
+                 (unsigned long)c5Link->tuneToFirstSampleUs());
+        events.send(timingPayload, "c5Timing");
+        }
+        C5LapEvent lap;
+        bool lapTaken = false;
+        while (c5MultiPilot->takeLap(lap)) {
+            JsonDocument lapDoc;
+            lapDoc["pilot"] = lap.pilot;
+            lapDoc["lap"] = lap.lap;   // 0 = Gate 1
+            lapDoc["lapTimeMs"] = lap.lapTimeMs;
+            lapDoc["racer"] = lap.racer;
+            String lapPayload;
+            serializeJson(lapDoc, lapPayload);
+            events.send(lapPayload.c_str(), "c5Lap");
+            lapTaken = true;
+        }
+        // The gate's own lap flash, as an RX5808 lap gives (LapTimer), with
+        // or without a browser open. Once per batch: laps taken together are
+        // one flash, and the webhook is not sent several times at once.
+        if (lapTaken) {
+            if (led) led->on(200);
+#ifdef HAS_RGB_LED
+            if (g_rgbLed) g_rgbLed->flashLap();
+#endif
+            if (webhooks && conf->getGateLEDsEnabled() && conf->getWebhookLap()) {
+                webhooks->triggerLap();
+            }
+        }
+    }
     // A reboot asked for over HTTP. Deferred rather than immediate so the
     // response reaches the client first; restarting inside the handler drops
     // the connection and the caller cannot tell success from a crash.
@@ -345,7 +696,23 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         }
     }
 
-    if (sendRssi && ((currentTimeMs - rssiSentMs) > WEB_RSSI_SEND_TIMEOUT_MS)) {
+    if (sendRssi && conf->getReceiverRadio() == 2) {
+        // RSSI debug popout on the C5: every slot's peak since the last frame
+        // (0..1023) and who the race detector has in the gate, 25 a second.
+        if (c5MultiPilot && servicesStarted && (currentTimeMs - rssiSentMs) >= WEB_C5_FAST_SEND_MS &&
+            !streamBusy(events)) {   // before the peaks are taken
+            rssiSentMs = currentTimeMs;
+            char buf[96];
+            int n = snprintf(buf, sizeof(buf), "{\"v\":[");
+            uint8_t in = 0;
+            for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+                n += snprintf(buf + n, sizeof(buf) - n, i ? ",%u" : "%u", c5MultiPilot->takePeakHold(i));
+                if (c5MultiPilot->inside(i)) in |= (uint8_t)(1u << i);
+            }
+            snprintf(buf + n, sizeof(buf) - n, "],\"in\":%u}", in);
+            events.send(buf, "c5RssiFast");
+        }
+    } else if (sendRssi && ((currentTimeMs - rssiSentMs) > WEB_RSSI_SEND_TIMEOUT_MS)) {
         sendRssiEvent(timer->getRssi());
         rssiSentMs = currentTimeMs;
     }
@@ -409,6 +776,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
             case WIFI_AP:
                 DEBUG("Changing to WiFi AP mode\n");
 
+                elrsBackpack.stop();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -417,6 +785,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 wifiMode = WIFI_AP;
                 WiFi.setHostname(wifi_hostname);  // hostname must be set before the mode is set to STA
                 WiFi.mode(effectiveWifiModeForRole(true, conf));
+                elrsBackpack.afterModeSet();
                 changeTimeMs = currentTimeMs;
 
                 // Power-saving settings for AP mode to prevent boot-looping
@@ -427,7 +796,10 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 DEBUG("Starting WiFi AP: %s with password: %s\n", wifi_ap_ssid.c_str(), wifi_ap_password);
                 
                 // Start AP with max 4 connections to limit power draw.
-                WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, 6, 0, 4);
+                // ELRS backpacks talk on channel 1.
+                if (WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, elrsBackpack.enabled() ? 1 : 6, 0, 4)) {
+                    elrsBackpack.afterApStarted();
+                }
 
 #ifdef SEEED_XIAO_ESP32S3
                 // Disable WiFi power saving for faster responsiveness on XIAO
@@ -447,6 +819,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 break;
             case WIFI_STA:
                 DEBUG("Connecting to WiFi network\n");
+                elrsBackpack.stop();
                 WiFi.softAPdisconnect(true);
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
@@ -533,7 +906,7 @@ static void handleRoot(AsyncWebServerRequest *request) {
     String host = request->host();
     if (!isIp(host)) {
         // Get the device's IP address
-        IPAddress deviceIP = (WiFi.getMode() == WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+        IPAddress deviceIP = (WiFi.getMode() & WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
         String redirectUrl = "http://" + deviceIP.toString() + request->url();
         DEBUG("Redirecting %s to %s\n", host.c_str(), redirectUrl.c_str());
         request->redirect(redirectUrl);
@@ -656,12 +1029,50 @@ void Webserver::startServices() {
     DEBUG("CORS headers configured\n");
 
     startLittleFS();
+    elrsBackpack.registerRoutes(server);
     
     // Note: storage is already initialized in main.cpp before webserver starts
     // Do NOT call storage->init() here as it would reset the sdAvailable flag!
     
     // Note: race history is already initialized in main.cpp
     // Do NOT re-initialize it here
+
+    // Every request, before its handler: keep what one response can hold
+    // small, and refuse new work when the heap is nearly gone (see
+    // capSendBuffer). Lap timing doesn't use this heap: the C5 and the pass
+    // detector run on the other core from buffers set aside at startup.
+    server.addMiddleware([](AsyncWebServerRequest *request, ArMiddlewareNext next) {
+        // Only file downloads are refused: they hold the heap, while API
+        // calls (RotorHazard's clock polls, status checks) cost next to
+        // nothing and failing them would break the things using them.
+        const bool fileRequest = !request->url().startsWith("/api/") && !request->url().endsWith("/events");
+        if (fileRequest && heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < WEB_LOW_HEAP_BYTES) {
+            ++busyRefusals;
+            AsyncWebServerResponse *busy = request->beginResponse(503, "text/plain", "Busy, try again");
+            busy->addHeader("Retry-After", "1");
+            request->send(busy);
+            return;
+        }
+        // Not on event streams: their messages are small, and slowed down
+        // they back up in AsyncEventSource's queue (up to 32 copies each),
+        // which costs more heap than the cap saves.
+        const bool stream = request->url().endsWith("/events");
+        if (!stream) capSendBuffer(request);
+        // serveStatic has opened the file but not read it yet. Arduino gives
+        // every file a 4 KB stdio buffer; with the send cap above, each read
+        // is at most two segments, so 512 bytes (the LittleFS cache) loses
+        // nothing and leaves 3.5 KB per file in flight for everything else.
+        if (request->_tempFile) request->_tempFile.setBufferSize(WEB_FILE_BUFFER);
+        // Counted for the low-heap snapshot.
+        const bool file = !stream && !request->url().startsWith("/api/");
+        ++activeRequests;
+        if (file) ++activeFiles;
+        request->onDisconnect([file]() {
+            --activeRequests;
+            if (file) --activeFiles;
+        });
+        next();
+    });
 
     server.on("/", handleRoot);
     server.on("/generate_204", handleRoot);  // handle Andriod phones doing shit to detect if there is 'real' internet and possibly dropping conn.
@@ -756,15 +1167,18 @@ EEPROM:\n\
     });
     
     server.on("/timer/start", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const uint32_t timestamp = request->hasParam("timestamp") ? request->getParam("timestamp")->value().toInt() : 0;
+            const bool accepted = c5RaceControl->requestStart(timestamp);
+            request->send(accepted ? 202 : 409, "application/json", accepted
+                ? "{\"status\":\"OK\",\"gateManaged\":true}"
+                : "{\"status\":\"ERROR\",\"message\":\"Race busy, unsaved, no racers, or lap limit exceeds 63\"}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/start");
         // Start local timer
         timer->start();
-        // Notify RotorHazard (queued, sent on next process() tick)
-        // Pass the race start timestamp so RH can sync to the same reference.
-        if (rhManager && rhManager->isEnabled()) {
-            rhManager->startRace(timer->getRaceStartMs());
-        }
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("started");
         }
@@ -785,14 +1199,15 @@ EEPROM:\n\
     });
 
     server.on("/timer/stop", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            c5RaceControl->requestStop();
+            request->send(202, "application/json", "{\"status\":\"OK\",\"gateManaged\":true}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/stop");
         // Stop local timer
         timer->stop();
-        // Notify RotorHazard (queued, sent on next process() tick)
-        if (rhManager && rhManager->isEnabled()) {
-            rhManager->stopRace();
-        }
         if (transportMgr) {
             transportMgr->broadcastRaceStateEvent("stopped");
         }
@@ -843,10 +1258,6 @@ EEPROM:\n\
             if (conf->getRaceSyncMode() == 2) {
                 DEBUG("[Slave] Manual lap - sending to master: %u ms\n", lapTimeMs);
                 sendLapToMaster(lapTimeMs);
-            }
-            // Report lap to RotorHazard with raw millis() timestamps for clock sync
-            if (rhManager && timer) {
-                rhManager->triggerLap(millis(), timer->getRaceStartMs());
             }
         }
         request->send(200, "application/json", "{\"status\": \"OK\"}");
@@ -908,6 +1319,12 @@ EEPROM:\n\
     });
     
     server.on("/timer/clearLaps", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const bool accepted = c5RaceControl->requestClear();
+            request->send(accepted ? 202 : 409, "application/json", accepted
+                ? "{\"status\":\"OK\"}" : "{\"status\":\"ERROR\",\"message\":\"Stop and save the race before clearing laps\"}");
+            return;
+        }
         // Send sync to slaves first (if master)
         sendSyncCommand(conf, "/timer/clearLaps");
         // Broadcast clearLaps event to all connected clients (including OSD)
@@ -980,6 +1397,10 @@ EEPROM:\n\
     });
     
     AsyncCallbackJsonWebHandler *remoteLapHandler = new AsyncCallbackJsonWebHandler("/timer/remoteLap", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"status\":\"ERROR\",\"message\":\"C5 Multi does not accept chained timers\"}");
+            return;
+        }
         JsonObject jsonObj = json.as<JsonObject>();
         
         uint32_t lapTimeMs = jsonObj["lapTimeMs"] | 0;
@@ -1035,6 +1456,175 @@ EEPROM:\n\
     // sizes are reported as measured rather than as a layout version number,
     // so an updater can simply compare an image against the space that exists
     // instead of tracking which layout shipped when.
+    // The current (or last) C5 race: every slot's laps so far, so a page
+    // opened or reloaded mid-race can rebuild the lap table.
+    server.on("/api/c5/race", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot) {
+            request->send(404, "application/json", "{\"error\":\"no C5 receiver\"}");
+            return;
+        }
+        JsonDocument doc;
+        doc["running"] = c5MultiPilot->running();
+        doc["racers"] = c5MultiPilot->racerMask();
+        doc["multi"] = c5MultiPilot->multiRace();
+        C5RaceControl::Status raceState;
+        if (c5RaceControl) {
+            const auto state = c5RaceControl->status();
+            raceState = state;
+            doc["gateManaged"] = true;
+            doc["eventManaged"] = state.eventManaged;
+            doc["eventFailed"] = state.eventFailed;
+            doc["error"] = state.error;
+            doc["running"] = state.running;
+            doc["busy"] = state.busy;
+            doc["timestamp"] = state.timestamp;
+            doc["savedTimestamp"] = state.savedTimestamp;
+            doc["saveFailed"] = state.saveFailed;
+            doc["stopReason"] = state.reason;
+            doc["finished"] = c5MultiPilot->finishedMask();
+        }
+        JsonArray pilots = doc["pilots"].to<JsonArray>();
+        uint32_t laps[C5MultiPilot::MAX_RACE_LAPS];
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            JsonObject p = pilots.add<JsonObject>();
+            p["slot"] = i;
+            p["frequency"] = conf->getC5Frequency(i);
+            if (raceState.timestamp) {
+                const auto& identity = raceState.roster[i];
+                p["frequency"] = identity.frequency;
+                p["name"] = identity.name;
+                p["phonetic"] = identity.phonetic;
+                p["color"] = identity.color;
+            }
+            JsonArray a = p["laps"].to<JsonArray>();
+            const uint8_t n = c5MultiPilot->copyLaps(i, laps, C5MultiPilot::MAX_RACE_LAPS);
+            for (uint8_t k = 0; k < n; ++k) a.add(laps[k]);
+        }
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
+#ifdef C5_TIMING_TRACE
+    server.on("/api/c5/trace", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const int pilot = request->hasParam("node") ? request->getParam("node")->value().toInt() : 0;
+        const int duration = request->hasParam("ms") ? request->getParam("ms")->value().toInt() : 140000;
+        if (!c5MultiPilot || pilot < 0 || pilot >= 8 || duration < 1 || duration > 180000 ||
+            !c5MultiPilot->startTrace(pilot, duration)) {
+            request->send(409, "text/plain", "Trace busy, invalid, or no PSRAM");
+            return;
+        }
+        request->send(200, "text/plain", "Armed");
+    });
+    server.on("/api/c5/trace", HTTP_DELETE, [this](AsyncWebServerRequest *request) {
+        if (c5MultiPilot) c5MultiPilot->stopTrace();
+        request->send(200, "text/plain", "Stopped");
+    });
+    server.on("/api/c5/trace", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot) { request->send(404); return; }
+        const auto info = c5MultiPilot->traceInfo();
+        JsonDocument doc;
+        doc["active"] = info.active; doc["full"] = info.full;
+        doc["count"] = info.count; doc["firstUs"] = info.firstUs; doc["pilot"] = info.pilot;
+        doc["recordBytes"] = sizeof(C5MultiPilot::TraceSample);
+        String body; serializeJson(doc, body);
+        request->send(200, "application/json", body);
+    });
+    server.on("/api/c5/trace.bin", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        size_t bytes = 0;
+        const auto samples = c5MultiPilot ? c5MultiPilot->beginTraceRead(bytes) : nullptr;
+        if (!samples) { request->send(409, "text/plain", "Stop the trace first, or no samples"); return; }
+        request->onDisconnect([this]() { c5MultiPilot->endTraceRead(); });
+        auto response = request->beginResponse(200, "application/octet-stream",
+            reinterpret_cast<const uint8_t*>(samples), bytes);
+        response->addHeader("Connection", "close");
+        request->send(response);
+    });
+#endif
+
+    // Manual lap for one C5 slot in the running race (?pilot=0..7). It goes
+    // out as a normal "c5Lap" event and counts in the race like a pass.
+    server.on("/api/c5/addLap", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (!c5MultiPilot || !request->hasParam("pilot")) {
+            request->send(400, "application/json", "{\"error\":\"pilot required\"}");
+            return;
+        }
+        const long pilot = request->getParam("pilot")->value().toInt();
+        if (pilot < 0 || !c5MultiPilot->requestManualLap((uint8_t)pilot)) {
+            request->send(409, "application/json", "{\"error\":\"no race running for that pilot\"}");
+            return;
+        }
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
+
+    // C5 firmware: an application image from FPVGateC5MK as the raw body.
+    // It is checked as it arrives (c5ImageChunk) and kept in LittleFS until
+    // POST /api/c5/update sends it to the C5 over the link.
+    server.on("/api/c5/firmware", HTTP_POST,
+        [this](AsyncWebServerRequest *request) {
+            JsonDocument doc;
+            if (!c5Image_.ok) {
+                doc["error"] = c5Image_.error[0] ? c5Image_.error : "No file received";
+            } else {
+                doc["version"] = c5Image_.version;
+                doc["board"] = c5Image_.board;
+                doc["size"] = c5Image_.size;
+            }
+            String out;
+            serializeJson(doc, out);
+            request->send(c5Image_.ok ? 200 : 400, "application/json", out);
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            c5ImageChunk(data, len, index, total);
+        });
+
+    server.on("/api/c5/update", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const char *why = nullptr;
+        if (!c5Link || !c5Link->online(millis())) why = "The C5 isn't connected";
+        else if (c5Link->firmware() < 3) why = "This C5's firmware can't be updated over the link. Flash it over USB once.";
+        else if (!c5Image_.ok) why = "Choose a C5 firmware file first";
+        else if (strcmp(c5Image_.board, c5Link->board()) != 0) why = "That firmware is for a different C5 board";
+        else if (timer->isRaceRunning()) why = "Stop the race first";
+        else if (!c5Link->requestUpdate(C5_IMAGE_PATH, c5Image_.size, c5Image_.sha256, c5Image_.version))
+            why = "An update is already running";
+        if (why) {
+            JsonDocument doc;
+            doc["error"] = why;
+            String out;
+            serializeJson(doc, out);
+            request->send(409, "application/json", out);
+            return;
+        }
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
+
+    // The C5's firmware, the image waiting to be sent, and update progress.
+    server.on("/api/c5/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        static const char *const states[] = {"idle", "starting", "sending", "finishing", "restarting", "done", "failed"};
+        JsonDocument doc;
+        JsonObject c5 = doc["c5"].to<JsonObject>();
+        c5["online"] = c5Link && c5Link->online(millis());
+        c5["firmware"] = c5Link ? c5Link->firmware() : 0;
+        c5["version"] = c5Link ? c5Link->version() : "";
+        c5["board"] = c5Link ? c5Link->board() : "";
+        if (c5Image_.ok) {
+            JsonObject image = doc["image"].to<JsonObject>();
+            image["version"] = c5Image_.version;
+            image["board"] = c5Image_.board;
+            image["size"] = c5Image_.size;
+        }
+        if (c5Link) {
+            doc["state"] = states[(uint8_t)c5Link->updateState()];
+            doc["sent"] = c5Link->updateAcked();
+            doc["size"] = c5Link->updateSize();
+            doc["error"] = c5Link->updateError();
+        }
+        String out;
+        serializeJson(doc, out);
+        request->send(200, "application/json", out);
+    });
+
     server.on("/api/system/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
         doc["version"] = FPVGATE_VERSION_STRING();
@@ -1043,6 +1633,53 @@ EEPROM:\n\
         doc["chipRevision"] = ESP.getChipRevision();
         doc["flashSize"] = ESP.getFlashChipSize();
         doc["sdkVersion"] = ESP.getSdkVersion();
+        doc["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        doc["heapLow"] = heapLow;
+        doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        doc["busyRefusals"] = busyRefusals;
+        doc["requestsNow"] = activeRequests;
+        if (lowHeap.free != UINT32_MAX) {
+            JsonObject low = doc["lowHeap"].to<JsonObject>();
+            low["free"] = lowHeap.free;
+            low["largest"] = lowHeap.largest;
+            low["agoMs"] = millis() - lowHeap.atMs;
+            low["requests"] = lowHeap.requests;
+            low["files"] = lowHeap.files;
+            low["eventClients"] = lowHeap.eventClients;
+            low["eventWaiting"] = lowHeap.eventWaiting;
+            low["rhClients"] = lowHeap.rhClients;
+            low["rhWaiting"] = lowHeap.rhWaiting;
+            low["wifiRssi"] = lowHeap.wifiRssi;
+        }
+        if (request->hasParam("resetHeapLow")) {
+            heapLow = UINT32_MAX;
+            lowHeap = LowHeapSnapshot();
+        }
+#ifdef FPVGATE_ETH_W5500
+        JsonObject ethernet = doc["ethernet"].to<JsonObject>();
+        char ethIp[16];
+        ethnet_ip_string(ethIp, sizeof(ethIp));
+        ethernet["link"] = ethnet_link_up();
+        ethernet["ip"] = ethIp;
+        ethernet["fixed"] = ethnet_is_static();
+        ethernet["mbps"] = ethnet_speed_mbps();
+        ethernet["fullDuplex"] = ethnet_full_duplex();
+        ethnet_w5500_stats_t w5500;
+        ethnet_w5500_stats(&w5500);
+        JsonObject counters = ethernet["w5500"].to<JsonObject>();
+        counters["rxFrames"] = w5500.rx_frames;
+        counters["rxTcp80"] = w5500.rx_tcp80;
+        counters["rxBufKb"] = ethnet_w5500_rxbuf_kb();
+        counters["rxErrors"] = w5500.rx_errors;
+        counters["rxNoMem"] = w5500.rx_nomem;
+        counters["rxMissedEdges"] = w5500.rx_missed_edges;
+        counters["txFrames"] = w5500.tx_frames;
+        counters["txFull"] = w5500.tx_full;
+        counters["txTimeout"] = w5500.tx_timeout;
+        counters["txErrors"] = w5500.tx_errors;
+        counters["phycfgrBoot"] = ethnet_boot_phycfgr();
+        counters["phycfgr"] = ethnet_w5500_phycfgr();
+#endif
 
         // Which application slot is running, and how much room the other one
         // has. An over-the-air application update is written to the inactive
@@ -1096,6 +1733,31 @@ EEPROM:\n\
 
     AsyncCallbackJsonWebHandler *configJsonHandler = new AsyncCallbackJsonWebHandler("/config", [this](AsyncWebServerRequest *request, JsonVariant &json) {
         JsonObject jsonObj = json.as<JsonObject>();
+        if (timer->isRaceRunning() && conf->getReceiverRadio() == 2) {
+            // Full settings forms include these fields even for unrelated edits.
+            // Refuse receiver changes during a C5 race; never retune a live heat.
+            bool changed = (!jsonObj["receiverRadio"].isNull() && jsonObj["receiverRadio"].as<int>() != 2) ||
+                           (!jsonObj["c5Gain"].isNull() && jsonObj["c5Gain"].as<int>() != conf->getC5Gain());
+            uint8_t seen = 0;
+            if (jsonObj["c5Pilots"].is<JsonArray>()) {
+                uint8_t index = 0;
+                for (JsonObject p : jsonObj["c5Pilots"].as<JsonArray>()) {
+                    uint8_t slot = p["id"] | index++;
+                    if (slot >= 8) { changed = true; continue; }
+                    seen |= 1u << slot;
+                    changed |= (p["frequency"] | 0) != conf->getC5Frequency(slot) ||
+                        (p["enterRssi"] | 72) != conf->getC5EnterRssi(slot) ||
+                        (p["exitRssi"] | 68) != conf->getC5ExitRssi(slot) ||
+                        (!p["race"].isNull() && (p["race"].as<int>() != 0) != bool((conf->getC5RaceMask() >> slot) & 1));
+                }
+                for (uint8_t slot = 0; slot < 8; ++slot)
+                    if (!(seen & (1u << slot)) && conf->getC5Frequency(slot)) changed = true;
+            }
+            if (changed) {
+                request->send(409, "application/json", "{\"status\":\"ERROR\",\"message\":\"Stop the race before changing C5 channels or calibration\"}");
+                return;
+            }
+        }
 #ifdef DEBUG_OUT
         serializeJsonPretty(jsonObj, DEBUG_OUT);
         DEBUG("\n");
@@ -1167,31 +1829,290 @@ EEPROM:\n\
         server.on(route, HTTP_GET, handleAudioFileRequest);
     }
     
-    // RotorHazard integration status endpoint
-    server.on("/api/rh/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    // RotorHazard plugin 2. The plugin reads the slots here, keeps its clock
+    // in step through /api/rh/clock (which also keeps the link alive), tunes
+    // slots through /api/rh/node and listens for "rhPass" and "rhRssi" on
+    // /events. Times are esp_timer microseconds since boot.
+    server.on("/api/rh/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
         JsonDocument doc;
-        bool en = rhManager && rhManager->isEnabled();
-        bool conn = rhManager && rhManager->isConnected();
-        bool synced = rhManager && rhManager->isClockSynced();
-        uint32_t rttMs = rhManager ? rhManager->getLastSyncRttMs() : 0;
-        doc["enabled"]     = en;
-        doc["connected"]   = conn;
-        doc["clockSynced"] = synced;
-        doc["rttMs"]       = rttMs;
-        doc["host"]        = conf->getRhHostIP();
-        doc["node"]        = conf->getRhNodeIndex();
+        const bool c5 = conf->getReceiverRadio() == 2;
+        doc["api"] = 2;   // 2: passes and RSSI on /api/rh/events
+        doc["version"] = FPVGATE_VERSION_STRING();
+        doc["board"] = FPVGATE_BOARD_ID;
+        doc["radio"] = conf->getReceiverRadio();
+        doc["rssiMax"] = 255;
+        if (c5) doc["rawMax"] = 1023;   // rhRssi "raw" and rhPass "rawPeak"; levels are raw / 4
+        doc["minMhz"] = c5 ? C5_MIN_MHZ : 5645;
+        doc["maxMhz"] = c5 ? C5_MAX_MHZ : 5945;
+        JsonArray nodes = doc["nodes"].to<JsonArray>();
+        for (uint8_t i = 0; i < (c5 ? C5Link::C5_MAX_PILOTS : 1); ++i) {
+            JsonObject node = nodes.add<JsonObject>();
+            node["frequency"] = c5 ? conf->getC5Frequency(i) : conf->getFrequency();
+            node["enter"] = c5 ? conf->getC5EnterRssi(i) : conf->getEnterRssi();
+            node["exit"] = c5 ? conf->getC5ExitRssi(i) : conf->getExitRssi();
+            node["name"] = c5 ? conf->getC5PilotName(i) : conf->getPilotName();
+        }
+        doc["us"] = esp_timer_get_time();
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
     });
 
-    // RotorHazard clock sync trigger endpoint
-    server.on("/api/rh/syncClock", HTTP_POST, [this, sendCorsResponse](AsyncWebServerRequest *request) {
-        if (rhManager) {
-            rhManager->requestSync();
-        }
-        sendCorsResponse(request, "{\"status\":\"queued\"}");
+#ifdef FPVGATE_USB_NET
+    // USB networking health, readable over Wi-Fi when USB itself has stalled.
+    // Counters only: no lwIP or USB calls, so it can't block on either.
+    // ?repair=0 / ?repair=1 switches the TX-FIFO-empty repair for bench A/B
+    // tests (not saved; it is on after every boot).
+    server.on("/api/usbnet/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("repair")) usbnet_txfe_set_enabled(request->getParam("repair")->value() != "0");
+        usbnet_counters_t c = {};
+        usbnet_counters(&c);
+        usbnet_txfe_status_t t = {};
+        usbnet_txfe_status(&t);
+        JsonDocument doc;
+        doc["uptimeS"] = millis() / 1000;
+        doc["resetReason"] = (int)esp_reset_reason();
+        doc["heap"] = ESP.getFreeHeap();
+        doc["heapMin"] = ESP.getMinFreeHeap();
+        doc["rx"] = c.rx;
+        doc["queued"] = c.queued;
+        doc["sent"] = c.sent;
+        doc["dropped"] = c.dropped;
+        doc["deferLost"] = c.defer_lost;
+        doc["poolFree"] = c.pool_free;
+        doc["poolLow"] = c.pool_low;
+        JsonObject txfe = doc["txfe"].to<JsonObject>();
+        txfe["running"] = t.running;
+        txfe["enabled"] = t.enabled;
+        txfe["detections"] = t.detections;
+        txfe["passes"] = t.passes;
+        txfe["repairs"] = t.total;
+        JsonArray perEp = txfe["perEp"].to<JsonArray>();
+        for (uint8_t i = 0; i < 7; ++i) perEp.add(t.repairs[i]);
+        txfe["lastRepairMs"] = t.last_repair_ms;
+        txfe["emptyMask"] = t.empty_mask;
+        txfe["stuckNow"] = t.stuck_now;
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
     });
+
+    // Controller events and registers (hex), for a stalled USB link.
+    server.on("/api/usbnet/regs", HTTP_GET, [](AsyncWebServerRequest *request) {
+        usbnet_usb_snapshot_t s = {};
+        usbnet_usb_snapshot(&s);
+        JsonDocument doc;
+        char hex[12];
+        auto put = [&](JsonVariant v, uint32_t value) {
+            snprintf(hex, sizeof(hex), "%08lx", (unsigned long)value);
+            v.set(hex);
+        };
+        doc["uptimeMs"] = millis();
+        doc["lastEventMs"] = s.last_event_ms;
+        JsonObject isr = doc["isr"].to<JsonObject>();
+        isr["entries"] = s.isr_entries;
+        isr["usbrst"] = s.isr_rst;
+        isr["resetdet"] = s.isr_rstdet;
+        isr["enumdone"] = s.isr_enum;
+        isr["suspend"] = s.isr_susp;
+        isr["earlySuspend"] = s.isr_esusp;
+        isr["wakeup"] = s.isr_wkup;
+        isr["disconnect"] = s.isr_disc;
+        isr["lastUsbrstMs"] = s.last_rst_ms;
+        isr["lastResetdetMs"] = s.last_rstdet_ms;
+        isr["lastEnumdoneMs"] = s.last_enum_ms;
+        isr["unknown15"] = s.unknown15_total;
+        JsonArray u15 = isr["unknown15PerEp"].to<JsonArray>();
+        for (uint8_t i = 0; i < 7; ++i) u15.add(s.unknown15[i]);
+        isr["lastUnknown15Ms"] = s.last_unknown15_ms;
+        JsonObject half = doc["halfReset"].to<JsonObject>();
+        half["collapses"] = s.collapses;
+        half["restores"] = s.restores;
+        half["lastMs"] = s.last_collapse_ms;
+        JsonArray events = doc["events"].to<JsonArray>();
+        for (uint8_t i = 0; i < 10; ++i) events.add(s.events[i]);
+        JsonArray xin = doc["xferIn"].to<JsonArray>();
+        JsonArray xout = doc["xferOut"].to<JsonArray>();
+        for (uint8_t i = 0; i < 8; ++i) {
+            xin.add(s.xfer_in[i]);
+            xout.add(s.xfer_out[i]);
+        }
+        // A missing key isn't created by converting doc["key"] to a
+        // JsonVariant, so assign these by name.
+        auto putKey = [&](const char *key, uint32_t value) {
+            snprintf(hex, sizeof(hex), "%08lx", (unsigned long)value);
+            doc[key] = hex;   // char[]: copied
+        };
+        putKey("dcfg", s.dcfg);
+        putKey("collapseDcfg", s.collapse_dcfg);
+        putKey("collapseGintsts", s.collapse_gintsts);
+        putKey("gintsts", s.gintsts);
+        putKey("gintmsk", s.gintmsk);
+        putKey("gotgctl", s.gotgctl);
+        putKey("gahbcfg", s.gahbcfg);
+        putKey("dctl", s.dctl);
+        putKey("dsts", s.dsts);
+        putKey("daint", s.daint);
+        putKey("daintmsk", s.daintmsk);
+        putKey("emptyMask", s.empty_mask);
+        putKey("pcgctrl", s.pcgctrl);
+        JsonArray in = doc["in"].to<JsonArray>();
+        JsonArray out = doc["out"].to<JsonArray>();
+        for (uint8_t n = 0; n < 7; ++n) {
+            JsonArray e = in.add<JsonArray>();
+            put(e.add<JsonVariant>(), s.in_ctl[n]);
+            put(e.add<JsonVariant>(), s.in_int[n]);
+            put(e.add<JsonVariant>(), s.in_siz[n]);
+            put(e.add<JsonVariant>(), s.in_fifo[n]);
+            JsonArray o = out.add<JsonArray>();
+            put(o.add<JsonVariant>(), s.out_ctl[n]);
+            put(o.add<JsonVariant>(), s.out_int[n]);
+            put(o.add<JsonVariant>(), s.out_siz[n]);
+        }
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+#endif
+
+    // The core dump left in flash by the last crash or watchdog reset, so a
+    // crash can be diagnosed over Wi-Fi without a serial bootloader session.
+    // Decode backtrace addresses with addr2line against the ELF of the
+    // build that crashed (app_elf_sha256 says which).
+    server.on("/api/coredump/summary", HTTP_GET, [](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        size_t addr = 0, size = 0;
+        esp_err_t found = esp_core_dump_image_get(&addr, &size);
+        doc["present"] = found == ESP_OK;
+        doc["resetReason"] = (int)esp_reset_reason();
+        if (found == ESP_OK) {
+            doc["size"] = size;
+            esp_core_dump_summary_t *s = (esp_core_dump_summary_t *)calloc(1, sizeof(esp_core_dump_summary_t));
+            esp_err_t err = s ? esp_core_dump_get_summary(s) : ESP_ERR_NO_MEM;
+            doc["summary"] = esp_err_to_name(err);
+            if (err == ESP_OK) {
+                char hex[12];
+                doc["task"] = s->exc_task;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_pc);
+                doc["pc"] = hex;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->ex_info.exc_cause);
+                doc["cause"] = hex;
+                snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->ex_info.exc_vaddr);
+                doc["vaddr"] = hex;
+                doc["btCorrupted"] = s->exc_bt_info.corrupted;
+                JsonArray bt = doc["backtrace"].to<JsonArray>();
+                for (uint32_t i = 0; i < s->exc_bt_info.depth && i < 16; ++i) {
+                    snprintf(hex, sizeof(hex), "0x%08lx", (unsigned long)s->exc_bt_info.bt[i]);
+                    bt.add(hex);
+                }
+                char sha[APP_ELF_SHA256_SZ + 1] = {};
+                memcpy(sha, s->app_elf_sha256, APP_ELF_SHA256_SZ);
+                doc["elfSha256"] = sha;
+            }
+            free(s);
+        }
+        String output;
+        serializeJson(doc, output);
+        request->send(200, "application/json", output);
+    });
+
+    server.on("/api/coredump", HTTP_GET, [](AsyncWebServerRequest *request) {
+        size_t addr = 0, size = 0;
+        if (esp_core_dump_image_get(&addr, &size) != ESP_OK) {
+            request->send(404, "application/json", "{\"error\":\"no core dump\"}");
+            return;
+        }
+        const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+        if (!part || addr < part->address) {
+            request->send(500, "application/json", "{\"error\":\"no core dump partition\"}");
+            return;
+        }
+        const size_t offset = addr - part->address;
+        AsyncWebServerResponse *response = request->beginResponse("application/octet-stream", size,
+            [part, offset, size](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                size_t n = size - index < maxLen ? size - index : maxLen;
+                if (n && esp_partition_read(part, offset + index, buffer, n) != ESP_OK) return 0;
+                return n;
+            });
+        response->addHeader("Content-Disposition", "attachment; filename=coredump.elf");
+        request->send(response);
+    });
+
+    server.on("/api/coredump/erase", HTTP_POST, [](AsyncWebServerRequest *request) {
+        esp_err_t err = esp_core_dump_image_erase();
+        char body[64];
+        snprintf(body, sizeof(body), "{\"erased\":\"%s\"}", esp_err_to_name(err));
+        request->send(200, "application/json", body);
+    });
+
+    server.on("/api/rh/clock", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        rhLinkMs_ = millis() | 1;   // 0 means never linked
+        char body[48];
+        snprintf(body, sizeof(body), "{\"us\":%lld}", (long long)esp_timer_get_time());
+        request->send(200, "application/json", body);
+    });
+
+    // ?node=n (0-based): a pass on node n now, sent to RotorHazard exactly as
+    // a real one, for checking a setup (a split gate, say) without flying.
+    // It doesn't touch the gate's own race. Only while the plugin is linked,
+    // as nothing else receives passes.
+    server.on("/api/rh/testPass", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const bool c5 = conf->getReceiverRadio() == 2;
+        const long node = request->hasParam("node") ? request->getParam("node")->value().toInt() : -1;
+        if (node < 0 || node >= (c5 ? C5Link::C5_MAX_PILOTS : 1)) {
+            request->send(400, "application/json", "{\"error\":\"no such node\"}");
+            return;
+        }
+        if (!rhLinked(millis())) {
+            request->send(409, "application/json", "{\"error\":\"RotorHazard plugin not connected\"}");
+            return;
+        }
+        const uint8_t peak = c5 ? conf->getC5EnterRssi((uint8_t)node) : conf->getEnterRssi();
+        portENTER_CRITICAL(&rhPassMux_);
+        const bool queued = rhPassCount_ < RH_PASS_QUEUE;
+        if (queued) rhPasses_[rhPassCount_++] = {(uint8_t)node, esp_timer_get_time(), peak};
+        portEXIT_CRITICAL(&rhPassMux_);
+        request->send(queued ? 200 : 503, "application/json", queued ? "{\"status\":\"OK\"}" : "{\"error\":\"busy\"}");
+    });
+
+    // {"node": n, "frequency": MHz (0 = off), "enter": 0..255, "exit": 0..255};
+    // any field may be left out. Replies with the slot as stored, so the
+    // plugin sees a frequency the receiver can't tune come back as 0.
+    AsyncCallbackJsonWebHandler *rhNodeHandler = new AsyncCallbackJsonWebHandler("/api/rh/node", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject obj = json.as<JsonObject>();
+        const bool c5 = conf->getReceiverRadio() == 2;
+        const uint8_t node = obj["node"] | 0;
+        if (node >= (c5 ? C5Link::C5_MAX_PILOTS : 1)) {
+            request->send(400, "application/json", "{\"error\":\"no such node\"}");
+            return;
+        }
+        uint16_t frequency;
+        uint8_t enter, exit;
+        if (c5) {
+            frequency = obj["frequency"] | conf->getC5Frequency(node);
+            enter = obj["enter"] | conf->getC5EnterRssi(node);
+            exit = obj["exit"] | conf->getC5ExitRssi(node);
+            conf->setC5Profile(node, frequency, enter, exit);
+            uint8_t count = 0;
+            for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+                if (conf->getC5Frequency(i)) count = i + 1;
+            conf->setC5PilotCount(count);
+            frequency = conf->getC5Frequency(node);
+            enter = conf->getC5EnterRssi(node);
+            exit = conf->getC5ExitRssi(node);
+        } else {
+            if (!obj["frequency"].isNull() && obj["frequency"].as<uint16_t>()) conf->setFrequency(obj["frequency"].as<uint16_t>());
+            if (!obj["enter"].isNull()) conf->setEnterRssi(obj["enter"].as<uint8_t>());
+            if (!obj["exit"].isNull()) conf->setExitRssi(obj["exit"].as<uint8_t>());
+            frequency = conf->getFrequency();
+            enter = conf->getEnterRssi();
+            exit = conf->getExitRssi();
+        }
+        char body[96];
+        snprintf(body, sizeof(body), "{\"node\":%u,\"frequency\":%u,\"enter\":%u,\"exit\":%u}", node, frequency, enter, exit);
+        request->send(200, "application/json", body);
+    });
+    server.addHandler(rhNodeHandler);
 
     // WiFi status endpoint (register before serveStatic to prevent VFS errors)
     server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
@@ -1199,7 +2120,7 @@ EEPROM:\n\
         
         // Get WiFi mode
         wifi_mode_t mode = WiFi.getMode();
-        if (mode == WIFI_AP) {
+        if (mode & WIFI_AP) {
             doc["mode"] = "AP";
             doc["ssid"] = WiFi.softAPSSID();
             doc["ip"] = WiFi.softAPIP().toString();
@@ -1220,7 +2141,18 @@ EEPROM:\n\
             doc["rssi"] = 0;
             doc["connected"] = false;
         }
-        
+#ifdef FPVGATE_ETH_W5500
+        // The header's connection indicator shows Ethernet first when it is up.
+        JsonObject ethernet = doc["ethernet"].to<JsonObject>();
+        char ethIp[16];
+        ethnet_ip_string(ethIp, sizeof(ethIp));
+        ethernet["link"] = ethnet_link_up();
+        ethernet["ip"] = ethIp;
+        ethernet["fixed"] = ethnet_is_static();
+        ethernet["mbps"] = ethnet_speed_mbps();
+        ethernet["fullDuplex"] = ethnet_full_duplex();
+#endif
+
         String output;
         serializeJson(doc, output);
         request->send(200, "application/json", output);
@@ -1252,6 +2184,7 @@ EEPROM:\n\
     server.onNotFound(handleNotFound);
 
     server.addHandler(&events);
+    server.addHandler(&rhEvents);
     server.addHandler(configJsonHandler);
 
     // Race history endpoints
@@ -1272,6 +2205,24 @@ EEPROM:\n\
         RaceRssiMeta meta;
         std::vector<uint8_t> samples;
         String file = race.rssiMeta.file;
+        String tracePath = file.startsWith("/") ? file : String("/races/") + file;
+        if (!RaceRssiRecorder::readMetaFromFile(storage, tracePath, meta)) {
+            tracePath = RaceRssiRecorder::sidecarPathForTimestamp(timestamp);
+            RaceRssiRecorder::readMetaFromFile(storage, tracePath, meta);
+        }
+        if (meta.version == 2) {
+            size_t bytes = 0;
+            if (!storage->fileSize(tracePath, bytes) || bytes < 12) {
+                request->send(404, "application/json", "{\"error\":\"RSSI file missing\"}");
+                return;
+            }
+            // Bounded reads: a full eight-channel race never occupies device heap.
+            request->send(request->beginResponse("application/octet-stream", bytes,
+                [this, tracePath](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+                    return storage->readBinaryRange(tracePath, index, buffer, maxLen);
+                }));
+            return;
+        }
         if (!RaceRssiRecorder::loadSamples(storage, file, meta, samples)) {
             String fallback = RaceRssiRecorder::sidecarBasenameForTimestamp(timestamp);
             DEBUG("[Marshal] loadSamples failed for '%s', trying '%s'\n", file.c_str(), fallback.c_str());
@@ -1308,6 +2259,71 @@ EEPROM:\n\
         led->on(200);
     });
 
+    // Editor uploads and gate-owned result/progression commits share a lease.
+    // The GET response retains its lease until the stream is destroyed, so a
+    // concurrent replacement cannot splice two document revisions together.
+    server.on("/api/event", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        auto lease = eventDirector ? eventDirector->readLease() : nullptr;
+        if (!lease) {
+            request->send(503, "application/json", "{\"error\":\"event storage busy or recovery required\"}");
+            return;
+        }
+        size_t bytes = 0;
+        if (!storage->exists(EVENT_PATH) || !storage->fileSize(EVENT_PATH, bytes) || bytes == 0) {
+            request->send(404, "application/json", "{\"error\":\"no event\"}");
+            return;
+        }
+        request->send(request->beginResponse("application/json", bytes,
+            [this, lease](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                return storage->readBinaryRange(EVENT_PATH, index, buffer, maxLen);
+            }));
+    });
+
+    server.on("/api/event", HTTP_POST,
+        [this](AsyncWebServerRequest *request) {
+            uint32_t revision = 0;
+            if (request->contentLength() > EVENT_MAX_BYTES) {
+                request->send(413, "application/json", "{\"error\":\"event too large\"}");
+            } else if (eventUploadRequest_ != request) {
+                request->send(409, "application/json", "{\"error\":\"event busy or race not saved; retry after Stop\"}");
+            } else if (!eventUploadOk_ || eventUploadBytes_ != request->contentLength()) {
+                request->send(500, "application/json", "{\"error\":\"incomplete event upload; old document retained\"}");
+            } else if (!eventDirector->commitUpload(revision)) {
+                JsonDocument result; result["error"] = eventDirector->error();
+                String out; serializeJson(result, out);
+                request->send(eventDirector->errorStatus(), "application/json", out);
+            } else {
+                request->send(200, "application/json", String("{\"status\":\"OK\",\"revision\":") + String(revision) + "}");
+            }
+            if (eventUploadRequest_ == request) {
+                eventUploadRequest_ = nullptr;
+                eventUploadLease_.reset();
+            }
+        },
+        nullptr,
+        [this](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+            if (total > EVENT_MAX_BYTES) return;
+            if (index == 0) {
+                if (eventUploadRequest_ || !eventDirector) return;
+                auto lease = eventDirector->editLease();
+                if (!lease) return;
+                eventUploadLease_ = lease;
+                eventUploadRequest_ = request;
+                eventUploadBytes_ = 0;
+                eventUploadOk_ = storage->writeBinaryFile(EventDirector::UPLOAD, nullptr, 0);
+                request->onDisconnect([this, request]() {
+                    if (eventUploadRequest_ == request) {
+                        eventUploadRequest_ = nullptr;
+                        eventUploadLease_.reset();
+                    }
+                });
+            }
+            if (eventUploadRequest_ != request) return;
+            if (index != eventUploadBytes_) eventUploadOk_ = false;
+            if (eventUploadOk_) eventUploadOk_ = storage->appendBinaryFile(EventDirector::UPLOAD, data, len);
+            eventUploadBytes_ += len;
+        });
+
     server.on("/races/download", HTTP_GET, [this](AsyncWebServerRequest *request) {
         String json = history->toJsonString();
         AsyncWebServerResponse *response = request->beginResponse(200, "application/octet-stream", json);
@@ -1318,6 +2334,19 @@ EEPROM:\n\
     });
 
     AsyncCallbackJsonWebHandler *raceSaveHandler = new AsyncCallbackJsonWebHandler("/races/save", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        // Current C5 races have exactly one writer: the gate. This also
+        // prevents older browser tabs from saving a second copy on stop.
+        if (conf->getReceiverRadio() == 2 && c5RaceControl) {
+            const auto state = c5RaceControl->status();
+            JsonDocument reply;
+            reply["status"] = state.savedTimestamp ? "OK" : "ERROR";
+            reply["gateManaged"] = true;
+            reply["timestamp"] = state.savedTimestamp;
+            String body;
+            serializeJson(reply, body);
+            request->send(state.savedTimestamp ? 200 : 409, "application/json", body);
+            return;
+        }
         JsonObject jsonObj = json.as<JsonObject>();
         
         RaceSession race;
@@ -1331,7 +2360,9 @@ EEPROM:\n\
         race.band = jsonObj["band"] | "";
         race.channel = jsonObj["channel"] | 0;
         race.notes = jsonObj["notes"] | "";
-        
+        race.name = jsonObj["name"] | "";   // e.g. a race director heat and round
+        race.tag = jsonObj["tag"] | "";
+
         DEBUG("Parsing race save: trackId=%u\n", (uint32_t)(jsonObj["trackId"] | 0));
         race.trackId = jsonObj["trackId"] | 0;
         race.trackName = jsonObj["trackName"] | "";
@@ -1341,6 +2372,7 @@ EEPROM:\n\
         
         // Sync mode
         race.syncMode = jsonObj["syncMode"] | 0;
+        race.minLapMs = conf->getMinLapMs();
         
         JsonArray lapsArray = jsonObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -1351,12 +2383,17 @@ EEPROM:\n\
         if (!jsonObj["pilots"].isNull()) {
             JsonArray pilotsArray = jsonObj["pilots"];
             for (JsonObject pilotObj : pilotsArray) {
+                if (race.pilots.size() >= MAX_PILOTS) break;
                 PilotData pilot;
                 pilot.name = pilotObj["name"] | "";
                 pilot.callsign = pilotObj["callsign"] | "";
                 pilot.color = pilotObj["color"] | 0x0080FF;
                 pilot.fastestLap = pilotObj["fastestLap"] | 0;
                 pilot.isLocal = pilotObj["isLocal"] | false;
+                pilot.slot = pilotObj["slot"] | -1;
+                pilot.frequency = pilotObj["frequency"] | 0;
+                pilot.enter = pilotObj["enter"] | 120;
+                pilot.exit = pilotObj["exit"] | 100;
                 JsonArray pilotLaps = pilotObj["lapTimes"];
                 for (uint32_t lap : pilotLaps) {
                     pilot.lapTimes.push_back(lap);
@@ -1420,6 +2457,24 @@ EEPROM:\n\
         JsonObject jsonObj = json.as<JsonObject>();
         
         if (!!jsonObj["timestamp"].isNull() || !!jsonObj["lapTimes"].isNull()) {
+            if (jsonObj["timestamp"].is<uint32_t>() && jsonObj["pilots"].is<JsonArray>()) {
+                JsonArray entries = jsonObj["pilots"];
+                std::vector<std::vector<uint32_t>> edited;
+                bool valid = entries.size() > 0 && entries.size() <= MAX_PILOTS;
+                for (JsonObject p : entries) {
+                    if (!p["lapTimes"].is<JsonArray>()) { valid = false; break; }
+                    JsonArray times = p["lapTimes"];
+                    if (times.size() > 255) { valid = false; break; }
+                    edited.emplace_back();
+                    for (JsonVariant t : times) {
+                        if (!t.is<uint32_t>() || t.as<uint32_t>() == 0) { valid = false; break; }
+                        edited.back().push_back(t.as<uint32_t>());
+                    }
+                }
+                bool ok = valid && history->updatePilotLaps(jsonObj["timestamp"], edited);
+                request->send(ok ? 200 : 400, "application/json", ok ? "{\"status\":\"OK\"}" : "{\"status\":\"ERROR\"}");
+                return;
+            }
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing parameters\"}");
             return;
         }
@@ -1442,9 +2497,8 @@ EEPROM:\n\
             uint32_t timestamp = request->getParam("timestamp")->value().toInt();
             
             // Find the race
-            const auto& races = history->getRaces();
-            for (const auto& race : races) {
-                if (race.timestamp == timestamp) {
+            RaceSession race;
+            if (history->getRaceByTimestamp(timestamp, race)) {
                     // Create JSON for single race
                     JsonDocument doc;  // Increased for multi-pilot
                     JsonArray racesArray = doc["races"].to<JsonArray>();
@@ -1462,6 +2516,7 @@ EEPROM:\n\
                     raceObj["channel"] = race.channel;
                     raceObj["notes"] = race.notes;
                     raceObj["syncMode"] = race.syncMode;
+                    raceObj["minLapMs"] = race.minLapMs;
                     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
                     for (uint32_t lap : race.lapTimes) {
                         lapsArray.add(lap);
@@ -1477,6 +2532,10 @@ EEPROM:\n\
                             pilotObj["color"] = pilot.color;
                             pilotObj["fastestLap"] = pilot.fastestLap;
                             pilotObj["isLocal"] = pilot.isLocal;
+                            pilotObj["slot"] = pilot.slot;
+                            pilotObj["frequency"] = pilot.frequency;
+                            pilotObj["enter"] = pilot.enter;
+                            pilotObj["exit"] = pilot.exit;
                             JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
                             for (uint32_t lap : pilot.lapTimes) {
                                 pilotLaps.add(lap);
@@ -1495,7 +2554,6 @@ EEPROM:\n\
                     led->on(200);
                     return;
                 }
-            }
             request->send(404, "application/json", "{\"status\": \"ERROR\", \"message\": \"Race not found\"}");
         } else {
             request->send(400, "application/json", "{\"status\": \"ERROR\", \"message\": \"Missing timestamp\"}");
@@ -1935,6 +2993,10 @@ EEPROM:\n\
 
     // Calibration wizard endpoints
     server.on("/calibration/start", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"error\":\"C5 mode uses the multi-pilot calibration screen\"}");
+            return;
+        }
         timer->startCalibrationWizard();
         request->send(200, "application/json", "{\"status\": \"OK\"}");
         led->on(200);
@@ -1972,7 +3034,7 @@ EEPROM:\n\
         RgbLed* rgbForTest = nullptr;
 #endif
         std::vector<TestResult> tests;
-        tests.push_back(selftest->testRX5808(rx));
+        tests.push_back(selftest->testRX5808(conf->getReceiverRadio() == 2 ? nullptr : rx));
         tests.push_back(selftest->testLapTimer(timer));
         tests.push_back(selftest->testAudio(buz));
         tests.push_back(selftest->testConfig(conf));
@@ -2026,6 +3088,10 @@ EEPROM:\n\
 
     // SPI mod test endpoint
     server.on("/api/spitest", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        if (conf->getReceiverRadio() == 2) {
+            request->send(409, "application/json", "{\"error\":\"RX5808 is disabled in C5 mode\"}");
+            return;
+        }
         if (!rx) {
             request->send(500, "application/json", "{\"error\":\"RX5808 not initialized\"}");
             return;

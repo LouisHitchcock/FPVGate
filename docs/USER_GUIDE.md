@@ -1,1327 +1,273 @@
-﻿# FPVGate User Guide
+# FPVGate user guide
 
-Complete guide to using all features of your FPVGate lap timer.
-
-** Navigation:** [Home](../README.md) | [Getting Started](GETTING_STARTED.md) | [Hardware Guide](HARDWARE_GUIDE.md) | [Features](FEATURES.md)
-
----
-
-## Table of Contents
-
-1. [Connecting to FPVGate](#connecting-to-fpvgate)
-2. [Web Interface Overview](#web-interface-overview)
-3. [Configuration](#configuration)
-4. [Calibration](#calibration)
-5. [Racing](#racing)
-6. [Race Synchronization (Multi-Timer)](#race-synchronization-multi-timer)
-7. [Race Analysis](#race-analysis)
-8. [Race History](#race-history)
-9. [LED Control](#led-control)
-10. [Voice Settings](#voice-settings)
-11. [Advanced Features](#advanced-features)
-
----
+For `V1.9.0-alpha` / `1.9.0-alpha-5`. Start with
+[Getting started](GETTING_STARTED.md) for wiring, flashing and SD preparation.
+This guide describes current behavior rather than older release procedures.
 
 ## Connecting to FPVGate
 
-### WiFi Connection (Default)
+| Connection | Address and behavior |
+| --- | --- |
+| Wi-Fi access point | Join `FPVGate_XXXX`, password `fpvgate1`; open `http://192.168.4.1` |
+| Wi-Fi station | Enter your network credentials in WiFi & Connection, apply/reboot, then use the router-assigned address |
+| USB networking | Native USB on the six shipping targets; open `http://192.168.7.1` on Windows/Linux |
+| Ethernet | S3-ETH: DHCP; after 45 s without a lease, fixed `192.168.8.1/24` |
 
-FPVGate creates its own WiFi Access Point on startup.
+`http://fpvgate.local` is a convenience when mDNS works. Use IP addresses
+for several gates on one network and when a phone cannot resolve the name.
+The AP firmware sets channel 6 and permits four clients; those clients are
+viewers/controllers, not the number of timed pilots.
 
-**Steps:**
+Wi-Fi station failure on initial connection falls back to the access point.
+Saved credentials and router availability determine the startup mode. USB
+networking coexists with Wi-Fi. On S3-ETH it is suspended while the Ethernet
+link is up; direct Ethernet needs your computer set to an address such as
+`192.168.8.2/24` because the fallback is not a laptop DHCP server.
 
-1. **Power on** your FPVGate device
-2. **Wait 10-15 seconds** for WiFi network to appear
-3. **Connect** to network: `FPVGate_XXXX` 
-   - (XXXX = last 4 digits of MAC address)
-4. **Enter password:** `fpvgate1`
-5. **Open browser** and navigate to:
-   - `http://fpvgate.local` (recommended)
-   - `http://192.168.4.1` (direct IP)
+### USB connection (ESP32-S3, firmware 1.8.0 and later)
 
-**Connection Tips:**
-- Works with any WiFi-enabled device (phone, tablet, laptop)
-- No internet connection required
-- No apps to download
-- Multiple devices can connect simultaneously
-- Forget network after use to avoid auto-reconnecting
+The supported builds expose RNDIS networking and CDC serial together.
+No COM-port selection is needed in the web page. Use a data-capable cable
+and the native USB connector. A USB-to-UART bridge is a different port.
+macOS does not provide the RNDIS support used by this firmware; use Wi-Fi
+or Ethernet. Retained LCD, LilyGO, Super Mini and Plus source targets do not
+define the USB-network flag. See [USB networking](USB_NETWORKING.md).
 
-### USB Connection (ESP32-S3, firmware 1.8.0 and later)
+If USB does not return after flashing, unplug/replug and check that the board
+has left its bootloader. If needed, enter BOOT recovery and flash the correct
+release again. Close serial monitors while flashing.
 
-From 1.8.0 the gate presents itself over USB-C as a **network adapter**. Plug it
-into a computer and the full web interface is reachable at a normal address, with
-no WiFi, no app to install and no drivers to find.
+## Web interface overview
 
-**Steps:**
+Race shows live standings and lap/consistency charts. Calibration sets detection
+thresholds. Race History lists saved races and the editor. Settings opens grouped
+configuration, network, interface, system and diagnostics controls. Event Mode
+adds an Event tab for C5 club sessions.
 
-1. **Connect** the gate to your computer with a USB-C cable
-2. **Wait a few seconds** for it to appear as a network device
-3. **Open a browser** and go to `http://192.168.7.1`
+![Alpha multi-pilot race](../images/screenshots/v1.9.0/race-multi-pilot.png)
 
-That is the whole procedure. There is no connection mode to pick, no COM port to
-choose, and no permission prompt.
-
-**Supported systems:**
-
-| System | Supported | Notes |
-|---|---|---|
-| Windows 10 / 11 | Yes | Driver is built in |
-| Linux | Yes | Driver is built in |
-| **macOS** | **No** | Apple removed support for the RNDIS protocol the gate uses. Use WiFi on a Mac. |
-
-**Good to know:**
-
-- **WiFi keeps working at the same time.** The gate stays on `192.168.4.1` over
-  its own access point while USB is connected, so a timing screen or a phone can
-  stay on WiFi while you use the cable.
-- **A COM port also appears.** That is the serial console for development. You do
-  not need it, and the web interface does not use it.
-- **The cable carries data, not just power.** Some USB-C cables are
-  charge-only — if nothing appears at all, try a different cable before anything
-  else.
-- **Upgrading from 1.7.x needs a wired flash.** The partition layout changed in
-  1.8.0, so an over-the-air update cannot make the jump. Use the web flasher at
-  [fpvgate.xyz](https://fpvgate.xyz/flasher.html) once, and later updates can go
-  over the air.
-
-#### USB troubleshooting
-
-**Nothing appears after flashing.**
-This is expected, and it is the single most common cause of "my gate is dead
-after updating". Flashing leaves the board waiting in its bootloader, and that
-state survives a reset — only removing power clears it. **Unplug the cable and
-plug it back in.** Pressing the reset button is not enough.
-
-**The gate appears in Device Manager but `192.168.7.1` does not load.**
-Unplug and replug once more. Windows occasionally brings the network adapter back
-disabled after the device reconnects, and a second power cycle clears it. In
-Device Manager the symptom is a *Remote NDIS based Internet Sharing Device* with
-a warning triangle, or an adapter shown as Disabled under Network Connections.
-
-**It still will not connect.**
-The gate is always reachable over WiFi as a fallback — join `FPVGate_XXXX` with
-password `fpvgate1` and open `http://192.168.4.1`. Everything works the same way
-there, so a USB problem never leaves you unable to run a race.
-
-**Nothing at all, on any port.**
-Hold the **BOOT** button while plugging the cable in, release it, then reflash
-with the web flasher. This forces the board into its recovery bootloader and
-works even when the firmware is not starting. Check too that nothing is pressing
-the BOOT button by accident — a board held in recovery mode will never start
-normally.
-
-**On a Mac.** USB networking will not work and cannot be made to. Use WiFi.
-
-### WiFi Status Display
-
-A real-time status indicator at the top of the Configuration page shows your current WiFi connection state.
-
-**Status Indicators:**
-
- **AP Mode (Blue)**
-- Device broadcasting its own WiFi network
-- Shows number of connected clients
-- Example: "AP Mode (2 Connected Clients)"
-- Or: "AP Mode (No Connected Devices)"
-
- **Station Mode Connected (Green)**
-- Device connected to external WiFi network
-- Shows signal strength: Weak / Fair / Good / Strong
-- Example: "External Network Connected (Wifi Strength: Good)"
-- If other clients connected: "External Network Connected (3 Clients)"
-
- **Disconnected (Red)**
-- Connection to external network failed
-- Shows: "External Network Failed - AP Mode Booting"
-- Device automatically falls back to AP mode
-
-**Updates:**
-- Status refreshes every 5 seconds automatically
-- No page refresh needed
-- Instant feedback on connection changes
-
-![WiFi & Connection Settings](../screenshots/12-12-2025/Config%20Screen%20-%20Wifi%20&%20Connections%2012-12-2025.png)
-
-**Station Mode Setup:**
-1. Go to Configuration -> Network Settings
-2. Enter WiFi SSID (your network name)
-3. Enter WiFi Password
-4. Click "Apply WiFi & Reboot"
-5. Device attempts connection
-6. Status indicator shows result
-7. If connection fails: 3 orange LED flashes, fallback to AP mode
-8. If connection succeeds: Green status indicator
-
-**Troubleshooting:**
-- **Red status:** Check SSID/password spelling
-- **Stays blue:** SSID/Password not configured (AP mode only)
-- **Green then red:** Network disappeared or wrong password
-- **No status:** Refresh page or check WiFi connection
-
----
-
-## Web Interface Overview
-
-The web interface has four main tabs:
-
-![Race Screen](../screenshots/02-04-2026/Race%20Screen%20Solo.png)
-
-### Race Tab
-
-**Main racing interface** - Start races, view live lap times, lap analysis.
-
-**Key Elements:**
-- **Timer Display** - Current race time (MM:SS:SS format)
-- **Lap Counter** - Current lap / Max laps
-- **Control Buttons:**
-  - Start Race - Begin countdown and race
-  - Stop Race - End race and save
-  - Add Lap - Manually add lap at current time
-  - Clear Laps - Reset lap table
-- **Lap Table** - Shows all recorded laps with times and gaps
-- **Statistics** - Fastest lap, median, best 3 laps
-- **Charts** - Visual lap history and fastest round
-
-### Configuration Tab
-
-![Configuration Menu](../screenshots/02-04-2026/Settings%20Menu.png)
-
-**All settings and diagnostics** - Organized into sections:
-
-1. **Race Setup** - Lap count, minimum lap time
-2. **TTS Settings** - Voice announcements, rate, format
-3. **Pilot Info** - Name, callsign, frequency, color
-4. **LED Setup** - Presets, colors, brightness
-5. **System Setup** - Battery, theme, config backup
-6. **System Diagnostics** - Self-test and status
-
-### Calibration Tab
-
-![Calibration Screen](../screenshots/02-04-2026/RSSI%20Calibration.png)
-
-**RSSI threshold setup** - Critical for accurate timing.
-
-**Features:**
-- Live RSSI graph
-- Enter/Exit threshold sliders
-- Peak/valley indicators
-- Save/load thresholds
-- Real-time preview
-
-#### Sync Mode: Race Analysis
-
-In Master or Slave mode, the analysis section changes to "Race Analysis" which shows multi-pilot comparison charts.
-
-#### Lap Times Chart
-
-**Type:** Line chart comparing all pilots
-**Purpose:** Visual comparison of lap times across pilots
-
-**Features:**
-- Each pilot displayed as a colored line
-- X-axis shows lap numbers
-- Y-axis shows time in seconds
-- Grid lines for easy reading
-- Legend identifies each pilot
-
-**Reading the Chart:**
-- Lower lines = faster times
-- Parallel lines = similar pace
-- Converging lines = catching up
-- Diverging lines = pulling away
-
-#### Consistency Chart
-
-**Type:** Box-and-whisker plot for each pilot
-**Purpose:** Compare consistency between pilots
-
-**Components:**
-- **Box:** Shows the interquartile range (middle 50% of lap times)
-- **Line in box:** Median lap time
-- **Whiskers:** Extend to min/max lap times
-- **Circles:** Individual lap times (outliers)
-
-**Reading the Chart:**
-- Shorter boxes = more consistent
-- Lower boxes = faster overall
-- Long whiskers = more variation
-
-#### Race Analysis Legend
-
-Below the charts, a legend shows:
-- Pilot name with color indicator
-- Number of laps completed
-- Fastest lap time
-- Asterisk (*) marks the local pilot
-
----
-## Race History Tab
-
-![Race History](../screenshots/02-04-2026/Race%20History.png)
-
-**Saved races archive** - View, edit, export past races.
-
-**Features:**
-- Race list with dates and stats
-- Detail view with analysis
-- Edit race names and tags
-- Export individual or all races
-- Import races from backup
-- Clear all races
-
----
+Settings generally save through the page. Wait for Save/Saved feedback before
+starting a heat or disconnecting. Wi-Fi application and firmware updates have
+their own reboot behavior.
 
 ## Configuration
 
-### Race Setup Section
+### Receiver and pilot information
 
-#### Number of Laps
+RX5808 and Novacore are conventional single-receiver modes. Novacore has
+separate filter controls. ESP32-C5 provides up to eight frequency slots with
+names, spoken names, colors, Enter/Exit levels and Race participation.
+C5MK AIO forces C5 at defaults, saved-config load and attempted receiver changes.
 
-Set how many laps constitute a complete race.
+For a C5, use Calibration's cards for each pilot. An unticked Race slot can
+still scan for observation; a frequency of Off disables that slot. Stop before
+changing participation, frequency, gain or thresholds. C5 frequencies are
+5180–5917 MHz; Boscam E7/E8 are outside that range. Choose channels appropriate
+to local RF rules and your transmitters.
 
-**Options:**
-- **0** - Infinite mode (race until manually stopped)
-- **1-50** - Specific lap count (auto-stops when reached)
+### Race setup
 
-**Settings:**
-- Default: 0 (Infinite)
-- Race auto-stops when lap count is reached
-- Lap counter shows "Lap X / Y" or "Lap X" for infinite
+| Setting | Meaning |
+| --- | --- |
+| Number of Laps | 0 is unlimited; page slider is 0–50 real laps |
+| Minimum Lap Time | Stored in tenths of a second, 0.1–20.0 s; default 2.0 s |
+| Maximum Heat Time | 0 unlimited; otherwise 30-second blocks up to 30 minutes |
+| Countdown | Classic "Less than 5" with randomized delay, or 10-second countdown |
 
-**Use Cases:**
-- **Infinite:** Practice sessions, testing
-- **5 laps:** MultiGP standard format
-- **3 laps:** Quick races, RaceGOW format
-- **1 lap:** Time trials
+Gate 1 does not count toward the lap limit. The C5 controller accepts at most
+63 real laps because the per-pilot array holds 64 crossings including Gate 1.
+Unlimited does not mean unbounded storage. A DNS pilot never reaches a lap
+limit; set a heat limit or stop manually.
 
-#### Minimum Lap Time
+### Announcer and voice settings
 
-Prevents false lap detection from crashes or lingering in gate.
+None, Beep, Lap Time, 2 Consecutive and 3 Consecutive control browser callouts.
+The consecutive modes use rolling totals of that pilot's last two/three real
+laps, excluding Gate 1, once enough laps exist. Pilot/Lap/Time, Lap/Time and
+Time Only control the single-pilot phrase format.
 
-**Recommended Settings:**
-- **5-8 seconds** - Tight indoor tracks
-- **10-15 seconds** - Normal outdoor tracks
-- **15-20 seconds** - Large tracks
+Select Sarah/default, Rachel, Adam, Antoni, Matilda, German, Spanish, French
+or Web Speech. Pre-recorded MP3s come from the selected SD voice directory;
+missing phrases can fall back to the browser's Web Speech. There is no
+bundled Piper synthesizer. C5 pilot-name/time speech can use Web Speech
+directly, so offline behavior depends on the installed browser voices.
 
-**How it Works:**
-- System ignores lap triggers within minimum time
-- Prevents double-counting if you crash near gate
-- Prevents re-triggering during slow fly-throughs
-
-![Lap & Announcer Settings](../screenshots/12-12-2025/Config%20Screen%20-%20Lap%20&%20Announcer%20Settings%2012-12-2025.png)
-
-### TTS Settings Section
-
-#### Announcer Type
-
-Choose how lap times are announced.
-
-**Options:**
-
-| Type | Behavior | Best For |
-|------|----------|----------|
-| **None** | Silent | Focus flying, no distractions |
-| **Beep** | Short beep only | Minimal audio feedback |
-| **Lap Time** | "Lap 3, 12.45" | Standard racing (recommended) |
-| **2 Consecutive** | Every 2 laps combined | Longer races |
-| **3 Consecutive** | Every 3 laps combined | Consistency tracking |
-
-#### Lap Announcement Format
-
-Choose what information is announced.
-
-**Formats:**
-
-1. **Pilot + Lap + Time** (Full)
-   - Example: "Louis Lap 5, 12.34"
-   - Best for multi-pilot events
-   
-2. **Lap + Time**
-   - Example: "Lap 5, 12.34"
-   - Shorter, still informative
-   
-3. **Time Only** (Fastest)
-   - Example: "12.34"
-   - Minimal distraction, focus on flying
-
-#### Voice Selection
-
-Choose TTS engine and voice character.
-
-**Options:**
-
-| Voice | Style | Engine | Notes |
-|-------|-------|--------|-------|
-| **Sarah (Energetic)** | High energy, excited | ElevenLabs | Default, natural |
-| **Rachel (Calm)** | Smooth, measured | ElevenLabs | Relaxed vibe |
-| **Adam (Deep Male)** | Authoritative | ElevenLabs | Deep voice |
-| **Antoni (Male)** | Friendly | ElevenLabs | Warm tone |
-| **PiperTTS** | Synthetic | PiperTTS | Lower latency |
-
-**How Voices Work:**
-- **ElevenLabs voices:** Use pre-recorded MP3s from SD card or LittleFS
-- **PiperTTS:** Real-time synthesis, no pre-recording needed
-- **Fallback:** If ElevenLabs files missing, PiperTTS used automatically
-
-#### Announcer Rate
-
-Control speech playback speed.
-
-**Range:** 0.1 (very slow) to 2.0 (very fast)  
-**Default:** 1.0 (normal)  
-**Recommended:** 1.2-1.4 for racing
-
-**Effect:**
-- Lower = Clearer but slower
-- Higher = Faster but may be unclear
-- Adjust based on track size and preference
-
-#### Voice Control Buttons
-
-**Enable Audio** - Activate voice announcements  
-**Disable Audio** - Mute all voice announcements  
-**Generate Audio** - Test current voice with pilot name
-
-**Visual Feedback:**
-- Active button is highlighted orange
-- Inactive button is dimmed
-
-### Pilot Info Section
-
-#### Band & Channel
-
-Set to match your drone's VTx frequency.
-
-**Supported Bands:**
-- **A (Boscam A)** - 5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725
-- **B (Boscam B)** - 5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866
-- **E (Boscam E)** - 5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945
-- **F (Fatshark)** - 5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880
-- **R (RaceBand)** - 5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917
-- **L (LowBand)** - 5362, 5399, 5436, 5473, 5510, 5547, 5584, 5621
-
-**Frequency Auto-Calculation:**
-- Frequency (MHz) displays below selection
-- Updates immediately when changed
-- Must match your VTx exactly for best results
-
-#### Pilot Name
-
-Full name used in voice announcements and race history.
-
-**Examples:** "Louis Hitchcock", "Sarah Chen"  
-**Max Length:** 50 characters  
-**Used For:** Voice callouts, race records
-
-#### Pilot Callsign
-
-Short display name for UI and race table.
-
-**Examples:** "Louis", "SChen", "Pilot1"  
-**Max Length:** 10 characters  
-**Used For:** UI display, compact views
-
-#### Phonetic Name
-
-How TTS should pronounce your name.
-
-**Purpose:** Correct pronunciation for natural speech  
-**Max Length:** 30 characters  
-**Fallback:** Uses Pilot Name if empty
-
-**Examples:**
-- "Louis" -> "Louie"
-- "Xavier" -> "Zavier"  
-- "Nguyen" -> "Win"
-- "Siobhan" -> "Shiv-awn"
-
-#### Pilot Color
-
-Your racing color for UI elements and LED preset.
-
-**15 Colors Available:**
-Red, Orange, Gold, Green, Cyan, Blue, Purple, Magenta, Pink, White, Gray, Black, Brown, Spring Green, Hot Pink
-
-**Used For:**
-- Color preview in UI
-- Race history identification
-- "Pilot Colour" LED preset (matches this color)
-
----
+Tap/click Enable Audio before racing, especially on mobile. Browser volume
+and buzzer volume are independent. Speech rate is configurable (0.1–2.0);
+firmware default is 1.0, while the announcer class starts at 1.3 before config
+loads. Keep a page open for spoken announcements.
+See [voice packs](MULTI_VOICE_SETUP.md).
 
 ## Calibration
 
-** Most Important Step** - Proper calibration is critical for accurate timing.
+Use the actual antenna, transmitter power, mounting and racing environment.
+Observe background RSSI first; then record several representative passes.
 
-### Understanding RSSI Thresholds
+Enter must be above noise but below the pass peak. Exit should be lower than
+Enter. Test slow passes and normal-speed passes, and set a minimum lap time
+that rejects retriggers without rejecting a valid lap. Recalibrate after
+changing RF gain, antenna, power or placement.
 
-FPVGate detects laps by monitoring RSSI (signal strength) changes:
+The RX5808 wizard records passes, supports ignoring noisy sections and lets
+you review calculated thresholds/minimum lap time before saving.
+C5 calibration operates per pilot and can calculate several pilots together;
+weak/no-pass captures retain their existing thresholds. Follow the
+[C5 calibration guide](C5_MULTI_PILOT.md#setting-enter-and-exit).
 
-1. **Enter RSSI** - Threshold to START watching for a lap
-2. **Exit RSSI** - Threshold to STOP watching and record lap
-
-**The Peak:**
-- RSSI peaks when drone is closest to gate
-- Time of peak = lap time recorded
-- Lap only counts if RSSI rises above Enter, peaks, then falls below Exit
-
-### Calibration Procedure
-
-#### Step 1: Prepare
-
-1. **Power on drone** and wait 30 seconds (VTx warm-up)
-2. **Check frequency** - Configuration -> Pilot Info -> Band/Channel
-3. **Position drone** - One gate distance away (~3-6 feet)
-4. **Navigate** to Calibration tab
-
-#### Step 2: Observe RSSI
-
-1. **Watch the graph** - Real-time RSSI value shown
-2. **Move drone to gate** - Note the peak RSSI value
-3. **Move drone away** - Note the valley RSSI value
-
-**Example Readings:**
-- At gate: Peak = 150
-- Away: Valley = 80-100
-
-#### Step 3: Set Thresholds
-
-**Enter RSSI:**
-- Set **2-5 points below** observed peak
-- Example: Peak = 150 -> Enter = 145
-
-**Exit RSSI:**
-- Set **8-10 points below** Enter RSSI
-- Example: Enter = 145 -> Exit = 135
-
-**Rule:** Enter must always be higher than Exit
-
-#### Step 4: Test
-
-1. **Fly drone through gate** - Watch for green crossing zone
-2. **Check lap table** - Should register one clean lap
-3. **Adjust if needed:**
-   - Missing laps? Lower Enter by 5
-   - False laps? Raise Exit by 5
-
-### Good vs Bad Calibration
-
-** Good Calibration:**
-```
-RSSI  �     /\
-      �    /  \
-      �   /    \     ? Single clean peak
-Enter +--/------\---
-      � /        \
-Exit  +/----------\-
-      +--------------- Time
-Result: 1 lap counted 
-```
-
-** Bad Calibration (Thresholds too low):**
-```
-RSSI  �   /\/\        ? Multiple peaks!
-      �  /    \
-Enter +-/------\---
-      �/        \
-Exit  /----------\-
-      +--------------- Time
-Result: 3 laps counted 
-```
-
-### Calibration Tips
-
-**Missing Laps:**
-- Lower Enter RSSI by 5 points
-- Check VTx frequency matches
-- Ensure VTx warmed up (30 seconds)
-
-**False Laps (Too Many):**
-- Increase Minimum Lap Time (Configuration)
-- Raise Exit RSSI by 5 points
-- Move timer further from flight path
-- Reduce RF interference
-
-**Inconsistent Detection:**
-- Wait for VTx to fully warm up
-- Check power supply stability
-- Re-calibrate when flying with others (RF noise)
-- Verify RX5808 connections
-
-**Flying with Other Pilots:**
-- Lower both thresholds by 3-5 points
-- Accounts for RF noise from other VTxs
-- May need per-session adjustment
-
----
+![Alpha C5 calibration](../images/screenshots/v1.9.0/calibration.png)
 
 ## Racing
 
-### Starting a Race
-
-1. **Navigate** to Race tab
-2. **Click "Start Race"** button
-3. **Listen** to countdown:
-   - "Arm your quad"
-   - "Starting on the tone in less than five"
-   - Random delay (1-5 seconds)
-   - Start beep (880 Hz tone)
-4. **Fly!**
-
-**Race Start Behavior:**
-- Button turns orange and pulses during countdown
-- RGB LED flashes green
-- Timer starts on beep
-- First gate pass = "Gate 1" (hole shot)
-- Subsequent passes = Lap 1, 2, 3...
-
-> **Mobile/iOS Note:** Your phone MUST NOT be on silent mode for the start beep to play. The starting tone requires your device's ringer to be enabled. On iOS devices, make sure the silent switch is off.
-
-### During Race
-
-**Live Information:**
-- **Timer** - Shows current race time
-- **Lap Counter** - Current lap / Max laps (if set)
-- **Lap Table** - Updates as laps are detected
-- **Voice** - Announces each lap (if enabled)
-- **LED** - Flashes white on each lap
+1. Confirm receiver online, correct racers/channels, calibration, saved settings
+   and voice playback.
+2. Start and wait for the countdown.
+3. The first crossing is Gate 1; lap 1 is the next crossing minus Gate 1.
+4. Stop manually or let the applicable lap/heat limits stop the race.
+5. Wait for history persistence before Clear or power-down.
+
+In C5 mode the S3 owns completion and history. Each pilot stops accumulating
+laps at their own limit; the race ends when all racers finish or the heat
+limit/manual Stop fires. A failed save stays in RAM and blocks Start/Clear.
+Fix storage and retry Stop. A successful HTTP stop only queues work: clients
+must wait until the gate is no longer busy and the save has completed.
+
+Closing every browser does not stop a C5 race or its automatic save. Unreleased
+alpha source also records Event results/loads the next heat on the gate;
+published Alpha 5 images still need a page for that Event processing. Closing
+the page stops browser speech. Non-C5 race
+auto-completion/history still uses the previous browser flow. See
+[gate completion](GATE_RACE_COMPLETION.md) for limits and recovery.
+
+## Race synchronization (multi-timer)
+
+Conventional receivers can use Personal, Master or Slave roles and up to five
+configured peer timers. Put them on a reachable shared network, use unique IP
+addresses and test start/stop/lap delivery before flying. Use one controlling
+master. Browser displays/announcements remain part of that workflow.
+
+C5 selection forces Multi mode, including a one-racer C5 heat. It cannot be
+used as a chained Master/Slave timer. RotorHazard is a separate plugin/API
+integration and supports C5 nodes; it is not a C5 sync role.
+
+## Event Mode
 
-**Manual Lap Button:**
-- Click "Add Lap" to manually record a lap
-- Uses current timer value
-- Useful if detection missed a pass
-- Lap broadcasts to all connected clients
-
-### Stopping a Race
+Enable Event Mode under User Interface with C5 selected. Create the roster,
+assign pilot channels and calibration, define groups of up to eight, and choose
+formats. Formats include most laps/fastest time, first to a lap limit, fastest
+lap and fastest three consecutive laps.
+
+Seed by roster order, random order, Elo, best three consecutive or fastest lap.
+Build a heat order with repeated groups or rotations, then load the heat and
+check its C5 slots. Each group can have channel overrides. A saved race is
+recorded against the loaded heat; automatic progression loads the next heat.
 
-**Click "Stop Race"** button
+In unreleased alpha source, result recording and next-heat loading run on the
+gate without a page. Next-heat loading never starts a race automatically.
+Editing/seeding still use the director page. Stale concurrent edits are rejected;
+export unsaved work before **Reload from gate**. See the
+[Event progression/recovery contract](GATE_EVENT_PROGRESSION.md), including the
+remaining physical tests. Export the event and history before a major update.
+
+## Race analysis
+
+Fastest Lap and Fastest 3 Consecutive show the best eligible pilot in a C5
+race. Best 3 Laps (not necessarily consecutive) and Median Lap use the leader,
+as in legacy history summary fields. The leader is most crossings, then lowest
+elapsed time. Gate 1 is excluded from real-lap statistics.
+
+Lap Times and Consistency are chart tabs; User Interface controls their
+visibility. Use per-pilot lap columns/legend to interpret multi-pilot data.
+
+## Race history
+
+History includes lap arrays, identities, notes/tags and statistics.
+Stopping an entirely empty C5 race does not create a record; other racers
+with no crossings remain in a nonempty multi-pilot result. Wait for save
+confirmation before editing or deleting.
+
+### Marshalling mode (lap editing)
+
+Open a saved race and choose Edit. With a recorded trace, select the pilot
+before moving, adding, removing or recalculating crossings. Show All Channel
+Traces is a reference overlay: edits apply to the selected pilot. Switching
+pilots retains their edits, and Save Changes writes every pilot.
+
+Missing, corrupt or legacy remote-pilot traces use typed lap entry instead.
+Multi-pilot recordings use physical slots 0–7, so gaps in the roster do not
+relabel a trace. Review graphs are nominally 20 ms peak-held samples, not the
+full-rate detector input; editing from them does not preserve original
+microsecond detection precision.
+
+### Export, import and deletion
+
+Use the history export/import controls for race JSON. JSON does not include
+the binary `.rssi` sidecar; back up the SD files too if you need later visual
+marshalling. Importing JSON cannot reconstruct a missing RF trace.
+Deleting races is permanent from the device unless you kept a backup.
+
+## LED control
+
+Board-specific LED outputs support ten presets, brightness, speed and colors.
+Manual override prevents race events from changing your selected effect.
+The LCD source target has no configured RGB LED. C5 internal pilot-specific
+crossing flashes and full LCD/overlay parity are not established by browser
+support; test the exact board/feature before relying on it.
+
+Gate LED webhooks are separate HTTP requests to external controllers.
+Configure reachable controller IPs and test /Lap, /RaceStart and /RaceStop
+behavior. They do not power or directly drive a physical LED strip.
+
+## Advanced features
+
+### OSD overlay
 
-**What Happens:**
-- Timer stops
-- Race auto-saves to history
-- Voice announces "Race stopped"
-- Button states reset
-- Lap data remains in table
+Use the overlay controls from the interface. `/vert-OSD` serves the vertical
+OSD and `/handcamOverlay` the handcam overlay. Verify the view with your race
+mode before using it in OBS: legacy overlays primarily consume single-pilot
+events and are not an eight-pilot scoreboard.
 
-**Auto-Stop:**
-- If max laps set (not infinite)
-- Race auto-stops when lap count reached
-- Voice announces "Race complete"
+### Battery monitoring
 
-### Clearing Laps
+Use the correct divider and enable the display where the firmware includes
+the capability. Set chemistry, cells and divider ratio, then compare against
+a meter. The low-battery warning is browser-driven and requires the page open;
+it is not a pack-protection circuit. See [battery details](BATTERY_MONITORING.md).
 
-**Click "Clear Laps"** button
+### Tracks, themes and language
 
-**What Happens:**
-- Auto-saves current race (if laps exist)
-- Clears lap table
-- Resets timer to 00:00:00
-- Resets lap counter
-- Clears analysis charts
+Tracks hold distance, image and notes (up to 50). Select the intended track
+before starting; C5 freezes race metadata at start. Distance/stat summary
+widgets may use the legacy leader rather than eight independent totals.
 
----
+User Interface selects the theme, custom colors and language. English, German,
+Spanish, French and Simplified Chinese locales exist; newer Event/C5 text is
+not completely translated. Voice language and interface language are separate.
 
-## Race Synchronization (Multi-Timer)
-
-FPVGate supports synchronizing multiple timers for multi-pilot racing. This allows multiple pilots to race simultaneously with centralized timing control.
+### Config backup and restore
 
-### Sync Modes
-
-FPVGate operates in one of three modes, indicated by a badge in the header:
-
-#### Personal Mode (Default)
-- **Badge:** PERSONAL (or no badge)
-- Single pilot timing
-- Traditional lap timing experience
-- Lap Analysis shows your individual performance charts
-- No network synchronization required
-
-#### Master Mode
-- **Badge:** MASTER
-- Controls race start/stop for all synced devices
-- Receives lap data from all slave timers
-- Shows multi-pilot race view with all pilots' laps side-by-side
-- Race Analysis charts compare all pilots
-- Saves multi-pilot race history with all pilots' data
-
-#### Slave Mode
-- **Badge:** SLAVE
-- Follows race commands from master timer
-- Start/Stop/Clear buttons are disabled
-- Sends lap times to master timer automatically
-- Local pilot's laps are displayed normally
-- Voice announcements still work locally
-
-### Setting Up Sync Mode
-
-**Access:** Configuration ? WiFi & Connection ? Race Synchronization
-
-#### Step 1: Connect All Devices to Same Network
-
-All FPVGate devices must be on the same WiFi network:
-
-**Option A: All devices connect to external WiFi**
-1. On each device, go to Configuration ? WiFi & Connection
-2. Enter your WiFi network SSID and password
-3. Click "Apply WiFi & Reboot"
-4. After reboot, each device will have an IP address on your network
+Export device settings before changing firmware, then review restored board,
+receiver and RF values. A config export is not a race/trace/event backup.
+C5MK AIO enforces its fixed receiver even when loading older settings.
 
-**Option B: One device as AP, others connect to it**
-1. Keep one device in default AP mode (FPVGate_XXXX network)
-2. Connect other devices and your phone/laptop to that network
-3. All devices will be on 192.168.4.x subnet
-
-#### Step 2: Add Sync Devices
-
-1. On the device you want as master, go to Sync Devices section
-2. Find "Add Device" input field
-3. Enter each slave device's IP address (e.g., 192.168.0.100)
-4. Click "Add Device"
-5. Device appears in the sync devices list
+### Updates
 
-#### Step 3: Set Device Roles
+System offers device updates from a file or published firmware and C5 updates
+when the receiver supports the link update protocol. Match board identity,
+app-slot size and installed filesystem layout. Keep power stable and avoid
+updating during a race. A source branch change does not update installed
+devices or published images. See [release procedures](RELEASE_PROCESS.md).
 
-For each device in the list:
-- **This Device:** Set to "Master" for the controlling timer
-- **Other Devices:** Set to "Slave"
+## Diagnostics and troubleshooting
 
-**Role Options:**
-- **Disabled** - Not participating in sync
-- **Master** - Controls race timing
-- **Slave** - Follows master's commands
+Diagnostics exposes logs, debug RSSI and an 18-check self-test with
+Pass/Fail/Skip. Self-test writes temporary files and tests the buzzer: run it
+between heats. Use the C5 debug window for multi-pilot traces; the legacy
+small overlay is for conventional RSSI.
 
-#### Step 4: Test Connections
-
-Click "Test All Connections" to verify all devices can communicate.
-
-**Success:** Green checkmark appears next to device
-**Failure:** Red X appears - check network connectivity
-
-### Multi-Pilot Race View
-
-When in Master or Slave mode, the race interface changes:
-
-**Lap Table:**
-- Shows columns for each pilot (local + remote)
-- Pilot names as column headers with color coding
-- Lap times displayed side-by-side for comparison
-- Fastest lap highlighted per pilot
-
-**Race Analysis:**
-- Replaces Lap Analysis in sync modes
-- Two chart types available:
-
-**Lap Times Chart:**
-- Line chart showing all pilots' lap times
-- X-axis: Lap number
-- Y-axis: Time in seconds
-- Each pilot has a colored line
-- Easily compare pace between pilots
-
-**Consistency Chart:**
-- Box-and-whisker plot for each pilot
-- Shows median, quartiles, and range
-- Compare consistency between pilots
-- Outliers visible as individual points
-
-**Legend:**
-- Shows pilot name with color indicator
-- Displays lap count and fastest time per pilot
-- Asterisk (*) indicates local pilot
-
-### How Sync Commands Work
-
-**Race Start (Master):**
-1. Master sends SSE event to all slaves
-2. Slaves begin countdown automatically
-3. All devices start timer simultaneously
-
-**Lap Detection (Slave):**
-1. Slave detects local pilot's lap
-2. Sends lap time + pilot info to master via HTTP
-3. Master receives and adds to multi-pilot view
-4. Master announces remote pilot lap via TTS
-
-**Race Stop (Master):**
-1. Master sends SSE stop event
-2. All slaves stop timing
-3. Master saves complete multi-pilot race
-
-### Troubleshooting Sync
-
-**Devices Not Connecting:**
-- Verify all devices on same network subnet
-- Check firewall settings (allow port 80)
-- Try using IP addresses instead of hostnames
-- Restart all devices
-
-**Lap Times Not Showing on Master:**
-- Confirm slave device is set to "Slave" role
-- Check slave's network connection
-- Verify master's IP is correct on slave
-
-**Race Start Not Syncing:**
-- Master must have "Master" role set
-- All slaves must be added to master's device list
-- Test connections before starting race
-
-**Inconsistent Timing:**
-- Network latency affects sync accuracy
-- Use wired network or strong WiFi for best results
-- Typical sync accuracy: ±50-100ms
-
----
-## Race Analysis
-
-FPVGate provides real-time analysis of your performance.
-
-### Statistics Boxes
-
-Located below the lap table, four key metrics:
-
-#### Fastest Lap
-- **Shows:** Your quickest single lap time
-- **Lap Number:** Which lap was fastest
-- **Example:** "12.34s (Lap 3)"
-- **Use:** Track personal bests
-
-#### Median Lap
-- **Shows:** Middle lap time (consistency indicator)
-- **Calculation:** Sorted lap times, middle value
-- **Example:** "14.56s"
-- **Use:** Gauge overall consistency
-
-#### Best 3 Laps (Sum)
-- **Shows:** Sum of your 3 fastest individual laps
-- **Lap Numbers:** Which laps contributed
-- **Example:** "39.87s (L2, L4, L7)"
-- **Use:** Compare across sessions
-
-#### Fastest 3 Consecutive
-- **Shows:** Best consecutive 3-lap sequence
-- **Lap Range:** Which laps (e.g., "L3-L5")
-- **Example:** "41.23s (L3-L5)"
-- **Use:** RaceGOW format scoring
-
-### Visual Charts
-
-Toggle between two chart views:
-
-#### Lap History Chart
-- **Shows:** Last 10 laps as colored bars
-- **Colors:** Each lap has unique color
-- **Width:** Proportional to lap time
-- **Use:** Identify trends, tire wear
-
-#### Fastest Round Chart  
-- **Shows:** Your best 3 consecutive laps
-- **Bars:** Individual times for each lap
-- **Total:** Combined time displayed
-- **Use:** Optimize 3-lap runs
-
-### Fastest Lap Highlighting
-
-- Fastest lap row has **gold background**
-- Updates automatically as you fly
-- Excludes "Gate 1" (hole shot)
-- Visual indicator of personal best
-
----
-
-### Sync Mode: Race Analysis
-
-In Master or Slave mode, the analysis section changes to "Race Analysis" which shows multi-pilot comparison charts.
-
-#### Lap Times Chart
-
-**Type:** Line chart comparing all pilots
-**Purpose:** Visual comparison of lap times across pilots
-
-**Features:**
-- Each pilot displayed as a colored line
-- X-axis shows lap numbers
-- Y-axis shows time in seconds
-- Grid lines for easy reading
-- Legend identifies each pilot
-
-**Reading the Chart:**
-- Lower lines = faster times
-- Parallel lines = similar pace
-- Converging lines = catching up
-- Diverging lines = pulling away
-
-#### Consistency Chart
-
-**Type:** Box-and-whisker plot for each pilot
-**Purpose:** Compare consistency between pilots
-
-**Components:**
-- **Box:** Shows the interquartile range (middle 50% of lap times)
-- **Line in box:** Median lap time
-- **Whiskers:** Extend to min/max lap times
-- **Circles:** Individual lap times (outliers)
-
-**Reading the Chart:**
-- Shorter boxes = more consistent
-- Lower boxes = faster overall
-- Long whiskers = more variation
-
-#### Race Analysis Legend
-
-Below the charts, a legend shows:
-- Pilot name with color indicator
-- Number of laps completed
-- Fastest lap time
-- Asterisk (*) marks the local pilot
-
----
-## Race History
-
-All races are automatically saved when you stop or clear laps.
-
-**Single-Pilot Races:** Saved with your pilot info and lap times.
-**Multi-Pilot Races:** When in Master mode, races are saved with all pilots' data including names, colors, and lap times.
-
-### Viewing Races
-
-**Navigate** to Race History tab
-
-**Race List Shows:**
-- Date and time
-- Lap count
-- Fastest lap time
-- Race name (if set)
-- Race tag (if set)
-- Pilot callsign
-- Frequency/channel
-
-### Race Details
-
-**Click any race** to view full analysis:
-
-**Statistics:**
-- Fastest lap with lap number
-- Median lap time
-- Best 3 laps total
-
-**Charts:**
-- Lap history (last 10 laps)
-- Fastest round (3 consecutive)
-
-### Editing Races
-
-**Click "Edit"** button on race card
-
-**Editable Fields:**
-- **Race Name** - Descriptive title ("Morning Practice", "Qualifier 1")
-- **Race Tag** - Category ("training", "race", "freestyle")
-
-**Click "Save"** to update race
-
-### Exporting Races
-
-**Single Race:**
-1. Click "Download" on race card
-2. Saves as JSON file
-3. Filename: `race_<timestamp>.json`
-
-**All Races:**
-1. Click "Download All Races" at top
-2. Saves complete history as JSON
-3. Filename: `fpvgate_races_<date>.json`
-
-**JSON Format:**
-- Compatible with other tools
-- Can be re-imported
-- Includes all lap data and metadata
-
-### Importing Races
-
-**Click "Import Races"** button
-
-1. Select JSON file (exported from FPVGate)
-2. System merges with existing races
-3. Duplicates are skipped
-4. Import confirmation shown
-
-**Use Cases:**
-- Restore from backup
-- Transfer between devices
-- Combine race data from multiple timers
-
-### Deleting Races
-
-**Single Race:**
-- Click "Delete" on race card
-- Confirmation prompt appears
-- Permanent deletion
-
-**All Races:**
-- Click "Clear All Races"
-- Confirmation prompt (important!)
-- Removes all saved races
-
-** Warning:** Deletions are permanent! Export before clearing.
-
-### Marshalling Mode (Lap Editing)
-
-**Edit race laps after completion!** Perfect for correcting false triggers or missed gates.
-
-#### Adding Laps
-
-**When to use:**
-- Missed gate detection
-- Manual timing needed
-- Correcting data gaps
-
-**How to add:**
-1. Click race to view details
-2. Find position where lap should be inserted
-3. Click "Add Lap" button (between existing laps)
-4. Enter lap time in seconds (e.g., "12.34")
-5. Click "Add"
-
-**What happens:**
-- New lap inserted at position
-- Subsequent laps renumbered automatically
-- All statistics recalculate (fastest, median, best 3, etc.)
-- Charts update immediately
-- Changes save to race history
-
-#### Removing Laps
-
-**When to use:**
-- False trigger from interference
-- Accidental manual lap
-- Data corruption
-- Wrong gate pass
-
-**How to remove:**
-1. Click race to view details
-2. Find lap to remove
-3. Click "Remove" button next to lap
-4. Confirm deletion in prompt
-
-**What happens:**
-- Lap deleted from race
-- Remaining laps renumber
-- Statistics recalculate
-- Total time adjusts
-- Charts update
-- Changes save immediately
-
-** Use Cases:**
-- **RF Interference:** Remove laps caused by radio noise
-- **Multi-Quad Sessions:** Remove detection from other pilots
-- **Technical Issues:** Clean up data from hardware problems
-- **Race Corrections:** Fix timing errors during competition
-
-** Note:** Changes are permanent! Export race before major edits.
-
----
-
-## LED Control
-
-Configure RGB LED behavior and visual effects.
-
-![LED Setup](../screenshots/12-12-2025/Config%20Screen%20-%20LED%20Setup%2012-12-2025.png)
-
-** Settings Persist:** All LED configuration (preset, colors, brightness, speed, manual override) automatically saves to EEPROM and survives page refreshes and device reboots.
-
-### LED Presets
-
-10 built-in effects available:
-
-| Preset | Description | Speed Control |
-|--------|-------------|---------------|
-| **Off** | LEDs disabled | No |
-| **Solid Colour** | Static single color | No |
-| **Rainbow Wave** | Smooth rainbow animation | Yes |
-| **Color Fade** | Fade to/from color | Yes |
-| **Fire** | Flickering fire effect | Yes |
-| **Ocean** | Blue wave pattern | Yes |
-| **Police** | Red/blue alternating | Yes |
-| **Strobe** | Fast flashing | Yes |
-| **Comet** | Chasing light | Yes |
-| **Pilot Colour** | Uses your pilot color | No |
-
-### Solid Colour Preset
-
-**Select:** Solid Colour preset  
-**Color Picker Appears:** Choose any color  
-**Apply:** Color displays immediately
-
-**Use Cases:**
-- Team colors
-- Venue lighting requirements
-- Personal preference
-
-### Color Fade Preset
-
-**Select:** Color Fade preset  
-**Color Picker Appears:** Choose target color  
-**Effect:** Smoothly fades between colors
-
-**Parameters:**
-- **Animation Speed:** 1-20 (controls fade rate)
-
-### Strobe Preset
-
-**Select:** Strobe preset  
-**Color Picker Appears:** Choose strobe color  
-**Effect:** Rapid flashing
-
-** Warning:** Slowed for visibility, may still be bright
-
-### Pilot Colour Preset
-
-**Select:** Pilot Colour preset  
-**Effect:** Uses color from Configuration -> Pilot Info -> Pilot Color
-
-**Updates:**
-- Changes automatically when you change pilot color
-- Syncs with race identification
-
-### Animation Speed
-
-**Range:** 1 (slow) - 20 (fast)  
-**Default:** 5  
-**Affects:** Rainbow, Fade, Fire, Ocean, Police, Strobe, Comet
-
-**Tip:** Lower speeds are more elegant, higher speeds more energetic
-
-### LED Brightness
-
-**Range:** 0 (off) - 255 (max)  
-**Default:** 80  
-**Effect:** Overall brightness of all presets
-
-**Use Cases:**
-- **80-120:** Indoor use
-- **150-200:** Outdoor daylight
-- **255:** Maximum visibility
-
-**Power:** Higher brightness = more current draw
-
-### Manual LED Control
-
-**Toggle:** "Manual LED Control" switch
-
-**When Enabled:**
-- Race events DON'T affect LEDs
-- LED settings remain constant
-- Good for practice/testing
-
-**When Disabled (Default):**
-- Race start -> Green flash
-- Lap detected -> White flash  
-- Race stop -> Red triple flash
-- Preset continues between events
-
----
-
-## Voice Settings
-
-Advanced voice configuration options.
-
-### Phonetic Pronunciation
-
-Customize how names and numbers are spoken.
-
-**Pilot Name Pronunciation:**
-- Set in Configuration -> Pilot Info -> Phonetic Name
-- Falls back to Pilot Name if empty
-- Examples in [Configuration section](#pilot-info-section)
-
-### Lap Format Customization
-
-Choose what information is announced per lap.
-
-**Access:** Configuration -> TTS Settings -> Lap Announcement Format
-
-**Three Options:**
-1. Full details (pilot + lap + time)
-2. Moderate (lap + time)
-3. Minimal (time only)
-
-**Example Announcements:**
-
-| Format | Gate 1 | Lap 3, 12.34s |
-|--------|--------|---------------|
-| **Full** | "Gate 1, 8.45" | "Louis Lap 3, 12.34" |
-| **Lap+Time** | "Gate 1, 8.45" | "Lap 3, 12.34" |
-| **Time Only** | "8.45" | "12.34" |
-
-### Voice Engine Selection
-
-**ElevenLabs Voices:**
-- Use pre-recorded MP3 files
-- Natural, human-like
-- Requires SD card or LittleFS space
-- Auto-falls back to PiperTTS if files missing
-
-**PiperTTS:**
-- Real-time synthesis
-- Lower latency (~200ms faster)
-- Slightly more robotic
-- No storage required
-- Exclusive mode (doesn't try ElevenLabs files)
-
-**Switching Engines:**
-- Configuration -> TTS Settings -> Voice
-- Change takes effect immediately
-- No restart required
-
----
-
-## Advanced Features
-
-### OSD Overlay
-
-Display race information on live video stream.
-
-**Access:** Click "Open OSD" button in Configuration
-
-**Features:**
-- Clean, minimal overlay
-- Shows current lap time
-- Shows lap number
-- Updates in real-time
-- Transparent background for easy keying
-
-**Setup for OBS:**
-1. Click "Open OSD" - opens in new tab
-2. Copy URL (auto-copied to clipboard)
-3. In OBS: Add "Browser Source"
-4. Paste URL
-5. Set width: 1920, height: 1080
-6. Check "Shutdown source when not visible"
-7. Position overlay on stream
-
-![System Settings](../screenshots/12-12-2025/Config%20Screen%20System%20Settings%2012-12-2025.png)
-
-### Battery Monitoring
-
-Track battery voltage during races.
-
-**Enable:** Configuration -> System Setup -> Battery Monitoring toggle
-
-**When Enabled:**
-- Current voltage and per-cell voltage displayed
-- Battery type (LiPo / LiPoHV / Li-Ion) and cell count
-- Voltage divider ratio, which must match the resistors fitted
-- Low battery alarm threshold, set per cell
-
-**Alerts are shown in the browser.** If no browser is connected to the gate,
-nothing warns you that the pack is low.
-
-**Wiring:**
-- The sense pin differs per board - GPIO1 on the AIO and Solo, GPIO0 on the
-  SuperMini and Seeed XIAO, GPIO3 on the LilyGO, GPIO5 on the Waveshare
-- A voltage divider is required for anything above 1S, and the ratio must be
-  entered in the settings or the reading will be wrong
-
-See **[Battery Monitoring](BATTERY_MONITORING.md)** for divider sizing,
-calibration and troubleshooting.
-
-### Theme Selection
-
-23 color schemes available.
-
-**Access:** Configuration -> System Setup -> Theme
-
-**Categories:**
-- **Material Themes:** Modern, colorful (10 options)
-- **Classic Dark:** Popular dark themes (7 options)
-- **Classic Light:** Bright themes (6 options)
-
-**Logo Adaptation:**
-- Black logo for light themes
-- White logo for dark themes
-- Automatic switching
-
-### Config Backup & Restore
-
-Save and restore all settings.
-
-**Download Config:**
-1. Configuration -> System Setup
-2. Click "Download Config"
-3. Saves as JSON file
-4. Includes ALL settings (backend + frontend)
-
-**Import Config:**
-1. Click "Import Config"
-2. Select JSON file
-3. Settings applied immediately
-4. Page reloads automatically
-
-**Backup Includes:**
-- Frequency, RSSI thresholds
-- Pilot information
-- LED settings
-- Theme, voice settings
-- All frontend preferences
-
----
-
-## Keyboard Shortcuts
-
-**Race Tab:**
-- `Space` - Start/Stop race
-- `L` - Add manual lap
-- `C` - Clear laps
-
-**Global:**
-- `Tab` - Cycle through tabs
-- `Esc` - Close modal dialogs
-- `?` - Show help (if implemented)
-
----
-
-## Tips & Best Practices
-
-### For Accurate Timing
-
- **DO:**
-- Let VTx warm up 30+ seconds
-- Recalibrate when flying with others
-- Use minimum lap time to prevent false triggers
-- Keep power supply stable (good battery)
-- Use Solid mounting for RX5808
-
- **DON'T:**
-- Change frequency without recalibrating
-- Fly with cold VTx
-- Ignore false lap triggers
-
-### For Better Performance
-
-- Use USB connection for zero latency
-- Enable voice for faster lap awareness
-- Set lap count for race format training
-- Review race history regularly
-- Export races before firmware updates
-
-### For Troubleshooting
-
-- Run self-test first (Configuration -> System Diagnostics)
-- Check Serial Monitor for debug info
-- Verify all connections with multimeter
-- Test with known-good components
-- Ask community before replacing hardware
-
----
-
-## Next Steps
-
- **Master the features**   
- **[Hardware Guide](HARDWARE_GUIDE.md)** - Advanced hardware info  
- **[Features Guide](FEATURES.md)** - Deep dive into capabilities  
- **[Development Guide](DEVELOPMENT.md)** - Contribute to project
-
----
-
-**Questions? [GitHub Discussions](https://github.com/LouisHitchcock/FPVGate/discussions) | [Report Issues](https://github.com/LouisHitchcock/FPVGate/issues)**
+Check power/receiver first for missing samples, calibration/minimum lap for
+double laps, storage/save state for history failures, and the actual target
+for absent USB or speaker features. Report firmware stage, exact board,
+connection, receiver version, reproduction steps and relevant logs.
+[Hardware troubleshooting](HARDWARE_GUIDE.md#troubleshooting) gives wiring checks.
 
 

@@ -166,7 +166,7 @@
           <div id="personalModeRaceBanner" class="personal-mode-indicator" style="display: none;" data-i18n="race.personal_mode_short">PERSONAL</div>
           <div id="masterModeRaceBanner" class="master-mode-indicator" style="display: none;" data-i18n="race.master_mode_short">MASTER</div>
           <div id="slaveModeRaceBanner" class="slave-mode-indicator" style="display: none;" data-i18n="race.slave_mode_short">SLAVE</div>
-          <div id="rotorhazardModeRaceBanner" class="rotorhazard-mode-indicator" style="display: none;">RotorHazard</div>
+          <div id="multiModeRaceBanner" class="multi-mode-indicator" style="display: none;">MULTI</div>
           <div id="batteryIndicator" class="battery-indicator" style="display: none;">
             <img id="batteryIcon" class="battery-icon" src="bat-full-svg.svg" width="20" height="20" alt="Battery" />
             <span id="batteryVoltageHeaderText">--</span>
@@ -183,6 +183,7 @@
       </nav>
       <ul class="nav-links">
         <li><a id="nav-link-race" class="tablinks active" onclick="openTab(event, 'race')" data-i18n="nav.race">Race</a></li>
+        <li style="display: none"><a id="nav-link-event" class="tablinks" onclick="openTab(event, 'raceEvent')">Event</a></li>
         <li><a id="nav-link-history" class="tablinks" onclick="openTab(event, 'history')" data-i18n="nav.history">Race History</a></li>
         <li><a id="nav-link-calib" class="tablinks" onclick="openTab(event, 'calib')" data-i18n="nav.calib">Calibration</a></li>
         <li><a id="nav-link-config" class="tablinks" onclick="openSettingsModal()" data-i18n="nav.config">Configuration</a></li>
@@ -195,6 +196,7 @@
       </div>
 
       <div id="race" class="tabcontent">
+        <div id="eventRaceBanner" class="ev-race-banner" style="display: none"></div>
         <span id="timer" data-i18n="race.timer_default">00:00:00s</span>
         <div id="lapCounter" style="text-align: center; font-size: 18px; font-weight: bold; color: var(--primary-color); margin: 8px 0">
           <span id="lapCounterText" data-i18n="race.lap_counter">Lap 0</span> - <span id="currentLapTimer">00:00:00s</span>
@@ -204,8 +206,9 @@
           <button id="stopRaceButton" onclick="stopRace()" disabled data-i18n="race.stop_race">Stop Race</button>
           <button id="addLapButton" onclick="addManualLap()" disabled data-i18n="race.add_lap">Add Lap</button>
           <button id="clearLapsButton" onclick="clearLaps()" data-i18n="race.clear_laps">Clear Laps</button>
+          <button id="nextHeatButton" style="display: none" onclick="RaceEvent.nextHeat()">Next Heat</button>
           <div class="race-notes-inline">
-            <button id="raceNotesButton" class="secondary-button" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
+            <button id="raceNotesButton" onclick="openRaceNotesModal()" data-i18n="race.notes_button">Race Notes</button>
             <span id="raceNotesIndicator" class="race-notes-indicator" style="display: none" data-i18n="race.notes_saved">Notes saved</span>
           </div>
         </div>
@@ -274,23 +277,39 @@
             </div>
           </div>
           <canvas id="debugRssiChart" style="width: 100%; height: 90px;"></canvas>
+          <!-- ESP32-C5: every pilot, drawn by c5-multipilot.js like the Calibration chart -->
+          <canvas id="debugC5Chart" style="display: none; width: 100%; height: 190px;"></canvas>
         </div>
 
         <!-- Sync Mode: Race Analysis (Multi-Pilot) -->
         <div id="raceAnalysis" class="lap-analysis" style="display: none;">
           <h3>Race Analysis</h3>
+          <!-- Standings, one row per pilot. Filled by renderUnifiedRaceView(). -->
+          <div id="multiPilotRaceSummary" class="multi-pilot-standings"></div>
           <div class="stats-boxes" style="margin-bottom: 12px;">
+            <div class="stat-box">
+              <div class="stat-label">Fastest Lap</div>
+              <div class="stat-value" id="raceAlwaysFastest">--</div>
+              <div class="stat-sublabel" id="raceAlwaysFastestSub"></div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Fastest 3 Consecutive</div>
+              <div class="stat-value" id="raceAlwaysFastest3Consec">--</div>
+              <div class="stat-sublabel" id="raceAlwaysFastest3ConsecSub"></div>
+            </div>
             <div class="stat-box">
               <div class="stat-label">Best 3 Laps</div>
               <div class="stat-value" id="raceAlwaysBest3">--</div>
+              <div class="stat-sublabel" id="raceAlwaysBest3Sub"></div>
             </div>
             <div class="stat-box">
               <div class="stat-label">Median Lap</div>
               <div class="stat-value" id="raceAlwaysMedian">--</div>
+              <div class="stat-sublabel" id="raceAlwaysMedianSub"></div>
             </div>
           </div>
           <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;">
-            Enable at least one analytics tab in System Settings to display additional race analytics.
+            Turn on Consistency or Lap Times under Settings → User Interface → Race Analytics Display to see race charts.
           </div>
           <div id="raceAnalyticsTabs" class="analysis-tabs" style="margin-top: 8px;"></div>
           <div id="raceAnalysisContent" class="analysis-content" style="min-height: 350px;">
@@ -361,6 +380,11 @@
         </div>
       </div>
 
+      <!-- Race director: pilots, formats, heats and results (event.js) -->
+      <div id="raceEvent" class="tabcontent" style="display: none;">
+        <div id="eventPanel"></div>
+      </div>
+
       <div id="calib" class="tabcontent" style="display: none;">
         <!-- Modern Calibration Header -->
         <div class="calib-header">
@@ -369,7 +393,7 @@
         </div>
 
         <!-- Channel Selection Card -->
-        <div class="calib-card">
+        <div id="legacyCalibrationChannelCard" class="calib-card">
           <div class="calib-card-header">
             <span data-i18n="calib.channel_selection">Channel Selection</span>
             <div class="calib-freq-badge" id="calibFreqOutput">R1 5658MHz</div>
@@ -405,8 +429,8 @@
           </div>
         </div>
 
-        <!-- RSSI Graph Card -->
-        <div class="calib-card">
+        <!-- RSSI Graph Card (RX5808/Novacore) -->
+        <div id="legacyCalibrationGraphCard" class="calib-card">
           <div class="calib-card-header">
             <span data-i18n="calib.rssi_graph">Live RSSI Signal</span>
             <button id="startWizardButton" onclick="startCalibrationWizard()" class="calib-wizard-btn" data-i18n="calib.start_wizard">Wizard</button>
@@ -416,8 +440,14 @@
           </div>
         </div>
 
+        <!-- ESP32-C5 multi-pilot calibration. Hidden for RX5808/Novacore. -->
+        <div id="c5CalibrationSection" style="display:none">
+          <!-- Filled by c5-multipilot.js -->
+          <div id="c5Panel"></div>
+        </div>
+
         <!-- Threshold Controls Card -->
-        <div class="calib-card">
+        <div id="legacyCalibrationThresholdCard" class="calib-card">
           <div class="calib-card-header">
             <span data-i18n="calib.thresholds">Detection Thresholds</span>
           </div>
@@ -487,6 +517,34 @@
           </div>
         </div>
 
+        <!-- Multi-pilot races: one row per pilot, like the Calibration list.
+             Click a row to edit that pilot; the dot shows or hides its trace. -->
+        <div id="marshalPilotControls" class="marshal-pilots" style="display:none">
+          <div id="marshalPilotList" class="marshal-pilot-list"></div>
+          <span class="marshal-pilot-hint">Click a pilot to edit their laps; the dot shows or hides their trace. Save Changes saves every pilot.</span>
+        </div>
+        <!-- Collapsed by default (openRaceEditor) so the graph gets the width. -->
+        <details id="marshalDetails" class="marshal-details">
+          <summary><span class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</span><span id="marshalDetailsSummary" class="marshal-details-summary"></span></summary>
+          <div class="marshal-details-grid">
+            <div class="marshal-field">
+              <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
+              <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
+              <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
+            </div>
+            <div class="marshal-field">
+              <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
+              <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
+            </div>
+            <div class="marshal-field marshal-field-notes">
+              <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
+              <textarea id="raceEditNotes" maxlength="300" rows="3" placeholder="Optional notes about this race..." data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
+            </div>
+          </div>
+        </details>
         <div class="marshal-layout">
           <div class="marshal-graph-col">
             <div class="marshal-chart-wrap" id="marshalChartWrap">
@@ -519,7 +577,7 @@
                   <label for="marshalEnter" data-i18n="calib.enter_rssi">Enter RSSI</label>
                   <span id="marshalEnterSpan" class="calib-threshold-value">120</span>
                 </div>
-                <input type="range" min="50" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="50" aria-valuemax="255" />
+                <input type="range" min="1" max="255" step="1" id="marshalEnter" value="120" oninput="updateMarshalThresholds()" class="calib-slider enter-slider" aria-valuemin="1" aria-valuemax="255" />
                 <div class="calib-threshold-hint" data-i18n="history.marshal_enter_hint">Used only for Recalculate preview (does not change device config)</div>
               </div>
               <div class="calib-threshold-item">
@@ -527,7 +585,7 @@
                   <label for="marshalExit" data-i18n="calib.exit_rssi">Exit RSSI</label>
                   <span id="marshalExitSpan" class="calib-threshold-value">100</span>
                 </div>
-                <input type="range" min="50" max="255" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="50" aria-valuemax="255" />
+                <input type="range" min="0" max="254" step="1" id="marshalExit" value="100" oninput="updateMarshalThresholds()" class="calib-slider exit-slider" aria-valuemin="0" aria-valuemax="254" />
                 <div class="calib-threshold-hint" data-i18n="history.marshal_exit_hint">Used only for Recalculate preview (does not change device config)</div>
               </div>
             </div>
@@ -551,25 +609,6 @@
             <button type="button" id="marshalAddLapBtn" class="marshal-btn" style="display: none; width: 100%; margin-top: 8px" onclick="addLapToEditor()" data-i18n="history.edit_add_lap">+ Add Lap</button>
           </aside>
 
-          <aside class="marshal-details-col" aria-label="Race details">
-            <h4 class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</h4>
-            <div class="marshal-field">
-              <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
-              <input type="text" id="raceName" maxlength="50" placeholder="e.g. Morning Practice" data-i18n-placeholder="history.edit_placeholder_name" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceTag" data-i18n="history.edit_tag">Tag:</label>
-              <input type="text" id="raceTag" maxlength="30" placeholder="e.g. training, race, freestyle" data-i18n-placeholder="history.edit_placeholder_tag" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceDistance" data-i18n="history.edit_distance">Total Distance (meters):</label>
-              <input type="number" id="raceDistance" min="0" step="0.1" placeholder="e.g. 150.0" data-i18n-placeholder="history.edit_placeholder_distance" />
-            </div>
-            <div class="marshal-field">
-              <label for="raceEditNotes" data-i18n="history.edit_notes">Notes:</label>
-              <textarea id="raceEditNotes" maxlength="300" rows="4" placeholder="Optional notes about this race..." data-i18n-placeholder="history.edit_placeholder_notes"></textarea>
-            </div>
-          </aside>
         </div>
       </div>
     </div>
@@ -726,11 +765,17 @@
             <div class="settings-nav-item" data-settings-section="wifi" onclick="switchSettingsSection(event, 'wifi')">
               <span data-i18n="settings.tabs.wifi">WiFi & Connection</span>
             </div>
+            <div class="settings-nav-item" data-settings-section="elrs" onclick="switchSettingsSection(event, 'elrs')">
+              <span data-i18n="settings.tabs.elrs">ELRS Backpack</span>
+            </div>
             <div class="settings-nav-item" data-settings-section="webhooks" onclick="switchSettingsSection(event, 'webhooks')">
               <span data-i18n="settings.tabs.webhooks">Webhooks</span>
             </div>
             <div class="settings-nav-item" data-settings-section="osd" onclick="switchSettingsSection(event, 'osd')">
               <span data-i18n="settings.tabs.osd">On Screen Displays</span>
+            </div>
+            <div class="settings-nav-item" data-settings-section="ui" onclick="switchSettingsSection(event, 'ui')">
+              <span>User Interface</span>
             </div>
             <div class="settings-nav-item" data-settings-section="system" onclick="switchSettingsSection(event, 'system')">
               <span data-i18n="settings.tabs.system">System Settings</span>
@@ -1193,7 +1238,7 @@
                   <!-- This Device row (auto-populated) and other devices rendered by JS -->
                 </div>
                 
-                <!-- Add/Test panel (hidden in RotorHazard mode) -->
+                <!-- Add/Test panel (hidden in C5 multi mode) -->
                 <div id="syncAddDevicePanel">
                   <!-- Add Device Input -->
                   <div class="config-item">
@@ -1211,46 +1256,6 @@
                   </div>
                 </div>
 
-                <!-- RotorHazard config panel (shown when RH mode selected) -->
-                <div id="rhConfigPanel" style="display: none; margin-top: 8px">
-                  <div class="config-item">
-                    <label for="rhHostIP">RH Host IP:</label>
-                    <input type="text" id="rhHostIP" placeholder="e.g. 192.168.0.50" maxlength="31" style="flex: 1" />
-                  </div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">IP address of the RotorHazard server (port 5000 is used automatically)</div>
-
-                  <div class="config-item" style="margin-top: 12px">
-                    <label for="rhNodeIndex">Node Seat (0-7):</label>
-                    <select id="rhNodeIndex">
-                      <option value="0">Seat 0</option>
-                      <option value="1">Seat 1</option>
-                      <option value="2">Seat 2</option>
-                      <option value="3">Seat 3</option>
-                      <option value="4">Seat 4</option>
-                      <option value="5">Seat 5</option>
-                      <option value="6">Seat 6</option>
-                      <option value="7">Seat 7</option>
-                    </select>
-                  </div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Which RH node seat this FPVGate corresponds to</div>
-
-                  <div class="config-item" style="margin-top: 12px">
-                    <label>Connection Status:</label>
-                    <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                      <span id="rhStatusBadge" style="padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; background-color: var(--bg-secondary); color: var(--secondary-color)">Unknown</span>
-                      <button onclick="refreshRHStatus()" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)">Refresh</button>
-                    </div>
-                  </div>
-
-                  <div class="config-item" style="margin-top: 12px">
-                    <label>Clock Sync:</label>
-                    <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                      <span id="rhSyncStatus" style="font-size: 12px; color: var(--secondary-color)">Not synced</span>
-                      <button onclick="syncRHClock()" id="rhSyncBtn" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)">Sync Now</button>
-                    </div>
-                  </div>
-                </div>
-
                 <!-- Slave Mode Indicator (shown when this device is slave) -->
                 <div id="slaveModeIndicator" style="display: none; margin-top: 12px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; border-left: 4px solid var(--primary-color)">
                   <p style="margin: 0; font-weight: bold; color: var(--primary-color)" data-i18n="settings.sync.slave_active">Slave Mode Active</p>
@@ -1263,6 +1268,43 @@
                 <button onclick="resetWiFiSettings()" style="flex: 1; background-color: var(--secondary-color)" data-i18n="settings.wifi.reset">Reset</button>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-top: 8px" data-i18n="settings.wifi.restart_note">Note: Device will restart after applying WiFi settings</div>
+            </div>
+
+            <!-- ELRS Backpack Section -->
+            <div id="settings-elrs" class="settings-section">
+              <h2 data-i18n="settings.elrs.title">ELRS Backpack</h2>
+              <form id="elrsForm" onsubmit="saveElrsSettings(event)">
+                <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                  <p style="margin: 0" data-i18n="settings.elrs.description">Start and stop a race from a switch on your ExpressLRS radio, through its backpack. No extra hardware. Needs the C5 receiver, and FPVGate in hotspot mode, which moves to Wi-Fi channel 1. USB networking and Ethernet keep working.</p>
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsEnabled" /> <span data-i18n="settings.elrs.enable">Enable ELRS backpack</span></label>
+                </div>
+                <div class="config-item">
+                  <label for="elrsPhrase" data-i18n="settings.elrs.phrase">Binding phrase:</label>
+                  <input type="password" id="elrsPhrase" maxlength="63" autocomplete="new-password" placeholder="Blank keeps the current pairing" data-i18n-placeholder="settings.elrs.phrase_placeholder" />
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsForget" /> <span data-i18n="settings.elrs.forget">Forget pairing (turn the backpack off first)</span></label>
+                </div>
+
+                <h3 data-i18n="settings.elrs.race_title">Switch race control</h3>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsRaceControl" checked /> <span data-i18n="settings.elrs.race_enable">Start and stop races from the radio</span></label>
+                </div>
+                <div class="config-item">
+                  <label><input type="checkbox" id="elrsInvert" /> <span data-i18n="settings.elrs.invert">Swap the Start and Stop positions</span></label>
+                </div>
+                <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color)">
+                  <p style="margin: 0" data-i18n="settings.elrs.race_hint">On the radio, open the ExpressLRS Lua script, go to Backpack, and set DVR Rec to the switch you want. Never use your arm switch. Switch on starts the race, switch off stops it. The gate beeps when a race starts; no beep means it was refused, and the status below says why.</p>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 16px">
+                  <button type="submit" id="elrsSave" style="flex: 1" data-i18n="settings.elrs.save">Save and restart</button>
+                  <button type="button" onclick="loadElrsSettings(false)" style="flex: 1; background-color: var(--secondary-color)" data-i18n="settings.elrs.refresh">Refresh status</button>
+                </div>
+                <pre id="elrsStatus" role="status" aria-live="polite" style="white-space: pre-wrap; font-size: 13px"></pre>
+              </form>
             </div>
 
             <!-- Webhooks Section -->
@@ -1323,9 +1365,21 @@
               </div>
             </div>
 
-            <!-- System Section -->
-            <div id="settings-system" class="settings-section">
-              <h2 data-i18n="settings.system.title">System Settings</h2>
+            <!-- User Interface Section -->
+            <div id="settings-ui" class="settings-section">
+              <h2>User Interface</h2>
+
+              <h3 style="margin-top: 0">Race Notes</h3>
+              <div class="config-item">
+                <label for="showRaceNotesButton">Race Notes Button:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="showRaceNotesButton" onchange="toggleShowRaceNotesButton(this.checked)" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Show the Race Notes button on the Race tab. Remembered on this device.</div>
               <div class="config-item">
                 <label for="openRaceNotesOnRaceEnd" data-i18n="settings.system.notes_auto_open">Open Race Notes on Race End:</label>
                 <div style="flex: 1">
@@ -1336,45 +1390,13 @@
                 </div>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.system.notes_auto_open_tip">Automatically open race notes when a race is stopped.</div>
+
               <h3>Race Analytics Display</h3>
               <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);">
-                Choose which multi-pilot race analytics panels to display in the Race tab (up to 3 enabled at once).
+                Fastest lap, fastest 3 consecutive, best 3 laps and median lap are always shown on the Race tab. Choose which charts to show below them; each one you turn on gets a tab there.
               </div>
 
               <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleFastestLap" onchange="toggleRaceAnalyticsPanel('fastestLap', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest Lap</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show fastest lap time and lap number details</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleFastest3Consec" onchange="toggleRaceAnalyticsPanel('fastest3Consec', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest 3 Consecutive</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show best 3-lap consecutive block and lap range</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
-                <label class="switch" style="flex-shrink: 0;">
-                  <input type="checkbox" id="raceAnalyticsToggleLapTimes" onchange="toggleRaceAnalyticsPanel('lapTimes', this.checked)" />
-                  <span class="slider"></span>
-                </label>
-                <div>
-                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
-                </div>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
                 <label class="switch" style="flex-shrink: 0;">
                   <input type="checkbox" id="raceAnalyticsToggleConsistency" onchange="toggleRaceAnalyticsPanel('consistency', this.checked)" />
                   <span class="slider"></span>
@@ -1385,13 +1407,48 @@
                 </div>
               </div>
 
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 6px;">
+                <label class="switch" style="flex-shrink: 0;">
+                  <input type="checkbox" id="raceAnalyticsToggleLapTimes" onchange="toggleRaceAnalyticsPanel('lapTimes', this.checked)" />
+                  <span class="slider"></span>
+                </label>
+                <div>
+                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
+                </div>
+              </div>
+
+              <div id="eventDirectorPreferences"></div>
+              <h3>Event Mode</h3>
+              <div class="config-item">
+                <label for="eventMode">Event Mode:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="eventMode" onchange="applyEventMode(this.checked); autoSaveConfig()" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Adds the Event tab for running club races and events: pilots, groups, heats and results. Needs the ESP32-C5 receiver. Saved on the gate, so every device sees it. Leave off for solo flying.</div>
+            </div>
+
+            <!-- System Section -->
+            <div id="settings-system" class="settings-section">
+              <h2 data-i18n="settings.system.title">System Settings</h2>
               <h3 style="margin-top: 0" data-i18n="settings.system.receiver_radio">Receiver Radio</h3>
               <div class="config-item">
                 <label for="receiverRadio" data-i18n="settings.system.receiver_label">Receiver Module:</label>
                 <select id="receiverRadio" onchange="toggleNovaFilterSection()">
                   <option value="0" data-i18n="settings.system.receiver_options.rx5808">RX5808</option>
                   <option value="1" data-i18n="settings.system.receiver_options.novacore">Novacore</option>
+                  <option value="2">ESP32-C5 Multi-Pilot</option>
                 </select>
+              </div>
+
+              <div id="c5PilotSection" style="display: none; margin-top: 12px; padding: 16px; background-color: var(--bg-secondary); border-radius: 8px;">
+                <h4 style="margin: 0 0 4px 0">ESP32-C5 Multi-Pilot</h4>
+                <p style="margin: 0 0 12px 0; font-size: 12px; color: var(--secondary-color)">The C5 retunes one receiver across up to 8 pilots (5180–5917 MHz, including Raceband R8). Save this configuration once with the ESP32-C5 receiver selected, then set the pilots, band, gain and each pilot's Enter/Exit on the <b>Calibration</b> tab.</p>
+                <button type="button" class="calib-wizard-btn" onclick="openC5Calibration()">Open C5 calibration</button>
               </div>
 
               <!-- Novacore Signal Filtering (shown when Novacore selected) -->
@@ -1679,6 +1736,43 @@
                 <label data-i18n="settings.firmware.first_install">First install or recovery:</label>
                 <a href="https://fpvgate.xyz/flasher" target="_blank" class="update-link" data-i18n="settings.firmware.open_page">Open Web Flasher</a>
               </div>
+
+              <!-- The C5 receiver has its own firmware and versions
+                   (FPVGateC5MK). The gate sends it over the link, so it is
+                   shown only once a C5 answers. -->
+              <div id="c5FwSection" style="display: none">
+                <h3 data-i18n="settings.c5fw.title">C5 Receiver Firmware</h3>
+                <div id="c5FwInfo" class="ota-device-info"></div>
+                <div class="ota-panel">
+                  <div id="c5FwOnline">
+                    <div class="ota-line">
+                      <select id="c5FwVersionSelect" onchange="onC5FwVersionChange()" aria-label="C5 version">
+                        <option value="" data-i18n="settings.firmware.loading_versions">Loading versions...</option>
+                      </select>
+                    </div>
+                    <details id="c5FwNotesWrap" class="ota-notes" style="display: none">
+                      <summary data-i18n="settings.firmware.whats_new">What's new</summary>
+                      <div id="c5FwNotes"></div>
+                    </details>
+                  </div>
+                  <div id="c5FwFile" style="display: none">
+                    <div class="ota-line">
+                      <label for="c5FwFileInput" data-i18n="settings.firmware.file_firmware_short">Firmware</label>
+                      <input type="file" id="c5FwFileInput" accept=".bin" />
+                    </div>
+                  </div>
+                  <div id="c5FwWarning" class="ota-warning" style="display: none"></div>
+                  <div class="ota-actions">
+                    <button type="button" id="c5FwStartBtn" onclick="startC5Update()" data-i18n="settings.c5fw.install">Update C5</button>
+                    <span class="ota-hint" data-i18n="settings.c5fw.hint">The gate sends it to the C5 over their link in about half a minute. Laps aren't timed meanwhile.</span>
+                    <button type="button" id="c5FwSourceToggle" class="ota-link" onclick="toggleC5FwSource()" data-i18n="settings.c5fw.source_file">Use my own file</button>
+                  </div>
+                  <div id="c5FwRunning" class="ota-running" style="display: none">
+                    <div class="ota-progress-track"><div id="c5FwProgressBar" class="ota-progress-bar"></div></div>
+                    <div id="c5FwProgressText" class="ota-progress-text"></div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- OSD Section -->
@@ -1834,6 +1928,10 @@
     </div>
 
     <script src="script.js" defer></script>
+    <script src="race-trace.js" defer></script>
+    <script src="c5-multipilot.js" defer></script>
+      <script src="event-director-ui.js" defer></script>
+      <script src="event.js" defer></script>
   </body>
 </html>
 
