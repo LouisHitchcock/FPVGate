@@ -614,8 +614,26 @@ function setupWiFiEvents() {
 // Handle race state changes from SSE (for slave mode sync)
 function handleRaceStateEvent(state) {
   console.log("[Sync] Handling race state:", state);
+  if (state === "starting") {
+    // ELRS starts the device-side countdown.  Mirror only its speech here;
+    // do not call startRace() or send a second /timer/start command.
+    window.elrsRemoteStarting = true;
+    queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
+    if (raceCountdownMode === 0) {
+      queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
+    } else {
+      setTimeout(() => queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`), 5000);
+    }
+    return;
+  }
   
   if (state === "started") {
+    if (window.elrsRemoteStarting) {
+      window.elrsRemoteStarting = false;
+      beep(1, 1, "square");
+      beep(500, 880, "square");
+      if (navigator.vibrate) navigator.vibrate(500);
+    }
     currentRaceSessionTimestamp = null;
     // Race started (from master or local)
     if (!c5Race.active || c5HasRaceLaps()) {
@@ -642,6 +660,8 @@ function handleRaceStateEvent(state) {
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race stopped via SSE");
+    if (audioAnnouncer) audioAnnouncer.clearQueue();
+    queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
     if (c5ReceiverSelected()) {
       completeC5RaceInBrowser().catch((err) => { console.error("[C5] Save status:", err); alert(err.message); });
     }
@@ -3047,6 +3067,30 @@ function updateMaxHeatTime(obj, value) {
 // Shared AudioContext for beeps (reused to avoid iOS issues)
 var beepAudioContext = null;
 var beepGainNode = null;
+var browserAudioUnlocked = false;
+
+// Browser policy requires Web Audio to be created/resumed from a user gesture.
+// ELRS start events arrive via SSE, so unlock the shared beep context on the
+// first interaction with the race page; later remote starts can then play the
+// tone without attempting an autoplay-violating AudioContext start.
+function unlockBrowserBeepAudio() {
+  if (browserAudioUnlocked) return;
+  try {
+    if (!beepAudioContext) {
+      beepAudioContext = new AudioContext();
+      beepGainNode = beepAudioContext.createGain();
+      beepGainNode.gain.value = beepVolume;
+      beepGainNode.connect(beepAudioContext.destination);
+    }
+    const resume = beepAudioContext.resume ? beepAudioContext.resume() : Promise.resolve();
+    Promise.resolve(resume).then(() => {
+      browserAudioUnlocked = beepAudioContext.state === "running";
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+document.addEventListener("pointerdown", unlockBrowserBeepAudio, { once: true, passive: true });
+document.addEventListener("keydown", unlockBrowserBeepAudio, { once: true, passive: true });
 var beepVolume = 1.0;  // 0.0 to 1.0
 
 function setBeepVolume(volume) {
