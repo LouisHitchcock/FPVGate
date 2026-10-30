@@ -91,6 +91,15 @@ bool Storage::initSD() {
     bool sdOk = SD.begin(PIN_SD_CS, *spi, 10000000);
     spiMutexGive();
     if (!sdOk) {
+        // Some cards/socket revisions need a slower first negotiation even
+        // though normal transfers are reliable at 10 MHz.
+        DEBUG("SD.begin() failed at 10MHz; retrying at 1MHz...\n");
+        SD.end();
+        spiMutexTake();
+        sdOk = SD.begin(PIN_SD_CS, *spi, 1000000);
+        spiMutexGive();
+    }
+    if (!sdOk) {
         DEBUG("ERROR: SD.begin() failed!\n");
         DEBUG("Possible causes:\n");
         DEBUG("  1. Card not inserted\n");
