@@ -23,7 +23,7 @@ single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
 events with heats and seeding, or a RotorHazard race. No transponders, no
 Raspberry Pi: open the gate in any browser and fly.
 
-This branch reports **1.9.0-alpha-5**. It is evaluation firmware; full
+This branch reports **1.9.0-alpha-6**. It is evaluation firmware; full
 six-board, independent multi-transmitter and storage-failure qualification is
 not complete. [Documentation index](docs/README.md) lists the current guides
 and separates historical notes from operating procedures.
