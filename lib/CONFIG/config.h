@@ -496,7 +496,7 @@ class Config {
     void load();
     void write();
     void toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor = nullptr);
-    void toJsonString(char* buf);
+    void toJsonString(AsyncResponseStream& destination);
     void fromJson(JsonObject source);
     void handleEeprom(uint32_t currentTimeMs);
     

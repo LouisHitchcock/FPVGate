@@ -614,7 +614,7 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
     serializeJson(config, destination);
 }
 
-void Config::toJsonString(char* buf) {
+void Config::toJsonString(AsyncResponseStream& destination) {
     JsonDocument config;
     config["freq"] = conf.frequency;
     config["minLap"] = conf.minLap;
@@ -638,7 +638,7 @@ void Config::toJsonString(char* buf) {
     config["name"] = conf.pilotName;
     config["ssid"] = conf.ssid;
     config["pwd"] = conf.password;
-    serializeJsonPretty(config, buf, 256);
+    serializeJsonPretty(config, destination);
 }
 
 void Config::fromJson(JsonObject source) {

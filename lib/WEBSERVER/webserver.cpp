@@ -1091,8 +1091,6 @@ void Webserver::startServices() {
 
     server.on("/status", [this](AsyncWebServerRequest *request) {
         char buf[1536];
-        char configBuf[256];
-        conf->toJsonString(configBuf);
         const char *format =
             "\
 Heap:\n\
@@ -1113,15 +1111,17 @@ Chip:\n\
 Network:\n\
 \tIP:\t%s\n\
 \tMAC:\t%s\n\
-EEPROM:\n\
-%s";
+EEPROM:\n";
 
         snprintf(buf, sizeof(buf), format,
                  ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getHeapSize(), ESP.getMaxAllocHeap(),
                  storage->getStorageType().c_str(), storage->getUsedBytes(), storage->getTotalBytes(), storage->getFreeBytes(),
                  ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores(), ESP.getSdkVersion(), ESP.getFlashChipSize(), ESP.getFlashChipSpeed() / 1000000, getCpuFrequencyMhz(),
-                 WiFi.localIP().toString().c_str(), WiFi.macAddress().c_str(), configBuf);
-        request->send(200, "text/plain", buf);
+                 WiFi.localIP().toString().c_str(), WiFi.macAddress().c_str());
+        AsyncResponseStream *response = request->beginResponseStream("text/plain");
+        response->print(buf);
+        conf->toJsonString(*response);
+        request->send(response);
         led->on(200);
     });
 
