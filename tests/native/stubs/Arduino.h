@@ -3,6 +3,11 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <cstdlib>
+
+inline long random(long minimum, long maximum) {
+    return maximum > minimum ? minimum + std::rand() % (maximum - minimum) : minimum;
+}
 
 extern uint64_t g_nowUs;
 inline uint32_t micros() { return (uint32_t)g_nowUs; }

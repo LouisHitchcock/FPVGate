@@ -16,6 +16,7 @@ public:
         maxLaps = laps; minLap = tenths * 100; heat = blocks; return true;
     }
     void setRaceCountdownMode(uint8_t mode) { countdown = mode; }
+    uint8_t getRaceCountdownMode() { return countdown; }
     void setC5PilotCount(uint8_t count) { pilotCount = count; }
     void setC5Profile(uint8_t slot, uint16_t freq, uint8_t, uint8_t) { frequencies[slot] = freq; }
     void setC5PilotIdentity(uint8_t slot, const char* name, const char*, uint32_t, bool races) {
