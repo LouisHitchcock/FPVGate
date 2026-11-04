@@ -97,6 +97,8 @@ public:
     // Back with the new version and hearing the S3; longer than the C5's
     // 60 s trial, so a rollback is reported as one.
     static constexpr uint32_t UPDATE_RESTART_TIMEOUT_MS = 90000;
+    // Keep observing beyond the receiver's 60-second pending-image trial.
+    static constexpr uint32_t UPDATE_TRIAL_OBSERVE_MS = 65000;
     // After u,done, a status the old image already had on the wire.
     static constexpr uint32_t UPDATE_STALE_STATUS_MS = 2000;
     // The image is in LittleFS at path. version is what the C5 should report
@@ -193,6 +195,7 @@ private:
     volatile uint32_t updateSize_ = 0;
     volatile uint32_t updateAcked_ = 0;   // bytes the C5 has written
     uint32_t updateSentMs_ = 0;           // when the last command or chunk went out
+    uint32_t updateTrialSeenMs_ = 0;      // first healthy status from the trial image
     uint8_t updateTries_ = 0;
     char updateError_[24] = {};
     File updateFile_;

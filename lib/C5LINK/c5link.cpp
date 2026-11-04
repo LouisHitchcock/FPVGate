@@ -404,6 +404,7 @@ bool C5Link::requestUpdate(const char *path, uint32_t size, const uint8_t sha256
     memcpy(updateSha_, sha256, sizeof(updateSha_));
     updateSize_ = size;
     updateAcked_ = 0;
+    updateTrialSeenMs_ = 0;
     updateError_[0] = 0;
     updateState_ = UpdateState::Idle;
     __sync_synchronize();   // the fields above before the flag the C5 task reads
@@ -511,9 +512,14 @@ void C5Link::serviceUpdate(uint32_t nowMs) {
             // is also what confirms the image on the C5.
             const bool newVersion = version_[0] && !strcmp(version_, updateVersion_);
             const bool hearsUs = enabledCount() == 0 || (scanMode_ && tuningReady_);
-            if (newVersion && hearsUs) {
-                updateState_ = UpdateState::Done;
-                DEBUG("[C5] update done: %s\n", version_);
+            if (newVersion && hearsUs && online(nowMs)) {
+                if (!updateTrialSeenMs_) updateTrialSeenMs_ = nowMs;
+                if (nowMs - updateTrialSeenMs_ >= UPDATE_TRIAL_OBSERVE_MS) {
+                    updateState_ = UpdateState::Done;
+                    DEBUG("[C5] update done: %s\n", version_);
+                } else if (nowMs - updateSentMs_ >= UPDATE_RESTART_TIMEOUT_MS) {
+                    failUpdate("trial not verified");
+                }
             } else if (version_[0] && !newVersion && nowMs - updateSentMs_ >= UPDATE_STALE_STATUS_MS) {
                 // Another version once the old image has gone: the C5 is
                 // back on its previous firmware.
