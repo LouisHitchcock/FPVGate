@@ -2254,7 +2254,13 @@ EEPROM:\n\
     });
 
     server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String json = history->toJsonString();
+        String json;
+        if (!history->tryToJsonString(json)) {
+            auto* response = request->beginResponse(503, "application/json", "{\"error\":\"Race history is busy; retry shortly\"}");
+            response->addHeader("Retry-After", "1");
+            request->send(response);
+            return;
+        }
         request->send(200, "application/json", json);
         led->on(200);
     });
@@ -2325,7 +2331,13 @@ EEPROM:\n\
         });
 
     server.on("/races/download", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String json = history->toJsonString();
+        String json;
+        if (!history->tryToJsonString(json)) {
+            auto* response = request->beginResponse(503, "application/json", "{\"error\":\"Race history is busy; retry shortly\"}");
+            response->addHeader("Retry-After", "1");
+            request->send(response);
+            return;
+        }
         AsyncWebServerResponse *response = request->beginResponse(200, "application/octet-stream", json);
         response->addHeader("Content-Disposition", "attachment; filename=\"races.json\"");
         response->addHeader("Content-Type", "application/json");

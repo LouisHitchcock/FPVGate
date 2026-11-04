@@ -475,6 +475,9 @@ bool Storage::readFile(const String& path, String& data) {
             return false;
         }
         DEBUG("[SPI] readFile: Reading data...\n");
+        // Files are synchronous: EOF cannot become more data after a timeout.
+        // Stream::readString otherwise spins for one second per loaded file.
+        file.setTimeout(0);
         data = file.readString();
         file.close();
         DEBUG("[SPI] readFile: Done (%d bytes), releasing mutex\n", data.length());
@@ -492,6 +495,7 @@ bool Storage::readFile(const String& path, String& data) {
         DEBUG("Failed to open file on LittleFS: %s\n", path.c_str());
         return false;
     }
+    file.setTimeout(0);
     data = file.readString();
     file.close();
     return true;

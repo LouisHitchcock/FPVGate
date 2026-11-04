@@ -9,8 +9,10 @@ SemaphoreHandle_t historyMutex = nullptr;
 // HTTP reads on core 0 while loop() saves on core 1. Never hold a spinlock
 // across filesystem operations or JSON allocation.
 struct HistoryLock {
-    HistoryLock() { if (historyMutex) xSemaphoreTakeRecursive(historyMutex, portMAX_DELAY); }
-    ~HistoryLock() { if (historyMutex) xSemaphoreGiveRecursive(historyMutex); }
+    bool acquired;
+    explicit HistoryLock(uint32_t wait = portMAX_DELAY)
+        : acquired(!historyMutex || xSemaphoreTakeRecursive(historyMutex, wait) == pdTRUE) {}
+    ~HistoryLock() { if (historyMutex && acquired) xSemaphoreGiveRecursive(historyMutex); }
 };
 }
 
@@ -502,6 +504,16 @@ bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const
 
 String RaceHistory::toJsonString() {
     HistoryLock lock;
+    String output;
+    tryToJsonString(output);
+    return output;
+}
+
+bool RaceHistory::tryToJsonString(String& output) {
+    // AsyncTCP's task watchdog cannot tolerate waiting for a slow SD reload.
+    // A busy response lets the caller retry without exposing partial history.
+    HistoryLock lock(0);
+    if (!lock.acquired) return false;
     JsonDocument doc;
     JsonArray racesArray = doc["races"].to<JsonArray>();
 
@@ -511,9 +523,9 @@ String RaceHistory::toJsonString() {
         writeRaceObject(raceObj, races[i]);
     }
 
-    String output;
+    output = "";
     serializeJson(doc, output);
-    return output;
+    return true;
 }
 
 bool RaceHistory::fromJsonString(const String& json) {

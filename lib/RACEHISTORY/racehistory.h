@@ -65,6 +65,7 @@ class RaceHistory {
     bool updatePilotLaps(uint32_t timestamp, const std::vector<std::vector<uint32_t>>& laps);
     bool clearAll();
     String toJsonString();
+    bool tryToJsonString(String& output);
     bool fromJsonString(const String& json);
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
