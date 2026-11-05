@@ -13,6 +13,7 @@
 #include "c5multipilot.h"
 #include "c5racecontrol.h"
 #include "eventdirector.h"
+#include "rhlink.h"
 
 #define WIFI_CONNECTION_TIMEOUT_MS 30000
 #define WIFI_RECONNECT_TIMEOUT_MS 500
@@ -78,7 +79,7 @@ class Webserver : public TransportInterface {
     // RotorHazard plugin 2: the plugin polls /api/rh/clock. While it has done
     // so recently it owns lap timing, and every pass streams to it as an
     // "rhPass" event (time in esp_timer microseconds).
-    bool rhLinked(uint32_t nowMs) const { return rhLinkMs_ && (nowMs - rhLinkMs_) < RH_LINK_TIMEOUT_MS; }
+    bool rhLinked(uint32_t nowMs) const { return rhLinkCurrent(nowMs, rhLinkMs_, RH_LINK_TIMEOUT_MS); }
     // RX5808 passes from LapTimer (millis()); C5 passes come from C5MultiPilot.
     void queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak);
 
