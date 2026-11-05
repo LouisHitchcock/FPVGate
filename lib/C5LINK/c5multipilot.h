@@ -72,6 +72,8 @@ public:
     // every pass), and queue each one for takePass().
     void setPassStream(bool on) { passStream_ = on; }
     bool takePass(C5Pass &pass);
+    // Passes lost since boot because the queue for takePass() was full.
+    uint32_t passQueueFull() const { return passQueueFull_; }
     // Highest filtered value since the last call (0..1023), for the RSSI
     // debug popout: at 25 frames a second a pass's peak would otherwise fall
     // between frames.
@@ -150,6 +152,7 @@ private:
     static constexpr uint8_t PASS_QUEUE = 16;
     C5Pass passes_[PASS_QUEUE] = {};
     uint8_t passCount_ = 0;
+    volatile uint32_t passQueueFull_ = 0;
     uint8_t manualMask_ = 0;   // bit i: a manual lap waits for slot i (under lapMux_)
 
 #ifdef C5_TIMING_TRACE

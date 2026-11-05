@@ -435,6 +435,7 @@ void Webserver::queueRhPass(uint8_t slot, uint32_t crossingMs, uint8_t peak) {
     const int64_t us = now - (int64_t)(uint32_t)((uint32_t)(now / 1000) - crossingMs) * 1000;
     portENTER_CRITICAL(&rhPassMux_);
     if (rhPassCount_ < RH_PASS_QUEUE) rhPasses_[rhPassCount_++] = {slot, us, peak};
+    else rhPassCounts_.queueFull = rhPassCounts_.queueFull + 1;
     portEXIT_CRITICAL(&rhPassMux_);
 }
 
@@ -444,7 +445,10 @@ void Webserver::sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak, 
     if (rawPeak >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"rawPeak\":%d", rawPeak);
     if (levelUs >= 0) n += snprintf(body + n, sizeof(body) - n, ",\"levelUs\":%lld", (long long)levelUs);
     snprintf(body + n, sizeof(body) - n, "}");
-    rhEvents.send(body, "rhPass");
+    const AsyncEventSource::SendStatus status = rhEvents.send(body, "rhPass");
+    if (status == AsyncEventSource::ENQUEUED) rhPassCounts_.sent = rhPassCounts_.sent + 1;
+    else if (rhEvents.count() == 0) rhPassCounts_.noClient = rhPassCounts_.noClient + 1;
+    else rhPassCounts_.discarded = rhPassCounts_.discarded + 1;
 }
 
 // Passes as they happen and every node's RSSI 20 times a second, while the
@@ -461,11 +465,15 @@ void Webserver::sendRhUpdates(uint32_t currentTimeMs) {
     const bool c5 = c5MultiPilot && conf->getReceiverRadio() == 2;
     if (c5MultiPilot) c5MultiPilot->setPassStream(linked && c5);
     if (!linked) {
+        if (rhWasLinked_) rhPassCounts_.linkLost = rhPassCounts_.linkLost + 1;
+        rhWasLinked_ = false;
         portENTER_CRITICAL(&rhPassMux_);
+        rhPassCounts_.unlinkedCleared = rhPassCounts_.unlinkedCleared + rhPassCount_;
         rhPassCount_ = 0;
         portEXIT_CRITICAL(&rhPassMux_);
         return;
     }
+    rhWasLinked_ = true;
     if (c5) {
         C5Pass pass;
         while (c5MultiPilot->takePass(pass)) {
@@ -1638,6 +1646,14 @@ EEPROM:\n";
         doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         doc["busyRefusals"] = busyRefusals;
         doc["requestsNow"] = activeRequests;
+        JsonObject rhPasses = doc["rhPasses"].to<JsonObject>();
+        rhPasses["sent"] = rhPassCounts_.sent;
+        rhPasses["discarded"] = rhPassCounts_.discarded;
+        rhPasses["noClient"] = rhPassCounts_.noClient;
+        rhPasses["queueFull"] = rhPassCounts_.queueFull;
+        rhPasses["unlinkedCleared"] = rhPassCounts_.unlinkedCleared;
+        rhPasses["linkLost"] = rhPassCounts_.linkLost;
+        rhPasses["c5QueueFull"] = c5MultiPilot ? c5MultiPilot->passQueueFull() : 0;
         if (lowHeap.free != UINT32_MAX) {
             JsonObject low = doc["lowHeap"].to<JsonObject>();
             low["free"] = lowHeap.free;
@@ -2071,6 +2087,7 @@ EEPROM:\n";
         portENTER_CRITICAL(&rhPassMux_);
         const bool queued = rhPassCount_ < RH_PASS_QUEUE;
         if (queued) rhPasses_[rhPassCount_++] = {(uint8_t)node, esp_timer_get_time(), peak};
+        else rhPassCounts_.queueFull = rhPassCounts_.queueFull + 1;
         portEXIT_CRITICAL(&rhPassMux_);
         request->send(queued ? 200 : 503, "application/json", queued ? "{\"status\":\"OK\"}" : "{\"error\":\"busy\"}");
     });

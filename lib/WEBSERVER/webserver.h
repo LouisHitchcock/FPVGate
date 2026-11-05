@@ -152,6 +152,20 @@ class Webserver : public TransportInterface {
     RhPass rhPasses_[RH_PASS_QUEUE] = {};
     uint8_t rhPassCount_ = 0;
     portMUX_TYPE rhPassMux_ = portMUX_INITIALIZER_UNLOCKED;
+    // Since boot, for /api/system/info, so a pass missing from RotorHazard can
+    // be placed on or beyond the gate. "sent" means queued for the stream.
+    // queueFull and unlinkedCleared are under rhPassMux_; the rest have one
+    // writer, parallelTask.
+    struct RhPassCounts {
+        volatile uint32_t sent = 0;
+        volatile uint32_t discarded = 0;        // a connected client's queue refused it
+        volatile uint32_t noClient = 0;         // linked, but no stream client connected
+        volatile uint32_t queueFull = 0;        // rhPasses_ had no room
+        volatile uint32_t unlinkedCleared = 0;  // queued, then cleared as the link was lost
+        volatile uint32_t linkLost = 0;         // linked to unlinked transitions
+    };
+    RhPassCounts rhPassCounts_;
+    bool rhWasLinked_ = false;
     // rawPeak: the C5's 0..1023 peak, or -1 for RX5808 passes (no raw scale).
     void sendRhPass(uint8_t slot, int64_t us, uint8_t peak, int rawPeak = -1, int64_t levelUs = -1);
     void sendRhUpdates(uint32_t currentTimeMs);

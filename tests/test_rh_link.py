@@ -54,6 +54,17 @@ class RhLinkTests(unittest.TestCase):
         header = (ROOT / 'lib/WEBSERVER/webserver.h').read_text(encoding='utf-8')
         self.assertIn('rhLinkCurrent(nowMs, rhLinkMs_, RH_LINK_TIMEOUT_MS)', header)
 
+    def test_every_way_a_gate_can_lose_a_pass_is_reported(self):
+        source = (ROOT / 'lib/WEBSERVER/webserver.cpp').read_text(encoding='utf-8')
+        for name in ('sent', 'discarded', 'noClient', 'queueFull', 'unlinkedCleared', 'linkLost'):
+            self.assertIn(f'rhPasses["{name}"] = rhPassCounts_.{name};', source)
+        self.assertIn('rhPasses["c5QueueFull"]', source)
+        self.assertIn('rhPassCounts_.queueFull + 1', source)
+        self.assertIn('rhPassCounts_.unlinkedCleared + rhPassCount_', source)
+        self.assertNotIn('\n    rhEvents.send(body, "rhPass");', source.replace('\r\n', '\n'))
+        c5 = (ROOT / 'lib/C5LINK/c5multipilot.cpp').read_text(encoding='utf-8')
+        self.assertIn('passQueueFull_ + 1', c5)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -154,6 +154,8 @@ void C5MultiPilot::endPass(uint8_t pilot) {
         portENTER_CRITICAL(&lapMux_);
         if (passCount_ < PASS_QUEUE)
             passes_[passCount_++] = {pilot, peak_[pilot].middleUs(), peak_[pilot].levelMiddleUs(), peak_[pilot].value};
+        else
+            passQueueFull_ = passQueueFull_ + 1;
         portEXIT_CRITICAL(&lapMux_);
     }
     if (running_) crossing(pilot, peak_[pilot].middleUs());

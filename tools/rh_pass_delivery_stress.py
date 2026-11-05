@@ -159,6 +159,8 @@ def main():
     assert request(conn, 'GET', '/api/rh/clock') == 200
     conn.request('GET', '/api/rh/info')
     info = json.loads(conn.getresponse().read())
+    conn.request('GET', '/api/system/info')
+    counts_before = json.loads(conn.getresponse().read()).get('rhPasses')
     stream = Stream(args.host)
     stream.start()
     time.sleep(1.0)
@@ -176,6 +178,9 @@ def main():
                 break
         if stream.dropped:
             break
+    conn = http.client.HTTPConnection(args.host, timeout=5)
+    conn.request('GET', '/api/system/info')
+    counts_after = json.loads(conn.getresponse().read()).get('rhPasses')
     stop_poll.set()
     stream.stopping = True
 
@@ -183,7 +188,8 @@ def main():
               for arm in ('clock', 'info')}
     report = {'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'host': args.host,
               'version': info.get('version'), 'board': info.get('board'),
-              'valid': not stream.dropped, 'totals': totals, 'arms': arms}
+              'valid': not stream.dropped, 'totals': totals, 'gateCountsBefore': counts_before,
+              'gateCountsAfter': counts_after, 'arms': arms}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2))
     print(json.dumps(totals))

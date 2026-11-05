@@ -217,7 +217,7 @@ class RH:
    slots=g.call('/config')['c5Pilots']
    return all(p['frequency']==(FREQ[i] if i<n else 0) and p['enterRssi']==250 and p['exitRssi']==240 for i,p in enumerate(slots))
   wait(invariant,20)
-  before=self.read('select coalesce(max(id),0) as id from saved_race_meta')[0]['id'];self.emit('stage_race');wait(lambda:self.status.get('race_status')==1,20);wait(lambda:g.state()['running'],20);g.claim_current();g.phase='rh-race';sent=[]
+  before=self.read('select coalesce(max(id),0) as id from saved_race_meta')[0]['id'];self.emit('stage_race');wait(lambda:self.status.get('race_status')==1,20);wait(lambda:g.state()['running'],20);g.claim_current();g.phase='rh-race';sent=[];passes_before=g.call('/api/system/info').get('rhPasses')
   for crossing in range(4):
    if crossing:time.sleep(max(1.2,interval))
    for slot in range(n):
@@ -229,7 +229,7 @@ class RH:
    if counts is not None and any(v>4 for v in counts[:n]):raise AssertionError(('duplicate live passes',counts))
    return counts is not None and counts[:n]==[4]*n and not any(counts[n:])
   try:wait(delivered,20)
-  finally:atomic(g.out/f'rh-{index:04d}-live.json',{'current':self.live,'gate':g.state(),'fixedProfile':g.call('/config')['c5Pilots']})
+  finally:atomic(g.out/f'rh-{index:04d}-live.json',{'current':self.live,'gate':g.state(),'fixedProfile':g.call('/config')['c5Pilots'],'rhPassesBefore':passes_before,'rhPassesAfter':g.call('/api/system/info').get('rhPasses')})
   assert invariant(),'Threshold/frequency changed during deterministic race'
   self.emit('stop_race');wait(lambda:self.status.get('race_status')==2,20);state=g.stopped();stamp,race=g.save_owned(state,n,4,g.out/f'rh-gate-{index:04d}.json')
   self.saving=True;self.emit('save_laps');wait(lambda:self.read('select coalesce(max(id),0) as id from saved_race_meta')[0]['id']>before,30);rid=self.read('select max(id) as id from saved_race_meta')[0]['id']
@@ -256,7 +256,7 @@ def stress(g):
 def lane(g,args):
  rh=RH(g);g.rh=rh;index=0;started=time.monotonic();deadline=None
  try:
-  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');assert info['version']=='1.9.0-rc.3' and receiver['c5']['version']=='1.2.5',(info,receiver)
+  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');assert info['version']=='1.9.0-rc.4' and receiver['c5']['version']=='1.2.5',(info,receiver)
   atomic(g.out/'source-identity.json',{'gate':info,'receiver':receiver});rh.start();threading.Thread(target=stress,args=(g,),daemon=True).start();end=time.monotonic()+args.seconds;deadline=end
   while time.monotonic()<end and not STOP.is_set():
    index+=1;n=[1,2,4,8][(index-1)%4];reason=['maxLaps','manual','heatTime'][(index-1)%3]
