@@ -2263,6 +2263,10 @@ EEPROM:\n";
         }
         request->send(200, "application/json", json);
         led->on(200);
+    }).setFilter([](AsyncWebServerRequest *request) {
+        // The pinned server also matches child paths. Do not intercept
+        // /races/download or /races/downloadOne before their own handlers.
+        return request->url() == "/races";
     });
 
     // Editor uploads and gate-owned result/progression commits share a lease.
