@@ -16,7 +16,15 @@ RESULTS=[]
 PHASE={}
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def atomic(path,data):
- temp=path.with_suffix(path.suffix+'.tmp');temp.write_text(json.dumps(data,indent=2,default=str),encoding='utf-8');os.replace(temp,path)
+ temp=path.with_suffix(path.suffix+'.tmp');temp.write_text(json.dumps(data,indent=2,default=str),encoding='utf-8');replace_evidence(temp,path)
+def replace_evidence(temp,path,attempts=50,delay=.1):
+ # Windows refuses the rename while a scanner or indexer briefly holds the target.
+ # This retries a local evidence write only; a crossing is never sent again.
+ for attempt in range(attempts):
+  try:os.replace(temp,path);return
+  except PermissionError:
+   if attempt==attempts-1:raise
+   time.sleep(delay)
 def record(board,case,status,**detail):
  row={'utc':now(),'board':board,'case':case,'status':status,'stimulus':'HTTP injected crossings unless explicitly stated',**detail}
  with LOCK:

@@ -14,6 +14,33 @@ acceptance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(acceptance)
 
 
+class EvidenceWriteTests(unittest.TestCase):
+    def test_transient_rename_refusal_is_retried_without_losing_the_write(self):
+        real = acceptance.os.replace
+        refusals = [PermissionError(13, 'Access is denied'), PermissionError(13, 'Access is denied')]
+
+        def flaky(source, target):
+            if refusals:
+                raise refusals.pop()
+            real(source, target)
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'journal.json'
+            with patch.object(acceptance.os, 'replace', flaky), patch.object(acceptance.time, 'sleep'):
+                acceptance.atomic(target, {'value': 1})
+            self.assertEqual(json.loads(target.read_text(encoding='utf-8')), {'value': 1})
+            self.assertEqual(refusals, [])
+
+    def test_lasting_rename_refusal_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'journal.json'
+            refused = Mock(side_effect=PermissionError(13, 'Access is denied'))
+            with patch.object(acceptance.os, 'replace', refused), patch.object(acceptance.time, 'sleep'):
+                with self.assertRaises(PermissionError):
+                    acceptance.atomic(target, {'value': 1})
+            self.assertEqual(refused.call_count, 50)
+
+
 class RestorationTests(unittest.TestCase):
     def test_unknown_result_is_not_deleted_and_configuration_is_still_restored(self):
         with tempfile.TemporaryDirectory() as directory:
