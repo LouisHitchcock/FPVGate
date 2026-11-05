@@ -182,10 +182,9 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
                       (unsigned)race.lapTimes.size(),
                       (unsigned)race.rssiMeta.sampleCount);
         races.insert(races.begin(), race);
-        if (races.size() > MAX_RACES) {
-            // Delete sidecar for dropped race if we ever prune files later; for now only memory list
-            races.resize(MAX_RACES);
-        }
+        // Match loadRaces(): retain the full in-memory index, and cap only the
+        // list emitted by tryToJsonString(). Deleting a newer race must expose
+        // older records again without a reboot or a metadata reimport.
     } else {
         DEBUG("Failed to save race\n");
         Serial.printf("[Race] Failed to save race %u\n", race.timestamp);

@@ -1,4 +1,4 @@
-"""Retain cross-task SSE disconnect serialization with ESPAsyncWebServer 3.12.1."""
+"""Network fixes for the pinned AsyncTCP 3.5.0 / web server 3.12.1 pair."""
 import glob
 import os
 
@@ -34,6 +34,29 @@ NEW_DESTRUCTOR = '''AsyncEventSourceClient::~AsyncEventSourceClient() {
   close();
 }'''
 
+OLD_WRITE = '''size_t AsyncClient::write(const char *data, size_t size, uint8_t apiflags) {
+  size_t will_send = add(data, size, apiflags);
+  if (!will_send || !send()) {
+    return 0;
+  }
+  return will_send;
+}'''
+NEW_WRITE = '''size_t AsyncClient::write(const char *data, size_t size, uint8_t apiflags) {
+  size_t will_send = add(data, size, apiflags);
+  // FPVGate accepted bytes: add() already queued these bytes in lwIP.
+  // A transient output failure must not make the response enqueue them twice.
+  if (will_send) send();
+  return will_send;
+}'''
+
+
+def patch_write(source):
+    if source.count(NEW_WRITE) == 1:
+        return source
+    if source.count(OLD_WRITE) != 1:
+        raise ValueError('AsyncTCP 3.5.0 write source changed; review accepted-byte accounting')
+    return source.replace(OLD_WRITE, NEW_WRITE, 1)
+
 
 def patch_text(source):
     for old, new in [(OLD_DISCONNECT, NEW_DISCONNECT), (OLD_DESTRUCTOR, NEW_DESTRUCTOR)]:
@@ -61,6 +84,14 @@ def patch_dependency(build_env):
         print('patch_async_sse_modern: verified ' + os.path.relpath(path, directory))
     if not matched:
         raise RuntimeError('No matching modern SSE dependency; refusing an unpatched build')
+    path = os.path.join(directory, 'AsyncTCP', 'src', 'AsyncTCP.cpp')
+    with open(path, encoding='utf-8') as stream:
+        source = stream.read()
+    updated = patch_write(source)
+    if updated != source:
+        with open(path, 'w', encoding='utf-8', newline='\n') as stream:
+            stream.write(updated)
+    print('patch_async_sse_modern: verified AsyncTCP accepted-byte accounting')
 
 
 try:
