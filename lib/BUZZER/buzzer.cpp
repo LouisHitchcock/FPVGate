@@ -99,6 +99,7 @@ void Buzzer::init(uint8_t pin, bool inverted) {
 }
 
 void Buzzer::setVolume(uint8_t vol) {
+    std::lock_guard<std::mutex> lock(playbackMutex);
     if (vol > 100) vol = 100;
     volume = vol;
 }
@@ -137,6 +138,7 @@ void Buzzer::applyPwmFrequency(uint32_t hz) {
 }
 
 void Buzzer::startPlaying(const ToneSeg* segments, uint8_t count) {
+    std::lock_guard<std::mutex> lock(playbackMutex);
     if (volume == 0 || segments == nullptr || count == 0 || count > kMaxSegments) return;
 
     for (uint8_t i = 0; i < count; i++) {
@@ -169,7 +171,7 @@ void Buzzer::beep(uint32_t timeMs) {
 }
 
 void Buzzer::playCue(BuzzerCue cue) {
-    if (cue == BUZZER_CUE_NONE || volume == 0) return;
+    if (cue == BUZZER_CUE_NONE) return;
 
     const Buzzer::ToneSeg* p = nullptr;
     uint8_t n = 0;
@@ -191,6 +193,7 @@ void Buzzer::playCue(BuzzerCue cue) {
 }
 
 void Buzzer::handleBuzzer(uint32_t currentTimeMs) {
+    std::lock_guard<std::mutex> lock(playbackMutex);
     if (buzzerState != BUZZER_PLAYING || segmentPtr == nullptr) return;
 
     if (currentTimeMs < segmentStartMs) return;

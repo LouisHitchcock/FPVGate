@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <mutex>
 
 #pragma once
 
@@ -42,6 +43,8 @@ class Buzzer {
     void startPlaying(const ToneSeg* segments, uint8_t count);
     void startSegmentAt(uint32_t nowMs);
 
+    // Playback and LEDC updates are shared by loop, web and parallel tasks.
+    std::mutex playbackMutex;
     buzzer_state_e buzzerState = BUZZER_IDLE;
     uint8_t buzzerPin = 0;
     uint8_t initialState = LOW;
