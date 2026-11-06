@@ -1,43 +1,43 @@
 # DEBUG library
 
-The current public macro is `DEBUG(format, ...)`, defined in `debug.h` through
-`debuglogger.h`. It uses printf-style arguments and writes the same formatted
-message to CDC/serial and a 100-entry in-memory ring buffer.
+`DEBUG(format, ...)` (from `debug.h`) takes printf-style arguments. Each call
+writes `[millis] message` to serial and to a log ring. Include a newline when
+you want one; a line is cut at 255 bytes.
 
 ```cpp
 #include "debug.h"
 DEBUG("Receiver state=%s, samples=%lu\n", state, sampleCount);
 ```
 
-Each entry contains a millisecond timestamp and `char message[256]`, so at
-most 255 message bytes plus terminator are retained. Serial output is
-`[timestamp] message`. Include a newline when you want one.
+## The log ring
 
-## API
+`logring.h` holds the ring: 8 KB of the newest log text, kept in RAM that the
+ESP32 does not clear on a crash, watchdog or software reset. A checksum tells a
+ring left by the previous boot from power-on contents, so after a crash the
+lines that led up to it are still there. A power loss clears it. Each boot
+starts with a line giving the boot number and reset reason.
 
-```cpp
-DebugLogger& logger = DebugLogger::getInstance();
-const std::vector<DebugLogger::LogEntry>& entries = logger.getBuffer();
-logger.clear();
-```
+`DebugLogger` copies into and out of the ring under a short critical section,
+so any task can log. It never holds the lock around I/O.
 
-`log(const char*, ...)` is the class logging method. There is no
-`logWithLevel` or implemented `LOG_ERROR/LOG_WARN/LOG_INFO/LOG_SUCCESS/LOG_DEBUG`
-macro set. The previous color-level examples were not supported by this header.
-Prefixes are not ANSI color sequences.
+## Saving to the SD card
 
-## Configuration and limits
+Off by default. When `/logs/enabled` exists on the SD card, a priority-1 task
+on core 0 appends the ring to `/logs/log.txt` every 5 seconds, in chunks of up
+to 2 KB, through `Storage` and its SPI lock. At 256 KB the file becomes
+`/logs/log.1.txt` (replacing the older one). The first write after a crash
+saves what the crash left unsaved. Nothing is written without a card, so the
+log never wears the board's flash. Messages logged by the writer task itself
+(storage diagnostics) go to serial only.
 
-`DEBUG_BUFFER_SIZE` is 100; `SERIAL_BAUD` in `debug.h` is 460800.
-The LCD target's monitor setting is 921600. USB CDC line coding is not a
-physical UART bit rate; match UART monitor settings to the actual build.
-Startup also has an early serial initialization before DEBUG initialization.
+## Endpoints
 
-The buffer is volatile, not persisted across reboot, and the header does not
-provide a synchronization primitive for concurrent writers/readers.
-Avoid logging from interrupts or high-rate sample loops. Check lifetime and
-thread safety before retaining a reference while another task logs/clears.
+- `GET /api/debuglog`: recent lines as `{logs: [{seq, timestamp, message}]}`.
+  `seq` orders lines across boots, where timestamps restart from zero.
+- `GET /api/log/status`: whether saving is on, bytes saved, unsaved, lost and
+  failed writes, and file sizes.
+- `POST /api/log/sd?enabled=1|0`: turn saving on or off (needs a card).
+- `GET /api/log/file?part=0|1`: download `log.txt` or `log.1.txt`.
 
-`GET /api/debuglog` exposes the retained log to the diagnostics page.
-Capture useful output with firmware stage, board, receiver and reproduction
-details. Avoid logging keys or passwords.
+The Diagnostics screen's **Download log.txt** combines these with system, C5
+and crash information into one file for bug reports.

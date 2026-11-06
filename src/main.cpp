@@ -300,6 +300,8 @@ void setup() {
     
     // Initialize storage first (LittleFS only at boot)
     storage.init();
+    // Saves the log to the SD card when that is turned on (off by default).
+    DebugLogger::getInstance().startWriter(&storage);
 #ifdef FPVGATE_USB_NET
     usbnet_boot_mark(USBNET_BOOT_STORAGE_READY);
 #endif

@@ -2727,22 +2727,107 @@ EEPROM:\n";
     // dispatches to the first matching handler and it was masking the
     // newer PASS/FAIL/SKIP implementation.)
     
-    // Debug log endpoint for serial monitor
+    // Recent log lines for the System Monitor, newest last. They come from the
+    // ring that survives a crash, so lines from before a reset can appear first;
+    // "seq" orders lines across boots, where timestamps restart from zero.
     server.on("/api/debuglog", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        const auto& buffer = DebugLogger::getInstance().getBuffer();
+        std::unique_ptr<char[]> text(new (std::nothrow) char[DebugLogger::RECENT_BYTES + 1]);
+        if (!text) {
+            request->send(503, "application/json", "{\"error\":\"busy\"}");
+            return;
+        }
+        const uint32_t seq = DebugLogger::getInstance().copyRecent(text.get(), DebugLogger::RECENT_BYTES + 1);
         JsonDocument doc;
         JsonArray logs = doc["logs"].to<JsonArray>();
-        
-        for (const auto& entry : buffer) {
-            JsonObject log = logs.add<JsonObject>();
-            log["timestamp"] = entry.timestamp;
-            log["message"] = entry.message;
+        char *line = text.get();
+        while (*line) {
+            char *end = strchr(line, '\n');
+            const uint32_t lineSeq = seq + (uint32_t)(line - text.get());
+            if (end) *end = '\0';
+            unsigned long timestamp = 0;
+            const char *message = line;
+            if (line[0] == '[') {
+                char *close = strchr(line, ']');
+                if (close) {
+                    timestamp = strtoul(line + 1, nullptr, 10);
+                    message = close[1] == ' ' ? close + 2 : close + 1;
+                }
+            }
+            if (*message) {
+                JsonObject entry = logs.add<JsonObject>();
+                entry["seq"] = lineSeq;
+                entry["timestamp"] = timestamp;
+                entry["message"] = message;
+            }
+            if (!end) break;
+            line = end + 1;
         }
-        
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
         led->on(200);
+    });
+
+    // The log on the SD card (off by default): state, switch and download.
+    server.on("/api/log/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        const DebugLogger::Status s = DebugLogger::getInstance().status();
+        JsonDocument doc;
+        const bool sd = storage && storage->isSDAvailable();
+        doc["sdAvailable"] = sd;
+        doc["sdEnabled"] = s.sdEnabled;
+        doc["boot"] = s.boots;
+        doc["recoveredPrevious"] = s.recoveredPrevious;
+        doc["unsaved"] = s.unsaved;
+        doc["lost"] = s.lost;
+        doc["savedBytes"] = s.savedBytes;
+        doc["writeFailures"] = s.writeFailures;
+        doc["lastWriteAgoMs"] = s.lastWriteMs ? (long)(millis() - s.lastWriteMs) : -1L;
+        size_t bytes = 0;
+        doc["fileBytes"] = sd && storage->fileSize(DebugLogger::LOG_PATH, bytes) ? bytes : 0;
+        bytes = 0;
+        doc["oldFileBytes"] = sd && storage->fileSize(DebugLogger::OLD_LOG_PATH, bytes) ? bytes : 0;
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+    });
+
+    server.on("/api/log/sd", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (!request->hasParam("enabled")) {
+            request->send(400, "application/json", "{\"error\":\"enabled=0 or 1 required\"}");
+            return;
+        }
+        if (!storage || !storage->isSDAvailable()) {
+            request->send(409, "application/json", "{\"error\":\"no SD card\"}");
+            return;
+        }
+        const bool on = request->getParam("enabled")->value() == "1";
+        if (!DebugLogger::getInstance().setSdEnabled(on)) {
+            request->send(500, "application/json", "{\"error\":\"could not write to the SD card\"}");
+            return;
+        }
+        request->send(200, "application/json", on ? "{\"sdEnabled\":true}" : "{\"sdEnabled\":false}");
+    });
+
+    // part=0: the current file, part=1: the previous one after rotation.
+    server.on("/api/log/file", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        const bool old = request->hasParam("part") && request->getParam("part")->value() == "1";
+        const String path = old ? DebugLogger::OLD_LOG_PATH : DebugLogger::LOG_PATH;
+        size_t size = 0;
+        if (!storage || !storage->isSDAvailable() || !storage->fileSize(path, size) || size == 0) {
+            request->send(404, "application/json", "{\"error\":\"no log file\"}");
+            return;
+        }
+        Storage *store = storage;
+        AsyncWebServerResponse *response = request->beginChunkedResponse(
+            "text/plain", [store, path, size](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                if (index >= size) return 0;
+                size_t n = size - index;
+                if (n > maxLen) n = maxLen;
+                if (n > 1024) n = 1024;
+                return store->readBinaryRange(path, index, buffer, n);
+            });
+        response->addHeader("Content-Disposition", old ? "attachment; filename=log.1.txt" : "attachment; filename=log.txt");
+        request->send(response);
     });
     
     // Reboot endpoint
