@@ -261,6 +261,18 @@ def stress(g):
    except Exception as e:return (path,repr(e))
   with concurrent.futures.ThreadPoolExecutor(4) as pool:failures=[x for x in pool.map(load,paths*2) if x]
   record(g.label,'concurrent-startup-assets-during-race','FAIL' if failures else 'PASS',phase=phase,requests=12,failures=failures)
+def wait_for_lanes(threads,limit=900):
+ # A lane restores its gate in its own finally, so the process must not end before it does.
+ # Poll liveness against a monotonic deadline: after Ctrl-C on Windows a timed join can
+ # return early, which let the process exit mid-heat without restoring the AIO.
+ end=time.monotonic()+limit
+ while time.monotonic()<end and any(t.is_alive() for t in threads):
+  try:
+   for t in threads:
+    if t.is_alive():t.join(.5)
+   time.sleep(.05)
+  except KeyboardInterrupt:STOP.set()
+ return [t.name for t in threads if t.is_alive()]
 def lane(g,args):
  rh=RH(g);g.rh=rh;index=0;started=time.monotonic();deadline=None
  try:
@@ -320,15 +332,21 @@ def main():
  gates={n:Gate(n,b) for n,b in [('aio','http://192.168.7.1'),('eth','http://192.168.0.65')] if n in a.boards}
  for feature in ['RF crossing timing accuracy/independent transmitters','native C5 USB/RH full saved-race timing accuracy','ELRS physical switch/loss/binding','physical power-cut/full-media failures','LED/buzzer/speech physical observation','physical USB browser flash']:
   record('coverage',feature,'BLOCKED',reason='Focused injected acceptance; this run does not exercise the listed hardware feature')
- threads=[threading.Thread(target=lane,args=(gates[n],a)) for n in a.boards]
+ threads=[threading.Thread(target=lane,args=(gates[n],a),name=n) for n in a.boards]
  for t in threads:t.start()
  try:
   for t in threads:
    while t.is_alive():t.join(1)
  except KeyboardInterrupt:STOP.set();record('run','interrupted','ERROR')
  finally:
-  for t in threads:t.join(90)
-  STOP.set();record('run','terminal','FAIL' if any(r['status'] in ['FAIL','ERROR'] for r in RESULTS) else 'PASS',note='Automated lane result only; blocked features remain unqualified')
+  STOP.set()
+  for name in wait_for_lanes(threads):
+   # Still busy after the limit: say so, and do not leave its RH server running.
+   record(name,'lane-not-terminated','ERROR',note='lane did not finish; gate restoration did not run')
+   try:
+    if gates[name].rh:gates[name].rh.stop()
+   except Exception as e:record(name,'rh-stop-after-stuck-lane','ERROR',error=repr(e))
+  record('run','terminal','FAIL' if any(r['status'] in ['FAIL','ERROR'] for r in RESULTS) else 'PASS',note='Automated lane result only; blocked features remain unqualified')
   if os.name=='nt':ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
  return 1 if any(r['status'] in ['FAIL','ERROR'] for r in RESULTS) else 0
 if __name__=='__main__':sys.exit(main())

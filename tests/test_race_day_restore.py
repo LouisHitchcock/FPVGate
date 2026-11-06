@@ -41,6 +41,39 @@ class EvidenceWriteTests(unittest.TestCase):
             self.assertEqual(refused.call_count, 50)
 
 
+class LaneShutdownTests(unittest.TestCase):
+    def test_waits_for_a_busy_lane_even_when_joins_return_early_or_are_interrupted(self):
+        import threading
+        import time as clock
+        lane = threading.Thread(target=clock.sleep, args=(1.0,), name='aio')
+        lane.start()
+        real_join = lane.join
+        calls = []
+
+        def cut_short(timeout=None):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise KeyboardInterrupt
+            return None  # returns immediately, as an interrupted wait can
+
+        lane.join = cut_short
+        started = clock.monotonic()
+        stuck = acceptance.wait_for_lanes([lane], limit=10)
+        self.assertEqual(stuck, [])
+        self.assertGreaterEqual(clock.monotonic() - started, 0.9)
+        self.assertTrue(acceptance.STOP.is_set())
+        acceptance.STOP.clear()
+        real_join()
+
+    def test_reports_a_lane_still_running_at_the_limit(self):
+        import threading
+        import time as clock
+        lane = threading.Thread(target=clock.sleep, args=(2.0,), name='eth')
+        lane.start()
+        self.assertEqual(acceptance.wait_for_lanes([lane], limit=0.3), ['eth'])
+        lane.join()
+
+
 class RestorationTests(unittest.TestCase):
     def test_unknown_result_is_not_deleted_and_configuration_is_still_restored(self):
         with tempfile.TemporaryDirectory() as directory:
