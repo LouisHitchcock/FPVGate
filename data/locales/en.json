@@ -122,7 +122,11 @@
         "delete": "Delete",
         "remove": "Remove",
         "delete_confirm": "Delete this race?",
-        "edit_lap_delete_confirm": "Delete this lap?",
+        "edit_lap_delete_confirm": "Delete this lap? Its time is removed, so the race gets shorter. For a false or double pass, use Merge instead.",
+        "edit_lap_merge": "Merge",
+        "edit_lap_merge_next": "Merge into the next lap",
+        "edit_lap_merge_previous": "Merge into the previous lap",
+        "edit_lap_merge_confirm": "Merge this lap into its neighbour? Its time is added to the next lap (or the previous one, for the last lap), so the race's total time stays the same.",
         "edit_lap_last_error": "Cannot delete the last lap. Delete the entire race instead.",
         "edit_modal_title": "Edit Race",
         "edit_details_title": "Race Details",
@@ -240,6 +244,9 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
+            "beep_every_lap": "Beep Every Lap:",
+            "with_lap_time": "Say Lap Time Too:",
+            "announcer_extras_tip": "Beep Every Lap adds a beep to any announcer type. Say Lap Time Too speaks each lap time with the 2- and 3-lap totals. Both are saved in this browser.",
             "race_countdown": "Race Countdown:",
             "race_countdown_tip": "Less than 5: classic TTS cue with a random start within ~5 seconds. 10 Second Countdown: visible 10..1..GO overlay.",
             "countdown_options": {

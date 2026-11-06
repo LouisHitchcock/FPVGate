@@ -1067,6 +1067,8 @@ function addC5ManualLap(slot, button) {
 // Always include the pilot name when speaking multi-pilot lap times or totals.
 function announceC5RaceLap(racer, idx, seconds) {
   const mode = announcerSelect.options[announcerSelect.selectedIndex].value;
+  const extras = announcerExtras();
+  if (extras.beepEveryLap && mode !== "beep") beep(100, 330, "square");
   if (mode === "beep") {
     beep(100, 330, "square");
     return;
@@ -1081,7 +1083,9 @@ function announceC5RaceLap(racer, idx, seconds) {
   const count = mode === "2lap" ? 2 : mode === "3lap" ? 3 : 0;
   if (count) {
     const total = lastLapsTotal((c5Race.laps[racer.slot] || []).slice(0, idx + 1), count);
-    if (total) queueSpeak(`<p>${racer.spoken} ${count} laps ${total}</p>`);
+    const parts = extras.withLapTime ? [t] : [];
+    if (total) parts.push(`${count} laps ${total}`);
+    if (parts.length) queueSpeak(`<p>${racer.spoken} ${parts.join(", ")}</p>`);
     return;
   }
   queueSpeak(`<p>${racer.spoken}, ${t}</p>`);
@@ -2973,6 +2977,12 @@ async function refreshConfigFromDevice() {
 if (announcerSelect) {
   announcerSelect.addEventListener("change", autoSaveConfig);
 }
+["announcerBeepEveryLap", "announcerWithLapTime"].forEach((id) => {
+  const box = document.getElementById(id);
+  if (!box) return;
+  box.checked = localStorage.getItem(id) === "1";
+  box.addEventListener("change", () => localStorage.setItem(id, box.checked ? "1" : "0"));
+});
 if (pilotNameInput) {
   pilotNameInput.addEventListener("input", autoSaveConfig);
 }
@@ -3151,6 +3161,17 @@ function lastLapsTotal(laps, count) {
   return real.slice(-count).reduce((sum, t) => sum + t, 0).toFixed(2);
 }
 
+// Per-browser additions to the announcer. The gate stores only the mode
+// (anType 0-4), so these live in localStorage like the beep volume: a beep on
+// every lap alongside the chosen mode, and the lap time spoken with the 2- and
+// 3-lap totals.
+function announcerExtras() {
+  return {
+    beepEveryLap: localStorage.getItem("announcerBeepEveryLap") === "1",
+    withLapTime: localStorage.getItem("announcerWithLapTime") === "1",
+  };
+}
+
 function addLap(lapStr) {
   // Use phonetic name for TTS if available, otherwise use regular pilot name
   const phoneticInput = document.getElementById("pphonetic");
@@ -3180,7 +3201,10 @@ function addLap(lapStr) {
   // Determine effective lap format - force "Pilot + Time" in sync modes
   const effectiveLapFormat = (raceSyncMode === 1 || raceSyncMode === 2 || raceSyncMode === 3) ? 'full' : lapFormat;
   
-  switch (announcerSelect.options[announcerSelect.selectedIndex].value) {
+  const announceMode = announcerSelect.options[announcerSelect.selectedIndex].value;
+  const extras = announcerExtras();
+  if (extras.beepEveryLap && announceMode !== "beep") beep(100, 330, "square");
+  switch (announceMode) {
     case "beep":
       beep(100, 330, "square");
       break;
@@ -3217,9 +3241,10 @@ function addLap(lapStr) {
         } else {
           queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
         }
-      } else if (last2lapStr != "") {
-        const text2 = "<p>" + pilotName + " 2 laps " + last2lapStr + "</p>";
-        queueSpeak(text2);
+      } else if (last2lapStr != "" || extras.withLapTime) {
+        const parts = extras.withLapTime ? [lapStr] : [];
+        if (last2lapStr != "") parts.push("2 laps " + last2lapStr);
+        queueSpeak("<p>" + pilotName + " " + parts.join(", ") + "</p>");
       }
       break;
     case "3lap":
@@ -3229,9 +3254,10 @@ function addLap(lapStr) {
         } else {
           queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
         }
-      } else if (last3lapStr != "") {
-        const text3 = "<p>" + pilotName + " 3 laps " + last3lapStr + "</p>";
-        queueSpeak(text3);
+      } else if (last3lapStr != "" || extras.withLapTime) {
+        const parts = extras.withLapTime ? [lapStr] : [];
+        if (last3lapStr != "") parts.push("3 laps " + last3lapStr);
+        queueSpeak("<p>" + pilotName + " " + parts.join(", ") + "</p>");
       }
       break;
     default:
@@ -7103,6 +7129,7 @@ function renderLapEditList() {
         <span class="marshal-lap-edit-label">${label}</span>
         <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} time in seconds" />
         <span>s</span>
+        ${marshalState.editLaps.length > 1 ? `<button type="button" class="marshal-btn" onclick="mergeLapInEditor(${i})" title="${i18n.t(i === marshalState.editLaps.length - 1 ? "history.edit_lap_merge_previous" : "history.edit_lap_merge_next")}">${i18n.t("history.edit_lap_merge")}</button>` : ""}
         <button type="button" class="marshal-btn marshal-btn-danger" onclick="deleteLapFromEditor(${i})" title="${i18n.t("history.delete")}">&times;</button>
       </div>`;
     })
@@ -7148,6 +7175,21 @@ function deleteLapFromEditor(index) {
   if (!confirm(i18n.t("history.edit_lap_delete_confirm"))) return;
   syncLapEditState();
   marshalState.editLaps.splice(index, 1);
+  renderLapEditList();
+}
+
+// A false or double pass splits one lap in two. Merging adds this lap's time
+// to its neighbour (the next lap, or the previous one for the last row), so
+// the race's total time is unchanged. Deleting drops the time instead.
+function mergeLapInEditor(index) {
+  if (!marshalState) return;
+  syncLapEditState();
+  const laps = marshalState.editLaps;
+  if (laps.length < 2 || index < 0 || index >= laps.length) return;
+  if (!confirm(i18n.t("history.edit_lap_merge_confirm"))) return;
+  const into = index < laps.length - 1 ? index + 1 : index - 1;
+  laps[into] += laps[index];
+  laps.splice(index, 1);
   renderLapEditList();
 }
 

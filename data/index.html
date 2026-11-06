@@ -840,6 +840,26 @@
               </div>
 
               <div class="config-item">
+                <label for="announcerBeepEveryLap" data-i18n="settings.tts.beep_every_lap">Beep Every Lap:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="announcerBeepEveryLap" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="config-item">
+                <label for="announcerWithLapTime" data-i18n="settings.tts.with_lap_time">Say Lap Time Too:</label>
+                <div style="flex: 1">
+                  <label class="switch">
+                    <input type="checkbox" id="announcerWithLapTime" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.announcer_extras_tip">Beep Every Lap adds a beep to any announcer type. Say Lap Time Too speaks each lap time with the 2- and 3-lap totals. Both are saved in this browser.</div>
+
+              <div class="config-item">
                 <label for="raceCountdownMode" data-i18n="settings.tts.race_countdown">Race Countdown:</label>
                 <select id="raceCountdownMode" onchange="onRaceCountdownModeChange(this)">
                   <option value="0" data-i18n="settings.tts.countdown_options.less_than_5">Less than 5</option>

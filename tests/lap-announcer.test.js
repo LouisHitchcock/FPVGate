@@ -25,7 +25,7 @@ function extractBody(name) {
 }
 
 // A race: addLap with the page state it reads and writes, and what it says.
-function race({ mode, maxLaps = 0, pilot = "Ann", sync = 0, format = "full", phonetic = "" }) {
+function race({ mode, maxLaps = 0, pilot = "Ann", sync = 0, format = "full", phonetic = "", extras = {} }) {
   const spoken = [];
   const stops = [];
   const pending = [];
@@ -35,6 +35,7 @@ function race({ mode, maxLaps = 0, pilot = "Ann", sync = 0, format = "full", pho
     document: { getElementById: (id) => id === "pphonetic" ? { value: phonetic } : null },
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
+    announcerExtras: () => extras,
     i18n: { t: (k, p) => (p ? `${k}:${p.n}` : k) },
     resetCurrentLapTimer: () => {},
     renderUnifiedRaceView: () => {},
@@ -129,7 +130,7 @@ test("every-lap and beep modes are unchanged", () => {
   expect(b.spoken).toEqual(["BEEP", "BEEP"]);
 });
 
-function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false) {
+function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false, extras = {}) {
   const spoken = [];
   const stops = [];
   const pending = [];
@@ -141,6 +142,7 @@ function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false) {
     c5GateManaged: gateManaged,
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
+    announcerExtras: () => extras,
     i18n: { t: (k, p) => p ? `${k}:${p.n}` : k },
     renderUnifiedRaceView: () => {},
     updateAnalysisSectionVisibility: () => {},
@@ -227,4 +229,46 @@ test("C5 replayed announcements only use laps up to the event index", () => {
   r.state.laps[3] = [1, 10, 11, 12, 13];
   r.announceC5RaceLap(r.state.racers[0], 2, 11);
   expect(r.spoken).toEqual(["Bea 2 laps 21.00"]);
+});
+
+// spova, Discord 24 October: a beep on every lap with the consecutive modes,
+// and the lap time spoken with the 2- or 3-lap total.
+test("beep every lap adds a beep to each lap without changing what is spoken", () => {
+  const r = race({ mode: "3lap", extras: { beepEveryLap: true } });
+  ["1.00", "10.00", "11.00", "12.00"].forEach((t) => r.addLap(t));
+  expect(r.spoken).toEqual(["BEEP", "Gate 1 1.00", "BEEP", "BEEP", "BEEP", "Ann 3 laps 33.00"]);
+});
+
+test("beep every lap does not double the beep in beep mode", () => {
+  const r = race({ mode: "beep", extras: { beepEveryLap: true } });
+  ["1.00", "10.00"].forEach((t) => r.addLap(t));
+  expect(r.spoken).toEqual(["BEEP", "BEEP"]);
+});
+
+test("say lap time too speaks the lap time before the total, and on its own until there is one", () => {
+  const r = race({ mode: "2lap", extras: { withLapTime: true } });
+  ["1.00", "10.00", "11.00"].forEach((t) => r.addLap(t));
+  expect(r.spoken).toEqual(["Gate 1 1.00", "Ann 10.00", "Ann 11.00, 2 laps 21.00"]);
+});
+
+test("both extras together", () => {
+  const r = race({ mode: "3lap", extras: { beepEveryLap: true, withLapTime: true } });
+  ["1.00", "10.00", "11.00", "12.00"].forEach((t) => r.addLap(t));
+  expect(r.spoken.slice(-2)).toEqual(["BEEP", "Ann 12.00, 3 laps 33.00"]);
+});
+
+test("extras off leave every mode exactly as before", () => {
+  const r = race({ mode: "2lap", extras: { beepEveryLap: false, withLapTime: false } });
+  ["1.00", "10.00", "11.00"].forEach((t) => r.addLap(t));
+  expect(r.spoken).toEqual(["Gate 1 1.00", "Ann 2 laps 21.00"]);
+});
+
+test("C5 pilots get the same extras", () => {
+  const r = c5RaceSandbox("3lap", 0, false, { beepEveryLap: true, withLapTime: true });
+  r.state.laps[3] = [1, 10, 11, 12];
+  r.announceC5RaceLap(r.state.racers[0], 3, 12);
+  expect(r.spoken).toEqual(["BEEP", "Bea 12.00, 3 laps 33.00"]);
+  r.spoken.length = 0;
+  r.announceC5RaceLap(r.state.racers[0], 1, 10);
+  expect(r.spoken).toEqual(["BEEP", "Bea 10.00"]);
 });
