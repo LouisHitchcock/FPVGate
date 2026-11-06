@@ -661,7 +661,30 @@
             "spi_running": "Sweeping frequencies...",
             "spi_pass": "SPI Mod Verified",
             "spi_fail": "SPI Mod Not Detected",
-            "spi_run_again": "Run SPI Test Again"
+            "spi_run_again": "Run SPI Test Again",
+            "c5_title": "C5 Receiver Checks",
+            "c5_description": "Checks the C5 receiver's connection, firmware version, tuning, RSSI samples and link errors over a few seconds. Run it with no race in progress.",
+            "c5_run": "Run C5 Checks",
+            "c5_running": "Checking the receiver...",
+            "c5_checks": {
+                "connected": "Receiver connected",
+                "race": "Race in progress",
+                "version": "Receiver firmware",
+                "tuning": "Tuning",
+                "slots": "Racing slots",
+                "samples": "RSSI samples arriving",
+                "link": "Link errors"
+            },
+            "log_title": "Logs",
+            "log_description": "Download one text file with the gate and receiver status, the last crash, the latest checks and the log, to attach to a bug report. The gate keeps its recent log through a crash or restart, but not a power loss; saving to the SD card keeps much more.",
+            "log_sd_label": "Save Log to SD Card",
+            "log_download": "Download log.txt",
+            "log_status_unknown": "Log status unavailable.",
+            "log_status_no_sd": "No SD card: only the recent log in memory is kept.",
+            "log_status_off": "Off: only the recent log in memory is kept.",
+            "log_status_on": "Saving every few seconds; {size} on the card.",
+            "log_status_recovered": "Lines from before the last restart are kept.",
+            "log_switch_failed": "Could not change log saving: {error}"
         }
     },
     "modals": {

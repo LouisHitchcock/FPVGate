@@ -9658,6 +9658,7 @@ document.addEventListener("click", function (event) {
 });
 
 function switchSettingsSection(ev, sectionName) {
+  if (sectionName === "diagnostics") loadLogStatus();
   // Hide all sections
   const sections = document.querySelectorAll(".settings-section");
   sections.forEach((section) => section.classList.remove("active"));
@@ -9794,6 +9795,7 @@ function runSelfTest() {
   fetch("/api/selftest")
     .then((response) => response.json())
     .then((data) => {
+      lastSelfTestResults = data.tests || null;
       // Hide loading
       loadingDiv.style.display = "none";
       // Newer firmware reports an explicit status: "pass" | "fail" | "skip".
@@ -10016,9 +10018,10 @@ function pollDebugLogs() {
       if (data.logs && data.logs.length > 0) {
         // Add new logs that we haven't seen yet
         data.logs.forEach((log) => {
-          if (log.timestamp > lastSeenTimestamp) {
+          const order = log.seq !== undefined ? log.seq : log.timestamp;
+          if (order > lastSeenTimestamp) {
             appendSerialLine(log.message, "#00ff00", log.timestamp);
-            lastSeenTimestamp = log.timestamp;
+            lastSeenTimestamp = order;
           }
         });
       }
@@ -11079,4 +11082,227 @@ function openSettingsModal() {
     // Switch to general section by default
     switchSettingsSection(null, "general");
   }
+}
+
+// ---------------------------------------------------------------------------
+// C5 receiver checks. Run in the browser from the c5Rssi telemetry the gate
+// already streams, so they need no firmware support and never touch storage.
+// ---------------------------------------------------------------------------
+
+// The receiver release this gate release is paired with.
+const C5_PAIRED_VERSION = "1.2.5";
+const C5_CHECK_MS = 6000;
+
+// frames: c5Rssi messages collected over `seconds`; update: /api/c5/update;
+// pilots: config c5Pilots. Returns [{ key, status: pass|warn|fail|skip, detail }].
+function evaluateC5Checks(frames, update, pilots, seconds) {
+  const results = [];
+  const add = (key, status, detail) => results.push({ key, status, detail });
+  const first = frames[0];
+  const last = frames[frames.length - 1];
+  if (!last) {
+    add("connected", "fail", "No receiver telemetry arrived from the gate");
+    return results;
+  }
+  if (last.race) {
+    add("race", "skip", "A race is running; stop it to run the checks");
+    return results;
+  }
+  add("connected", last.on && last.started ? "pass" : "fail",
+    last.on ? "The receiver is sending status" : "No status from the receiver: check its connection");
+  const c5 = (update && update.c5) || {};
+  const version = c5.version || "";
+  if (!version) add("version", "fail", "The receiver did not report a version");
+  else if (version === C5_PAIRED_VERSION) add("version", "pass", `${version}${c5.board ? ` (${c5.board})` : ""}`);
+  else add("version", "warn", `${version}${c5.board ? ` (${c5.board})` : ""}; this gate release is paired with ${C5_PAIRED_VERSION}`);
+  add("tuning", last.ready ? "pass" : "fail", last.ready ? "Tuning ready" : "The receiver has not finished tuning");
+  const racing = (pilots || []).filter((p) => p && p.race && p.frequency);
+  add("slots", racing.length ? "pass" : "warn",
+    racing.length ? `${racing.length} racing slot(s): ${racing.map((p) => p.frequency).join(", ")} MHz`
+      : "No racing slots have a frequency set");
+  const delta = (k) => (+last[k] || 0) - (+first[k] || 0);
+  const samples = delta("samples");
+  add("samples", frames.length > 1 && samples > 0 ? "pass" : "fail",
+    `${samples} RSSI samples in ${seconds.toFixed(1)} s`);
+  const gaps = delta("seqGaps"), drops = delta("queueDrops"), bad = delta("badRecords");
+  add("link", gaps || drops || bad ? "warn" : "pass",
+    `${gaps} sequence gaps, ${drops} dropped samples, ${bad} bad records during the check`);
+  return results;
+}
+
+function renderCheckResults(list, results, labelOf) {
+  const style = {
+    pass: ["✓", "#4ade80", "rgba(74, 222, 128, 0.1)"],
+    warn: ["!", "#fbbf24", "rgba(251, 191, 36, 0.1)"],
+    fail: ["✗", "#ff5555", "rgba(255, 85, 85, 0.1)"],
+    skip: ["–", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
+  };
+  list.innerHTML = results.map((r) => {
+    const [icon, color, bg] = style[r.status] || style.skip;
+    const div = document.createElement("div");
+    div.textContent = r.detail;
+    return `<div style="padding: 10px 12px; margin-bottom: 8px; border-radius: 6px; background-color: ${bg}; border-left: 3px solid ${color}">
+      <div style="font-weight: bold; color: ${color}">${icon} ${labelOf(r.key)}</div>
+      <div style="font-size: 13px; color: var(--secondary-color)">${div.innerHTML}</div></div>`;
+  }).join("");
+}
+
+function runC5Checks() {
+  const button = document.getElementById("runC5ChecksButton");
+  const box = document.getElementById("c5CheckResults");
+  const list = document.getElementById("c5CheckList");
+  if (!eventSource) {
+    box.style.display = "block";
+    renderCheckResults(list, [{ key: "connected", status: "fail", detail: "This page is not connected to the gate's live updates; reload the page" }],
+      (k) => i18n.t(`settings.diagnostics.c5_checks.${k}`));
+    return;
+  }
+  const frames = [];
+  const onFrame = (e) => {
+    try {
+      frames.push(JSON.parse(e.data));
+    } catch (err) {
+      // A malformed frame is skipped; the counters come from the others.
+    }
+  };
+  button.disabled = true;
+  button.textContent = i18n.t("settings.diagnostics.c5_running");
+  box.style.display = "none";
+  const started = Date.now();
+  eventSource.addEventListener("c5Rssi", onFrame);
+  const getJson = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  Promise.all([getJson("/api/c5/update"), getJson("/config"), new Promise((r) => setTimeout(r, C5_CHECK_MS))])
+    .then(([update, config]) => {
+      eventSource.removeEventListener("c5Rssi", onFrame);
+      const results = evaluateC5Checks(frames, update, config && config.c5Pilots, (Date.now() - started) / 1000);
+      lastC5CheckResults = results;
+      renderCheckResults(list, results, (k) => i18n.t(`settings.diagnostics.c5_checks.${k}`));
+      box.style.display = "block";
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.textContent = i18n.t("settings.diagnostics.c5_run");
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Log download and the SD card log switch.
+// ---------------------------------------------------------------------------
+
+let lastSelfTestResults = null;
+let lastC5CheckResults = null;
+
+// One text file for a bug report: gate and receiver state, the last crash, the
+// latest checks, then the log (from the SD card when saving is on, otherwise
+// the recent lines kept in memory).
+function buildLogText(d) {
+  const out = [];
+  const section = (title) => out.push("", `== ${title} ==`);
+  const json = (value) => out.push(value ? JSON.stringify(value, null, 2) : "Not available");
+  out.push("FPVGate log", `Downloaded: ${d.now}`, `Page: ${d.page}`, `Browser: ${d.browser}`);
+  section("Gate");
+  json(d.info);
+  section("C5 receiver");
+  json(d.c5);
+  section("Last crash");
+  if (d.core && d.core.present) json(d.core);
+  else out.push(d.core ? `No crash dump stored (reset reason ${d.core.resetReason})` : "Not available");
+  section("System self-test");
+  if (d.selfTest && d.selfTest.length) {
+    d.selfTest.forEach((t) => out.push(`${(t.status || (t.passed ? "pass" : "fail")).toUpperCase()}  ${t.name}${t.details ? `: ${t.details}` : ""}`));
+  } else out.push("Not run on this page");
+  section("C5 receiver checks");
+  if (d.c5Checks && d.c5Checks.length) d.c5Checks.forEach((r) => out.push(`${r.status.toUpperCase()}  ${r.key}: ${r.detail}`));
+  else out.push("Not run on this page");
+  section("Log status");
+  json(d.status);
+  if (d.sdNow || d.sdOld) {
+    if (d.sdOld) {
+      section("SD card log, older file (log.1.txt)");
+      out.push(d.sdOld.replace(/\n$/, ""));
+    }
+    section("SD card log (log.txt)");
+    out.push((d.sdNow || "").replace(/\n$/, ""));
+  } else {
+    section("Recent log in memory (kept through a crash or restart, not a power loss)");
+    const lines = (d.recent && d.recent.logs) || [];
+    if (lines.length) lines.forEach((l) => out.push(`[${l.timestamp}] ${l.message}`));
+    else out.push("No lines");
+  }
+  return out.join("\n") + "\n";
+}
+
+async function downloadGateLog() {
+  const button = document.getElementById("downloadLogButton");
+  if (button) button.disabled = true;
+  const getJson = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const getText = (path) => fetch(path).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+  try {
+    const [info, c5, core, status, recent] = await Promise.all([
+      getJson("/api/system/info"), getJson("/api/c5/update"), getJson("/api/coredump/summary"),
+      getJson("/api/log/status"), getJson("/api/debuglog"),
+    ]);
+    let sdOld = "", sdNow = "";
+    if (status && status.sdEnabled && status.fileBytes) {
+      if (status.oldFileBytes) sdOld = await getText("/api/log/file?part=1");
+      sdNow = await getText("/api/log/file?part=0");
+    }
+    const text = buildLogText({
+      info, c5, core, status, recent, sdOld, sdNow,
+      selfTest: lastSelfTestResults, c5Checks: lastC5CheckResults,
+      browser: navigator.userAgent, page: location.href, now: new Date().toISOString(),
+    });
+    const board = (info && info.board) || "gate";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    link.download = `fpvgate-log-${board}-${stamp}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function describeLogStatus(s) {
+  if (!s) return i18n.t("settings.diagnostics.log_status_unknown");
+  const kb = (b) => `${Math.round((b || 0) / 1024)} KB`;
+  let text;
+  if (!s.sdAvailable) text = i18n.t("settings.diagnostics.log_status_no_sd");
+  else if (!s.sdEnabled) text = i18n.t("settings.diagnostics.log_status_off");
+  else {
+    text = i18n.t("settings.diagnostics.log_status_on", { size: kb((s.fileBytes || 0) + (s.oldFileBytes || 0)) });
+    if (s.lost) text += ` ${s.lost} bytes were lost before they could be saved.`;
+    if (s.writeFailures) text += ` ${s.writeFailures} writes failed.`;
+  }
+  if (s.recoveredPrevious) text += ` ${i18n.t("settings.diagnostics.log_status_recovered")}`;
+  return text;
+}
+
+function loadLogStatus() {
+  const toggle = document.getElementById("sdLogToggle");
+  const label = document.getElementById("sdLogStatus");
+  if (!toggle || !label) return;
+  fetch("/api/log/status")
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((s) => {
+      toggle.checked = !!(s && s.sdEnabled);
+      toggle.disabled = !(s && s.sdAvailable);
+      label.textContent = describeLogStatus(s);
+    });
+}
+
+function setSdLog(on) {
+  const toggle = document.getElementById("sdLogToggle");
+  fetch(`/api/log/sd?enabled=${on ? 1 : 0}`, { method: "POST" })
+    .then((r) => r.json().catch(() => ({})).then((body) => {
+      if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    }))
+    .catch((e) => {
+      if (toggle) toggle.checked = !on;
+      alert(i18n.t("settings.diagnostics.log_switch_failed", { error: e.message }));
+    })
+    .finally(loadLogStatus);
 }

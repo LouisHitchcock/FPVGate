@@ -1868,6 +1868,31 @@
                 <p style="margin: 0; font-size: 14px; color: var(--primary-color)" data-i18n="settings.diagnostics.running">Running tests...</p>
               </div>
 
+              <h3 data-i18n="settings.diagnostics.c5_title">C5 Receiver Checks</h3>
+              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                <p style="margin: 0" data-i18n="settings.diagnostics.c5_description">Checks the C5 receiver's connection, firmware version, tuning, RSSI samples and link errors over a few seconds. Run it with no race in progress.</p>
+              </div>
+              <button id="runC5ChecksButton" onclick="runC5Checks()" style="width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--accent-color)" data-i18n="settings.diagnostics.c5_run">Run C5 Checks</button>
+              <div id="c5CheckResults" style="display: none; margin-bottom: 16px">
+                <div id="c5CheckList"></div>
+              </div>
+
+              <h3 data-i18n="settings.diagnostics.log_title">Logs</h3>
+              <div style="margin-bottom: 12px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
+                <p style="margin: 0" data-i18n="settings.diagnostics.log_description">Download one text file with the gate and receiver status, the last crash, the latest checks and the log, to attach to a bug report. The gate keeps its recent log through a crash or restart, but not a power loss; saving to the SD card keeps much more.</p>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 12px; background-color: var(--bg-secondary, rgba(0,0,0,0.15)); border-radius: 8px;">
+                <div>
+                  <label for="sdLogToggle" style="font-weight: bold; display: block;" data-i18n="settings.diagnostics.log_sd_label">Save Log to SD Card</label>
+                  <span id="sdLogStatus" style="font-size: 12px; color: var(--secondary-color);"></span>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="sdLogToggle" onchange="setSdLog(this.checked)">
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <button id="downloadLogButton" onclick="downloadGateLog()" style="width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--accent-color)" data-i18n="settings.diagnostics.log_download">Download log.txt</button>
+
               <h3 data-i18n="settings.diagnostics.spi_title">SPI Mod Test</h3>
               <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 14px">
                 <p style="margin: 0" data-i18n="settings.diagnostics.spi_description">Sweeps RaceBand frequencies to verify the RX5808 SPI mod is working. A modded module will show varied RSSI across channels; an unmodded module will be flat.</p>
