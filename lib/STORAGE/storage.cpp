@@ -175,9 +175,7 @@ bool Storage::writeFile(const String& path, const String& data) {
     
 #ifdef HAS_SD_CARD_SUPPORT
     if (sdAvailable) {
-        DEBUG("[SPI] writeFile: Taking mutex...\n");
         spiMutexTake();
-        DEBUG("[SPI] writeFile: Mutex acquired, opening file...\n");
         File file = SD.open(path, FILE_WRITE);
         if (!file) {
             DEBUG("[SPI] writeFile: Failed to open, releasing mutex\n");
@@ -185,10 +183,8 @@ bool Storage::writeFile(const String& path, const String& data) {
             DEBUG("Failed to open file on SD: %s\n", path.c_str());
             return false;
         }
-        DEBUG("[SPI] writeFile: File opened, writing data...\n");
         size_t written = file.print(data);
         file.close();
-        DEBUG("[SPI] writeFile: Done, releasing mutex\n");
         spiMutexGive();
         return written > 0;
     }
@@ -458,15 +454,12 @@ bool Storage::replaceFileSafely(const String& fromPath, const String& toPath) {
 bool Storage::readFile(const String& path, String& data) {
 #ifdef HAS_SD_CARD_SUPPORT
     if (sdAvailable) {
-        DEBUG("[SPI] readFile: %s - Taking mutex...\n", path.c_str());
         spiMutexTake();
-        DEBUG("[SPI] readFile: Mutex acquired, checking exists...\n");
         if (!SD.exists(path)) {
             DEBUG("[SPI] readFile: File not found, releasing mutex\n");
             spiMutexGive();
             return false;
         }
-        DEBUG("[SPI] readFile: Opening file...\n");
         File file = SD.open(path, FILE_READ);
         if (!file) {
             DEBUG("[SPI] readFile: Failed to open, releasing mutex\n");
@@ -474,13 +467,11 @@ bool Storage::readFile(const String& path, String& data) {
             DEBUG("Failed to open file on SD: %s\n", path.c_str());
             return false;
         }
-        DEBUG("[SPI] readFile: Reading data...\n");
         // Files are synchronous: EOF cannot become more data after a timeout.
         // Stream::readString otherwise spins for one second per loaded file.
         file.setTimeout(0);
         data = file.readString();
         file.close();
-        DEBUG("[SPI] readFile: Done (%d bytes), releasing mutex\n", data.length());
         spiMutexGive();
         return true;
     }

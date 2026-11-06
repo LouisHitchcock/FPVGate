@@ -43,9 +43,10 @@ int main() {
   // Wrapping: older bytes are overwritten, counted as lost, and saved moves past them.
   reset(r);
   std::string line(100, 'x'); line[99] = '\n';
-  for (int i = 0; i < 100; ++i) append(r, line.c_str(), line.size());   // 10000 bytes > 8192
+  const int lines = RING_BYTES / 100 + 20;   // more than the ring holds
+  for (int i = 0; i < lines; ++i) append(r, line.c_str(), line.size());
   assert(valid(r));
-  assert(r.head == 10000 && unsaved(r) == RING_BYTES && r.lost == 10000 - RING_BYTES);
+  assert(r.head == (uint32_t)lines * 100 && unsaved(r) == RING_BYTES && r.lost == (uint32_t)lines * 100 - RING_BYTES);
   n = copyFrom(r, r.saved, buf, sizeof(buf));
   assert(n == sizeof(buf));
 
@@ -67,7 +68,7 @@ int main() {
 
   // A position already overwritten copies nothing rather than stale bytes.
   reset(r);
-  for (int i = 0; i < 100; ++i) append(r, line.c_str(), line.size());
+  for (int i = 0; i < lines; ++i) append(r, line.c_str(), line.size());
   assert(copyFrom(r, 0, buf, sizeof(buf)) == 0);
   std::puts("ring OK");
 }

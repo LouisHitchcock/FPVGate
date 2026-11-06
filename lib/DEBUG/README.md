@@ -11,7 +11,7 @@ DEBUG("Receiver state=%s, samples=%lu\n", state, sampleCount);
 
 ## The log ring
 
-`logring.h` holds the ring: 8 KB of the newest log text, kept in RAM that the
+`logring.h` holds the ring: 16 KB of the newest log text, kept in RAM that the
 ESP32 does not clear on a crash, watchdog or software reset. A checksum tells a
 ring left by the previous boot from power-on contents, so after a crash the
 lines that led up to it are still there. A power loss clears it. Each boot

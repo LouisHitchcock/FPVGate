@@ -13,7 +13,7 @@
 // boot from power-on garbage, so the lines before a crash are kept.
 namespace logring {
 
-constexpr size_t RING_BYTES = 8192;
+constexpr size_t RING_BYTES = 16384;
 static_assert((RING_BYTES & (RING_BYTES - 1)) == 0, "RING_BYTES must be a power of two");
 constexpr uint32_t MAGIC = 0x474F4C46;   // "FLOG"
 
