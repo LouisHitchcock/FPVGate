@@ -276,7 +276,7 @@ def wait_for_lanes(threads,limit=900):
 def lane(g,args):
  rh=RH(g);g.rh=rh;index=0;started=time.monotonic();deadline=None
  try:
-  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');assert info['version']=='1.9.0-rc.4' and receiver['c5']['version']=='1.2.5',(info,receiver)
+  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');assert info['version']=='1.9.0-rc.5' and receiver['c5']['version']=='1.2.5',(info,receiver)
   atomic(g.out/'source-identity.json',{'gate':info,'receiver':receiver});rh.start();threading.Thread(target=stress,args=(g,),daemon=True).start();end=time.monotonic()+args.seconds;deadline=end
   while time.monotonic()<end and not STOP.is_set():
    index+=1;n=[1,2,4,8][(index-1)%4];reason=['maxLaps','manual','heatTime'][(index-1)%3]
