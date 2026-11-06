@@ -89,6 +89,11 @@ describe("downloadable log", () => {
     expect(text).toContain("WARN  link: 2 sequence gaps");
   });
 
+  test("the whole recent log is included as text when the gate provides it", () => {
+    const text = buildLogText({ ...base, recent: { text: "[1] === Boot 2, reset reason 3 (software restart) ===\n[5] later\n" } });
+    expect(text).toContain("[1] === Boot 2, reset reason 3 (software restart) ===\n[5] later\n");
+  });
+
   test("a stored crash dump is written out in full", () => {
     const text = buildLogText({ ...base, core: { present: true, pc: "0x42001234", backtrace: ["0x1"] }, recent: { logs: [] } });
     expect(text).toContain('"pc": "0x42001234"');

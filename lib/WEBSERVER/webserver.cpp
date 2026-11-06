@@ -4,6 +4,7 @@
 #include <esp_partition.h>
 #include <esp_timer.h>
 #include <esp_core_dump.h>
+#include "logring.h"
 #ifdef FPVGATE_ETH_W5500
 #include "ethnet.h"
 #endif
@@ -2766,6 +2767,29 @@ EEPROM:\n";
         serializeJson(doc, json);
         request->send(200, "application/json", json);
         led->on(200);
+    });
+
+    // The whole ring as text, for Download log.txt without an SD card. Copied
+    // once (PSRAM when the board has it) and streamed, so the ring is not held.
+    server.on("/api/log/recent", HTTP_GET, [](AsyncWebServerRequest *request) {
+        const size_t size = logring::RING_BYTES + 1;
+        char *raw = (char *)heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!raw) raw = (char *)malloc(size);
+        if (!raw) {
+            request->send(503, "application/json", "{\"error\":\"busy\"}");
+            return;
+        }
+        DebugLogger::getInstance().copyRecent(raw, size);
+        std::shared_ptr<char> text(raw, free);
+        const size_t length = strlen(raw);
+        AsyncWebServerResponse *response = request->beginChunkedResponse(
+            "text/plain", [text, length](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                if (index >= length) return 0;
+                const size_t n = length - index < maxLen ? length - index : maxLen;
+                memcpy(buffer, text.get() + index, n);
+                return n;
+            });
+        request->send(response);
     });
 
     // The log on the SD card (off by default): state, switch and download.

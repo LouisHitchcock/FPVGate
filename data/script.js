@@ -11225,9 +11225,12 @@ function buildLogText(d) {
     out.push((d.sdNow || "").replace(/\n$/, ""));
   } else {
     section("Recent log in memory (kept through a crash or restart, not a power loss)");
-    const lines = (d.recent && d.recent.logs) || [];
-    if (lines.length) lines.forEach((l) => out.push(`[${l.timestamp}] ${l.message}`));
-    else out.push("No lines");
+    if (d.recent && d.recent.text) out.push(d.recent.text.replace(/\n$/, ""));
+    else {
+      const lines = (d.recent && d.recent.logs) || [];
+      if (lines.length) lines.forEach((l) => out.push(`[${l.timestamp}] ${l.message}`));
+      else out.push("No lines");
+    }
   }
   return out.join("\n") + "\n";
 }
@@ -11238,10 +11241,12 @@ async function downloadGateLog() {
   const getJson = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const getText = (path) => fetch(path).then((r) => (r.ok ? r.text() : "")).catch(() => "");
   try {
-    const [info, c5, core, status, recent] = await Promise.all([
+    const [info, c5, core, status, recentText] = await Promise.all([
       getJson("/api/system/info"), getJson("/api/c5/update"), getJson("/api/coredump/summary"),
-      getJson("/api/log/status"), getJson("/api/debuglog"),
+      getJson("/api/log/status"), getText("/api/log/recent"),
     ]);
+    // Firmware before rc.5 has no /api/log/recent; its /api/debuglog lines will do.
+    const recent = recentText ? { text: recentText } : await getJson("/api/debuglog");
     let sdOld = "", sdNow = "";
     if (status && status.sdEnabled && status.fileBytes) {
       if (status.oldFileBytes) sdOld = await getText("/api/log/file?part=1");
