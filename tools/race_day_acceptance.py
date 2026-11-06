@@ -4,6 +4,7 @@ Never deletes baseline race IDs. All case evidence is kept independently of devi
 import argparse,base64,concurrent.futures,copy,ctypes,datetime,hashlib,json,os,pathlib,random,re,sqlite3,subprocess,sys,threading,time,traceback
 import requests,socketio,secrets,shutil
 from race_day_contracts import RaceJournal, deterministic_timing, live_counts, saved_counts_complete
+from race_day_stop import watch_stop_file
 ROOT=pathlib.Path.cwd()/'.dev/race-day-acceptance'
 REPO=pathlib.Path(__file__).resolve().parents[1]
 CODE=REPO.parent
@@ -13,6 +14,7 @@ FREQ=[5658,5695,5732,5769,5806,5843,5880,5917]
 LOCK=threading.RLock()
 STOP=threading.Event()
 RESULTS=[]
+FAIL_FAST=True
 PHASE={}
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def atomic(path,data):
@@ -29,6 +31,7 @@ def record(board,case,status,**detail):
  row={'utc':now(),'board':board,'case':case,'status':status,'stimulus':'HTTP injected crossings unless explicitly stated',**detail}
  with LOCK:
   RESULTS.append(row)
+  if FAIL_FAST and status in ('FAIL','ERROR'):STOP.set()
   with (ROOT/'results.jsonl').open('a',encoding='utf-8') as f:f.write(json.dumps(row,default=str)+'\n')
   atomic(ROOT/'summary.json',{'updatedUTC':now(),'terminal':STOP.is_set(),'counts':{s:sum(x['status']==s for x in RESULTS) for s in ['PASS','FAIL','ERROR','BLOCKED']},'lastResults':RESULTS[-30:]})
  print(board,case,status,str(detail)[:250],flush=True)
@@ -281,7 +284,10 @@ def lane(g,args):
   while time.monotonic()<end and not STOP.is_set():
    index+=1;n=[1,2,4,8][(index-1)%4];reason=['maxLaps','manual','heatTime'][(index-1)%3]
    try:
-    g.local_heat(index,n,reason,args.lap_interval);rh.heat_run(index,n,args.lap_interval)
+    g.local_heat(index,n,reason,args.lap_interval)
+    if STOP.is_set():break
+    rh.heat_run(index,n,args.lap_interval)
+    if STOP.is_set():break
     if index%4==0:g.track(index);g.event(index)
     if index%8==0:
      existing=rh.read('select count(*) as n from saved_race_meta')[0]['n'];rh.start(not rh.full);assert rh.read('select count(*) as n from saved_race_meta')[0]['n']==existing;record(g.label,'rh-restart-saved-results-and-scale','PASS')
@@ -311,15 +317,16 @@ def lane(g,args):
   exercised=any(r['board']==g.label and r['case']=='rh-stage-mirror-pass-stream-save-database' and r['status']=='PASS' for r in RESULTS)
   record(g.label,'lane-terminal','PASS' if completed and exercised and not failed else 'FAIL',completedDuration=completed,elapsedSeconds=round(time.monotonic()-started,2),lastHeat=index)
 def main():
- global ROOT,RH_SERVER
+ global ROOT,RH_SERVER,FAIL_FAST
  p=argparse.ArgumentParser();p.add_argument('--seconds',type=float,default=300);p.add_argument('--lap-interval',type=float,default=8);p.add_argument('--between-heats',type=float,default=30);p.add_argument('--boards',nargs='+',default=['aio','eth']);p.add_argument('--allow-littlefs',action='store_true');p.add_argument('--continue-on-failure',action='store_true');p.add_argument('--out',type=pathlib.Path,required=True);p.add_argument('--config-template',type=pathlib.Path,required=True);p.add_argument('--rh-source',type=pathlib.Path,default=CODE/'rotorHazard/RotorHazard-4.5.1');a=p.parse_args()
  assert a.seconds>0 and a.lap_interval>=1,'Positive duration and lap interval >=1s required'
+ FAIL_FAST=not a.continue_on_failure
  ROOT=a.out.resolve();RH_SERVER=a.rh_source.resolve()/'src/server'
  assert not ROOT.exists(),'Use a fresh evidence directory'
  assert (RH_SERVER/'server.py').exists(),'RH source missing'
  ROOT.mkdir(parents=True)
  source=ROOT/'source';source.mkdir()
- for name in ['race_day_acceptance.py','race_day_contracts.py','race_history_response.py','run_rh_bench.py']:shutil.copy2(REPO/'tools'/name,source/name)
+ for name in ['race_day_acceptance.py','race_day_contracts.py','race_history_response.py','race_day_stop.py','run_rh_bench.py']:shutil.copy2(REPO/'tools'/name,source/name)
  for label,base in [('aio','http://192.168.7.1'),('eth','http://192.168.0.65')]:
   if label not in a.boards:continue
   out=ROOT/label/'baseline';out.mkdir(parents=True)
@@ -332,6 +339,8 @@ def main():
  gates={n:Gate(n,b) for n,b in [('aio','http://192.168.7.1'),('eth','http://192.168.0.65')] if n in a.boards}
  for feature in ['RF crossing timing accuracy/independent transmitters','native C5 USB/RH full saved-race timing accuracy','ELRS physical switch/loss/binding','physical power-cut/full-media failures','LED/buzzer/speech physical observation','physical USB browser flash']:
   record('coverage',feature,'BLOCKED',reason='Focused injected acceptance; this run does not exercise the listed hardware feature')
+ stop_file=ROOT.parent/(ROOT.name+'.stop.json')
+ threading.Thread(target=watch_stop_file,args=(stop_file,STOP,lambda reason:record('qualification','external-stop','FAIL',reason=reason)),daemon=True).start()
  threads=[threading.Thread(target=lane,args=(gates[n],a),name=n) for n in a.boards]
  for t in threads:t.start()
  try:
