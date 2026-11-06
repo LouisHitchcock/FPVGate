@@ -1,5 +1,6 @@
 #ifdef FPVGATE_ETH_W5500
 #include "ethnet.h"
+#include "ethnet_timeout.h"
 #include "config.h"
 #include "debug.h"
 
@@ -36,8 +37,8 @@ static int bootPhycfgr = -1;
 static void onEthEvent(void *, esp_event_base_t, int32_t id, void *) {
     switch (id) {
         case ETHERNET_EVENT_CONNECTED:
-            linkUp = true;
             linkUpMs = millis();
+            linkUp = true;
             if (isStatic && netif) {
                 isStatic = false;
                 esp_netif_dhcpc_start(netif);
@@ -137,7 +138,7 @@ int ethnet_boot_phycfgr(void) { return bootPhycfgr; }
 
 void ethnet_update(unsigned long nowMs) {
     if (!netif || !linkUp || hasIp || isStatic) return;
-    if (nowMs - linkUpMs < ETHNET_DHCP_TIMEOUT_MS) return;
+    if (!ethnetDhcpExpired(nowMs, linkUpMs, ETHNET_DHCP_TIMEOUT_MS)) return;
     // No DHCP server answered: a cable straight to a computer.
     esp_netif_dhcpc_stop(netif);
     esp_netif_ip_info_t ip = {};
