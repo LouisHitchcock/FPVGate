@@ -1,890 +1,150 @@
-﻿# FPVGate Hardware Guide
+# FPVGate hardware guide
+
+This guide describes `V1.9.0-alpha` (currently `1.9.0-alpha-5`).
+Board wiring comes from `lib/CONFIG/config.h`; build capabilities come from
+`targets/*.ini` and `platformio.ini`. A source target is not a promise that a
+prebuilt alpha image exists.
+
+## Choose a timer and receiver
+
+The timer is an ESP32-S3. Use an SPI-enabled RX5808 for one pilot, or a separate
+ESP32-C5 running [FPVGate C5MK](https://github.com/LouisHitchcock/FPVGateC5MK)
+for up to eight pilot slots. The C5 is a receiver co-processor, not a replacement
+for the S3 running this repository. Novacore remains a conventional receiver
+option in settings; its filter controls do not configure the C5.
+
+| PlatformIO environment | Configured flash | Filesystem offset | Alpha 5 package | USB networking |
+| --- | --- | --- | --- | --- |
+| `ESP32S3` | 8 MB | `0x410000` | Yes | Yes |
+| `SeeedXIAOESP32S3` | 8 MB | `0x410000` | Yes | Yes |
+| `FPVGateAIO` | 8 MB | `0x410000` | Yes | Yes |
+| `FPVGateSolo` | 8 MB | `0x410000` | Yes | Yes |
+| `FPVGateC5MKAIO` | 8 MB | `0x410000` | Yes | Yes |
+| `WaveshareS3ETH` | 16 MB | `0x610000` | Yes | Yes, while Ethernet is disconnected |
+| `XIAOS3Plus` | 16 MB | `0x610000` | No | No |
+| `ESP32S3SuperMini` | 4 MB | `0x290000` | No | No |
+| `LilyGOTEnergyS3` | 8 MB layout | `0x410000` | No | No |
+| `WaveshareESP32S3LCD2` | 16 MB chip; 8 MB layout | `0x410000` | No | No |
+
+USB networking requires `FPVGATE_USB_NET`; a USB-C connector or a CDC serial port
+alone does not provide it. All of the six shipping environments define it.
+`FPVGateLCDAIO.ini` is not included by `platformio.ini` and is not an available
+release environment.
+
+The [Seeed XIAO S3 family documentation](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/)
+distinguishes the 8 MB S3 and 16 MB Plus variants. Check the actual module before
+choosing an image. The `ESP32S3` build deliberately does not enable PSRAM on the
+DevKitC-1 N8. GPIO35–37 used for its external SD card are unsuitable on an
+octal-PSRAM module. Do not substitute an N8R8 board without reviewing its pins.
+
+The [LilyGO T-Energy S3 V1.0](https://github.com/Xinyuan-LilyGO/T-Energy-S3)
+has 16 MB flash, 8 MB octal PSRAM and battery ADC GPIO3. FPVGate's retained target
+uses an 8 MB layout and does not enable that PSRAM. Its SD wiring needs a board
+revision/pin-reservation check; see [the LilyGO guide](LILYGO_TENERGY_S3_WIRING.md).
+The Super Mini target is retained for existing builds; board quality and
+brownouts have made it unsuitable as the default recommendation.
+
+## Components and power
+
+A DIY build needs a matching S3, receiver and antenna, regulated power, common
+ground, and wiring suitable for the selected board. A FAT32 microSD card is
+needed for the full voice library and recorded RSSI traces. LEDs and a buzzer
+are optional; they are not timing sensors.
+
+Keep these three electrical connections distinct:
+
+| Connection | Requirement |
+| --- | --- |
+| S3 / C5 development-board supply | Regulated input appropriate to that board; C5 external builds use 5 V/VUSB |
+| UART, SPI and ADC signals | 3.3 V logic; do not apply 5 V to S3 inputs |
+| SD card | 3.3 V at the card; a breakout with a regulator may require a different supply at its VCC input |
+
+Check the SD breakout's circuit rather than powering every module the same way.
+An RX5808 carrier may accept 5 V through its regulator; a bare receiver or
+different carrier must be powered to its own specification. Confirm RSSI stays
+within the S3 ADC input limit. See the
+[original RX5808 SPI modification guide](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html)
+for the actual module revision; do not blindly bridge a component called R16.
+
+Do not put a flight pack directly on a 5 V or ADC pin. Use an appropriate
+regulator for power and a separate divider for sensing. Size the supply for the
+receiver, S3, SD and LED load; published runtime and current figures from older
+builds are not guarantees for a C5 configuration.
+
+## Wiring guides
+
+- [Seeed XIAO ESP32S3 and XIAO pin labels](wiring/Seeed-XIAO-ESP32S3.md)
+- [ESP32-S3 DevKitC-1, 8 MB / no octal PSRAM](wiring/ESP32-S3-DevKitC-1.md)
+- [Waveshare ESP32-S3-ETH and onboard Ethernet/SD](WAVESHARE_S3_ETH.md)
+- [ESP32-C5 UART and receiver-specific pins](C5_MULTI_PILOT.md#what-you-need)
+- [LilyGO T-Energy S3](wiring/LilyGO-T-Energy-S3.md)
+- [ESP32-S3 Super Mini](wiring/ESP32-S3-SuperMini.md)
+- [Waveshare ESP32-S3-LCD-2](wiring/Waveshare-ESP32-S3-LCD-2.md)
+
+There is no physical Wi-Fi/RotorHazard mode switch in the alpha workflow.
+The plugin connects to the gate's HTTP API. Old diagrams assigning GPIO9 to
+that switch should not be used.
+
+## RGB LEDs and buzzer
+
+LED count and output pin are board-specific `NUM_LEDS` and `PIN_RGB_LED` in
+`lib/CONFIG/config.h`. Defaults are two for most external strips, three on AIO
+and C5MK AIO, five on Solo, one on S3-ETH, and none on the LCD board. Budget LED
+power separately when expanding a strip; do not drive its supply from a GPIO.
+Use a suitable signal resistor, shared ground and level shifting where the
+LED's input specification requires it.
+
+The normal targets use an active buzzer. The LCD board defines `BUZZER_PASSIVE`
+and a 2700 Hz PWM default on GPIO15. A high-current buzzer needs a driver
+transistor. A buzzer is not an I2S speaker: stock alpha targets do not enable
+the unfinished MAX98357A speaker path.
+
+## Battery monitoring circuit
 
-Technical specifications, wiring diagrams, and hardware troubleshooting.
+Connect battery positive through R1 to the ADC midpoint, and R2 from the
+midpoint to ground:
 
-** Navigation:** [Home](../README.md) | [Getting Started](GETTING_STARTED.md) | [User Guide](USER_GUIDE.md) | [Features](FEATURES.md)
-
----
-
-## Table of Contents
-
-1. [Hardware Requirements](#hardware-requirements)
-2. [ESP32 Board Selection](#esp32-board-selection)
-3. [RX5808 Module](#rx5808-module)
-4. [RGB LED Strip](#rgb-led-strip)
-5. [SD Card Module](#sd-card-module)
-6. [Buzzer](#buzzer)
-7. [Power Supply](#power-supply)
-8. [Complete Pin Reference](#complete-pin-reference)
-9. [Hardware Assembly](#hardware-assembly)
-10. [Troubleshooting](#troubleshooting)
-
----
-
-## Pre-Built Option: FPVGate AIO
-
-Don't want to source and wire components yourself? The **[FPVGate AIO](https://fpvgate.xyz/shop.html)** is a pre-built, ready-to-use FPVGate device. Everything is assembled and flashed -- just plug in and go. This guide covers the DIY build process; if you have an AIO, see the [Getting Started guide](GETTING_STARTED.md#initial-configuration) for setup.
-
----
-
-## Hardware Requirements
-
-### Required Components
-
-| Component | Specification | Quantity | Est. Cost |
-|-----------|--------------|----------|-----------|
-| **ESP32-S3** | DevKit-C or compatible | 1 | $6-12 |
-| **RX5808 Module** | 5.8GHz receiver | 1 | $3-6 |
-| **WS2812B LED Strip** | 5V addressable RGB | 1 (20-60 LEDs) | $5-10 |
-| **SD Card Module** | SPI interface | 1 | $1-3 |
-| **MicroSD Card** | 4GB+ (FAT32) | 1 | $3-5 |
-| **Passive Buzzer** | 5V, 2-pin | 1 | $1-2 |
-| **Power Supply** | 5V 2A USB or barrel | 1 | $3-8 |
-| **Jumper Wires** | Male-to-female | 20-30 | $2-5 |
-
-**Total Cost:** ~$25-50 USD
-
-### Optional Components
-
-| Component | Purpose | Cost |
-|-----------|---------|------|
-| **LiPo Battery** | Portable power (2S-3S) | $10-20 |
-|| **Buck Converter** | Voltage regulation (7-24V → 5V) | $2-5 |
-|| **Enclosure** | Protection, mounting | $5-15 |
-
----
-
-## ESP32 Board Selection
-
-### Recommended: Seeed Studio XIAO ESP32S3
-
-**Why XIAO ESP32S3:**
-- **Compact form factor** - Smallest recommended board
-- **8MB Flash** - Full feature support
-- **USB-C** - Modern connector
-- **Consistent quality** - Reliable sourcing from Seeed Studio
-- **Good documentation** - Well-supported by manufacturer
-
-**Where to Buy:**
-- **Seeed Studio:** $7-10 (direct)
-- **Amazon:** $10-15 (faster shipping)
-- **AliExpress:** $6-8 (longer shipping)
-
-### Alternative: ESP32-S3 DevKit-C
-
-**Why ESP32-S3:**
-- **USB Serial CDC** - Direct USB connectivity to PC
-- **Dual-core** - Better performance for simultaneous WiFi + voice
-- **More RAM** - 512KB SRAM (vs 320KB on original ESP32)
-- **Better WiFi** - Improved antenna design
-- **LittleFS support** - Store voice files without SD card
-
-**Where to Buy:**
-- **AliExpress:** $6-8 (search "ESP32-S3 DevKit-C")
-- **Amazon:** $10-12 (faster shipping)
-- **Adafruit:** $13 (quality assurance)
-
-### Not Recommended
-
-**ESP32-S3 Super Mini:**
-- **Unreliable sourcing** - Inconsistent board quality from various suppliers
-- **Brownout issues** - Some revisions experience frequent brownouts under load
-- **Still supported** - Available in Expert Mode on the web flasher, but not recommended for new builds
-
-### Not Supported
-
-**ESP32-C3:**
-- No longer supported in FPVGate (performance and compatibility issues)
-- Different pin layout
-
-**ESP32-S2:**
-- No Bluetooth (not used currently, but future-proof)
-- Less popular (fewer resources)
-
-**ESP8266:**
-- Not compatible (different architecture)
-
----
-
-## RX5808 Module
-
-### Overview
-
-The RX5808 is a 5.8GHz FPV receiver module that detects drone video signals.
-
-**Key Specs:**
-- **Frequency Range:** 5.645-5.945 GHz
-- **Channels:** 40 (5 bands × 8 channels)
-- **Interface:** SPI (for tuning)
-- **RSSI Output:** Analog 0-3.3V
-- **Power:** 5V, ~150mA
-
-### SPI Modification
-
-** CRITICAL:** RX5808 modules ship in parallel mode and must be modified for SPI.
-
-**Procedure:**
-
-1. **Locate R16 resistor** on module PCB (near chip)
-2. **Carefully bridge R16** with solder blob
-3. **Verify continuity** with multimeter
-4. **Test:** SPI communication should work
-
-**Why This is Needed:**
-- Default parallel mode only reads, cannot tune frequency
-- SPI mode allows software frequency control
-- Without this, stuck on one frequency
-
-**Visual Guide:**
-- See [RX5808 SPI mod guide](https://github.com/sheaivey/rx5808-pro-diversity/blob/master/docs/rx5808-spi-mod.md)
-
-### Pin Functions
-
-| Pin | Function | ESP32 Connection |
-|-----|----------|------------------|
-| **VCC** | Power (5V) | 5V rail |
-| **GND** | Ground | GND |
-| **RSSI** | Signal strength | GPIO3 (ADC) |
-| **SPI_CLK** | SPI clock | GPIO15 |
-| **SPI_DATA** | SPI data | GPIO13 |
-| **SPI_SEL** | Chip select | GPIO14 |
-
-### Troubleshooting RX5808
-
-**No RSSI Reading (always 0):**
-- Check RSSI pin connection (GPIO3)
-- Verify 5V power present
-- Test with multimeter: RSSI should vary 0-3V
-
-**Cannot Tune Frequency:**
-- SPI mod not done or failed
-- Check SPI pin connections
-- Verify R16 bridge with continuity test
-
-**Low/Weak RSSI:**
-- Antenna not connected
-- Wrong frequency selected
-- VTx not powered/transmitting
-- Module damaged
-
-**Inconsistent Readings:**
-- Poor power supply (voltage drops)
-- Loose connections
-- RF interference
-- Bad module (replace)
-
----
-
-## RGB LED Strip
-
-### Specifications
-
-**Type:** WS2812B (or compatible: SK6812, WS2813)
-
-**Key Features:**
-- **Individually addressable** - Each LED controlled separately
-- **Protocol:** Single-wire data + power
-- **Voltage:** 5V
-- **Current:** ~60mA per LED at full white
-
-**Strip Types:**
-
-| Type | LEDs/m | Best For | Cost/m |
-|------|--------|----------|--------|
-| **30 LEDs/m** | 30 | Long strips, low density | $5 |
-| **60 LEDs/m** | 60 | Standard (recommended) | $8 |
-| **144 LEDs/m** | 144 | High density, short lengths | $15 |
-
-### Recommended Configuration
-
-**LED Count:** 20-60 LEDs
-- **20 LEDs:** Minimal, gate frame only
-- **30 LEDs:** Good balance
-- **60 LEDs:** Full race gate + base
-
-**Power Calculation:**
-- 30 LEDs × 60mA = 1.8A max
-- ESP32 = 500mA
-- Total = 2.3A → Use 5V 3A supply
-
-### Wiring
-
-**3-Wire Connection:**
-
-| Strip Wire | Color | ESP32 Pin |
-|------------|-------|-----------|
-| **Data (DIN)** | Green/White | GPIO5 |
-| **Power (+5V)** | Red | 5V rail |
-| **Ground (GND)** | Black/White | GND |
-
-**Important:**
-- **Short wires** - Keep data line under 6 inches if possible
-- **Power injection** - For 60+ LEDs, inject 5V at both ends
-- **Capacitor** - Optional 1000μF across power helps stability
-
-### Data Line Issues
-
-**LEDs glitchy/flickering:**
-- Add 330Ω resistor inline with data pin
-- Use shorter wire (< 6 inches)
-- Add 0.1μF capacitor between data and GND at strip
-
-**First LED wrong, rest OK:**
-- Voltage drop on long wire
-- Use level shifter (3.3V → 5V)
-- Power LED strip separately from ESP32
-
-**Some LEDs stuck/wrong color:**
-- Power supply insufficient
-- Bad LED in strip (data chain broken)
-- Cut out bad LED, reconnect data line
-
-### Power Injection
-
-For 60+ LED strips:
-
-```
-                    5V Power Supply (5V 3A)
-                           |
-                    +------+------+
-                    |             |
-                 ESP32         LED Strip
-                  (GND)        (GND, +5V)
-                    |             |
-                    +------+------+
-                           |
-                          GND
+```text
+Battery+ --- R1 ---+--- ADC
+                  |
+                  R2
+                  |
+Battery- -------- GND
 ```
 
-**Why:**
-- Voltage drop along strip causes dim/wrong colors at end
-- Injecting power at both ends maintains stable 5V
-- Critical for 100+ LEDs
-
----
-
-## SD Card Module
-
-### Specifications
-
-**Interface:** SPI  
-**Voltage:** 3.3V logic (5V tolerant on most modules)  
-**Speed:** 25 MHz SPI clock  
-**Card Support:** microSD, microSDHC (up to 32GB)
-
-### SD Card Formatting
-
-**File System:** FAT32 (required)  
-**Allocation Unit:** 4096 bytes (default)
-
-**How to Format:**
-1. Insert card into PC
-2. Right-click drive → Format
-3. File system: FAT32
-4. Start
-
-**Troubleshooting Format:**
-- Cards >32GB need special FAT32 formatter
-- Use "FAT32 Format" tool (Google for download)
-- exFAT and NTFS are NOT supported
-
-### Wiring
-
-| SD Module Pin | ESP32 Pin |
-|---------------|-----------|
-| **CS** | GPIO10 |
-| **SCK (CLK)** | GPIO12 |
-| **MOSI (DI)** | GPIO11 |
-| **MISO (DO)** | GPIO13 |
-| **VCC** | 3.3V |
-| **GND** | GND |
-
-**Important:**
-- Use **3.3V**, not 5V (can damage ESP32)
-- MISO conflict with RX5808 SPI_DATA (GPIO13) is OK - they share SPI bus
-
-### File Structure
-
-**Expected Directory Layout:**
-
-```
-SD Card Root
-├── audio/
-│   ├── elevenlabs/
-│   │   ├── sarah/
-│   │   │   ├── arm.mp3
-│   │   │   ├── gate1.mp3
-│   │   │   ├── lap1.mp3
-│   │   │   └── ...
-│   │   ├── rachel/
-│   │   ├── adam/
-│   │   └── ...
-│   └── piper/
-│       └── (generated at runtime)
-└── races/
-    └── (auto-saved race files)
-```
-
-**Generating Audio Files:**
-- Use `tools/tts_generator.py` to create voice files
-- See [tools/README.md](../tools/README.md) for details
-
-### Troubleshooting SD Card
-
-**SD card not detected:**
-- Check wiring (especially CS, CLK, MOSI, MISO)
-- Verify FAT32 format
-- Try different card (some cards incompatible)
-- Check Serial Monitor for "SD card initialized"
-
-**Files not found:**
-- Verify folder structure matches above
-- Check file names (case-sensitive!)
-- Ensure files are MP3 format
-- Re-copy files, safely eject
-
-**Card works sometimes, not others:**
-- Poor connection (reseat card)
-- Bad SD module (try different one)
-- Power supply issues (add capacitor)
-
----
-
-## Buzzer
-
-### Specifications
-
-**Type:** Passive buzzer (recommended)  
-**Alternative:** Active buzzer (always same tone)
-
-**Passive Buzzer:**
-- Requires PWM signal
-- Variable tones/frequencies
-- Used for countdown beep (880 Hz)
-
-**Active Buzzer:**
-- Just needs on/off signal
-- Fixed frequency (~2kHz)
-- Simpler but less flexible
-
-### Wiring
-
-| Buzzer Pin | ESP32 Pin |
-|------------|------------|
-| **Signal (+)** | GPIO6 |
-| **Ground (-)** | GND |
-
-**Polarity:**
-- Red/long leg = Signal (GPIO6)
-- Black/short leg = Ground
-
-**Optional:**
-- Add 100Ω resistor in series to reduce volume
-
-### Buzzer Behavior
-
-**Race Start Countdown:**
-- "Arm your quad"
-- "Starting on the tone in less than five"
-- Random delay (1-5 seconds)
-- **Beep** - 880 Hz, 500ms
-
-**Why 880 Hz:**
-- Clear, distinct tone
-- Easily heard over noise
-- Not harsh/annoying
-
-### Troubleshooting Buzzer
-
-**No sound:**
-- Check polarity (swap wires)
-- Verify passive vs active type
-- Test GPIO6 with LED (should flash during countdown)
-
-**Distorted/weak sound:**
-- Power supply issue
-- Buzzer damaged
-- Use active buzzer instead
-
-**Always on/buzzing:**
-- Active buzzer on PWM pin (swap to passive)
-- Software bug (check Serial Monitor)
-
----
-
-## Power Supply
-
-### Requirements
-
-**Voltage:** 5V ± 0.25V (4.75V - 5.25V)  
-**Current:** 2-3A minimum  
-**Connector:** USB-C (ESP32-S3) or Micro-USB (ESP32), or 5V barrel jack
-
-### Power Budget
-
-| Component | Current Draw |
-|-----------|--------------|
-| ESP32-S3 | 500mA (WiFi + processing) |
-| RX5808 | 150mA |
-| SD Card | 100mA |
-| 30× WS2812B LEDs | 1800mA (full white) |
-| Buzzer | 30mA |
-| **Total** | **2580mA** |
-
-**Recommendation:** 5V 3A power supply (3000mA)
-
-### Power Supply Options
-
-#### Option 1: USB Power (Simplest)
-
-**Pros:**
-- Easy to find
-- Safe voltage
-- Built-in protection
-
-**Cons:**
-- Requires USB cable nearby
-- Limited portability
-
-**Recommended Supplies:**
-- Phone charger (5V 2A minimum)
-- USB power bank (10,000mAh+)
-- Powered USB hub
-
-#### Option 2: Barrel Jack with Regulator
-
-**Pros:**
-- Use 7-24V battery (LiPo, SLA, etc.)
-- Portable
-- Higher power available
-
-**Cons:**
-- Requires buck converter (7-24V → 5V 3A)
-- Extra component cost
-
-**Recommended Buck Converter:**
-- LM2596 module (3A, adjustable)
-- MP1584 module (3A, compact)
-- Pre-set to 5.0V before connecting ESP32
-
-#### Option 3: LiPo Battery Direct (Advanced)
-
-**Pros:**
-- Most portable
-- Clean power
-- Rechargeable
-
-**Cons:**
-- Requires BEC or regulator
-- Battery management
-- Fire risk if mishandled
-
-**Configuration:**
-- 2S-3S LiPo (7.4V - 11.1V)
-- 5V 3A BEC (e.g., Hobbywing UBEC)
-- XT60 or Deans connector
-
-### Power Wiring
-
-**Shared Ground:**
-- All components must share common ground
-- Connect all GND pins together
-- Use breadboard or distribution block
-
-**Power Distribution:**
-
-```
-     5V Power Supply
-           |
-    +------+------+
-    |      |      |
-  ESP32  RX5808  LED Strip
-   (5V)   (5V)    (5V)
-    |      |      |
-    +------+------+
-           |
-          GND (common)
-```
-
-### Troubleshooting Power
-
-**Device resets randomly:**
-- Insufficient current
-- Voltage drop under load
-- Use higher amperage supply
-- Add bulk capacitor (1000μF) near ESP32
-
-**LEDs dim at end of strip:**
-- Voltage drop along wires
-- Power inject at both ends
-- Use thicker wire (lower gauge)
-
-**WiFi drops frequently:**
-- Power supply noise
-- Add 100μF capacitor near ESP32
-- Use filtered/regulated supply
-
-**Everything works until LEDs turn on:**
-- Current limit exceeded
-- Upgrade to 3A supply
-- Reduce LED count or brightness
-
----
-
-## Complete Pin Reference
-
-### ESP32-S3 DevKit-C Pinout
-
-| GPIO | Component | Signal | Direction |
-|------|-----------|--------|-----------|
-| **GPIO3** | RX5808 | RSSI | Input (analog) |
-| **GPIO5** | LED Strip | Data | Output |
-| **GPIO6** | Buzzer | PWM | Output |
-| **GPIO10** | SD Card | CS | Output |
-| **GPIO11** | SD Card | MOSI | Output |
-| **GPIO12** | SD Card | SCK | Output |
-| **GPIO13** | SD Card + RX5808 | MISO / SPI_DATA | Input/Output |
-| **GPIO14** | RX5808 | SPI_SEL (CS) | Output |
-| **GPIO15** | RX5808 | SPI_CLK | Output |
-| **GPIO1** | Battery (optional) | Voltage sense | Input (analog) |
-
-**Power Pins:**
-
-| Pin | Function |
-|-----|----------|
-| **5V** | Power output (USB powered) |
-| **3.3V** | Regulated 3.3V output |
-| **GND** | Ground (multiple pins available) |
-
-**Notes:**
-- Don't use GPIO0 (boot mode selection)
-- Don't use GPIO46 (strapping pin)
-- GPIO13 shared between SD and RX5808 (different SPI functions, OK)
-
-### Connection Summary Table
-
-| Component | Pin(s) | Voltage | Notes |
-|-----------|--------|---------|-------|
-| **RX5808** | GPIO3, 14, 15, 13 | 5V | RSSI + SPI |
-| **LED Strip** | GPIO5 | 5V | Single data wire |
-| **SD Card** | GPIO10, 11, 12, 13 | 3.3V | SPI bus |
-| **Buzzer** | GPIO6 | 5V | Passive type |
-| **Battery** | GPIO1 | 3.3V max | Optional, voltage divider |
-
----
-
-## Hardware Assembly
-
-### Step-by-Step Build
-
-#### Step 1: Test Components Individually
-
-Before final assembly, test each component:
-
-1. **ESP32 alone** - Upload blink sketch, verify USB
-2. **RX5808** - Connect, run self-test, check RSSI
-3. **LED strip** - Connect, test with FastLED example
-4. **SD card** - Format, connect, test with SD example
-5. **Buzzer** - Connect, test with tone() function
-
-#### Step 2: Plan Layout
-
-**Considerations:**
-- Keep RX5808 away from ESP32 WiFi antenna
-- LED strip needs clearance (heat dissipation)
-- SD card accessible for swapping
-- Buzzer orientation (sound direction)
-
-**Recommended Layout:**
-```
-    [RX5808]
-           |
-      [ESP32-S3]
-           |
-    [LED Strip connector]
-           |
-     [SD Card] [Buzzer]
-```
-
-#### Step 3: Solder or Breadboard
-
-**Breadboard (Testing):**
-- Quick, no soldering
-- Easy to modify
-- Less reliable (loose connections)
-
-**Soldered Connections:**
-- Permanent
-- Reliable for racing
-- Harder to troubleshoot
-
-**Perfboard (Recommended):**
-- Semi-permanent
-- Organized layout
-- Easy to trace connections
-
-#### Step 4: Wire Management
-
-**Best Practices:**
-- Group wires by function (power, SPI, signals)
-- Use different colors (red=5V, black=GND, etc.)
-- Label wires with tape
-- Strain relief on connectors
-- Cable ties for neatness
-
-#### Step 5: Enclosure
-
-**3D Printable Case:**
-- Search Thingiverse for "ESP32 race timer"
-- Design your own (CAD skills)
-- Ensure ventilation holes
-
-**Commercial Enclosure:**
-- Hammond plastic project box
-- Cutouts for USB, LED strip
-- Use Dremel or step drill
-
-**Mounting:**
-- Velcro to race gate
-- Clamps or zip ties
-
----
+The settings ratio is `(R1 + R2) / R2`. Size it for the fully charged pack,
+with headroom below 3.3 V at the ADC, then calibrate against a meter.
+A 2:1 divider is for a 1S pack, not a fully charged 2S or larger pack.
+Battery sensing does not make a board's power input accept the measured pack
+voltage. The bare XIAO S3 needs an external divider on D0/GPIO1.
+See [battery monitoring](BATTERY_MONITORING.md) for per-board enablement,
+calibration and the browser-only low-voltage alert.
+
+## Storage and assembly checks
+
+Format a suitable card as FAT32; 4–32 GB cards are a convenient starting point.
+Copy the contents of a generated `SD_Card/` folder to the card root, retaining
+`voice_*` directories. Do not create an extra `SD_Card` parent directory on
+the card. See [SD setup and migration](SD_CARD_MIGRATION_GUIDE.md).
+
+Before powering a new build, check board revision, polarity, supply voltage,
+common ground, ADC divider and absence of shorts. Test the S3 alone first,
+then the receiver, SD, and optional peripherals. Disconnect power before
+rewiring; disconnect a C5 that shares XIAO D3/D4 with RX5808 control before
+changing receiver types.
 
 ## Troubleshooting
 
-### No Power / Won't Boot
+| Symptom | First checks |
+| --- | --- |
+| Will not boot or repeatedly resets | Stable supply, USB cable, BOOT button, strapping pins and PSRAM pin conflicts |
+| No RSSI / receiver offline | Correct build, receiver selection, antenna, supply, UART crossing or RX5808 SPI wiring |
+| SD absent | FAT32, board-specific pins, breakout supply and common ground |
+| Voice absent | Enable browser audio; check the selected `voice_*` directory and phone mute/volume |
+| USB has only a COM port | Native USB connector and a target that defines `FPVGATE_USB_NET` |
+| Double laps | Separate Enter/Exit thresholds, minimum lap time and receiver gain |
+| Missing saved race | SD/storage health and, for C5, `saveFailed`; retry Stop before Clear or reboot |
 
-**Symptoms:**
-- No lights on ESP32
-- USB not detected by PC
-
-**Solutions:**
-- Check USB cable (try different one - data cable, not charge-only)
-- Verify power supply (multimeter check 5V)
-- Press BOOT button while plugging in USB
-- Try different USB port
-
-### WiFi Not Appearing
-
-**Symptoms:**
-- No "FPVGate_XXXX" network
-- ESP32 powered but no connection
-
-**Solutions:**
-- Wait 15-20 seconds after boot
-- Check Serial Monitor for WiFi messages
-- Reflash firmware
-- Erase flash first: `pio run -t erase`
-
-### RSSI Always Zero
-
-**Symptoms:**
-- Calibration graph flat line
-- No lap detection
-
-**Solutions:**
-- Verify RX5808 connections (especially RSSI on GPIO3)
-- Check VTx is powered and transmitting
-- Verify frequency match (band + channel)
-- Test RSSI pin with multimeter (should show 0-3V)
-- RX5808 may be damaged (swap module)
-
-### LEDs Not Working
-
-**Symptoms:**
-- LEDs stay off
-- Only first LED works
-- Random colors/flickering
-
-**Solutions:**
-- Check data pin (GPIO5)
-- Verify 5V power to strip
-- Check ground connection
-- Add 330Ω resistor on data line
-- Reduce brightness in software
-- Power supply may be insufficient
-
-### SD Card Not Detected
-
-**Symptoms:**
-- Serial Monitor shows "SD card initialization failed"
-- Voice files not playing
-
-**Solutions:**
-- Reformat SD card as FAT32
-- Check all SPI pins (CS, SCK, MOSI, MISO)
-- Try different SD card
-- Verify 3.3V to SD module (not 5V!)
-- Clean SD card contacts
-
-### Voice Not Playing
-
-**Symptoms:**
-- Laps detected but no audio
-- Buzzer works, voice doesn't
-
-**Solutions:**
-- Check SD card detected
-- Verify audio files on SD (/audio/elevenlabs/...)
-- Check file names match expected format
-- Enable audio in Configuration
-- Check I2S or DAC connections (if using external DAC)
-
-### Frequent Crashes / Resets
-
-**Symptoms:**
-- ESP32 reboots randomly
-- Watchdog timer resets
-
-**Solutions:**
-- Insufficient power (upgrade supply)
-- Add decoupling capacitor (100μF near ESP32)
-- Reduce LED count or brightness
-- Check Serial Monitor for stack traces
-- Reflash firmware (may be corrupted)
-
-### USB Connection Issues (ESP32-S3, firmware 1.8.0 and later)
-
-From 1.8.0 the gate appears over USB-C as a network adapter and is reached at
-`http://192.168.7.1`. There are no drivers to install on Windows or Linux, and
-no COM port to select.
-
-**Nothing appears after flashing**
-- **Unplug the cable and plug it back in.** Flashing leaves the board waiting in
-  its bootloader, and that survives a reset — only removing power clears it.
-  This is by far the most common cause.
-
-**Device is listed but `192.168.7.1` will not load**
-- Unplug and replug once more. Windows sometimes brings the adapter back
-  disabled, and a second power cycle clears it.
-- In Device Manager the symptom is *Remote NDIS based Internet Sharing Device*
-  with a warning triangle, or a Disabled adapter under Network Connections.
-
-**Nothing on any port at all**
-- Try a different USB-C cable; charge-only cables carry no data.
-- Hold **BOOT** while plugging in, release, then reflash from
-  [fpvgate.xyz](https://fpvgate.xyz/flasher.html). This forces recovery mode and
-  works even when the firmware will not start.
-- Check nothing is pressing the BOOT button. A board held in recovery mode never
-  starts normally, and on a board in an enclosure this is easy to miss.
-
-**Using a Mac**
-- USB networking cannot work on macOS — Apple removed the RNDIS support it
-  relies on. Use WiFi instead; every feature is available there.
-
-**Fallback**
-- WiFi always works in parallel. Join `FPVGate_XXXX` (password `fpvgate1`) and
-  open `http://192.168.4.1`, so a USB problem never stops a race running.
-
-### Phantom Laps
-
-**Symptoms:**
-- Multiple laps triggered for one pass
-- Laps without flying
-
-**Solutions:**
-- Raise Exit RSSI threshold
-- Increase Minimum Lap Time
-- Check for RF interference (move away from electronics)
-- Recalibrate thresholds
-- Shield RX5808 with metal enclosure
-
-### Missed Laps
-
-**Symptoms:**
-- Fly through gate, no lap counted
-- Inconsistent detection
-
-**Solutions:**
-- Lower Enter RSSI threshold
-- Wait for VTx warm-up (30 seconds)
-- Verify frequency match
-- Move timer closer to flight path
-- Increase transmission power on VTx
-
----
-
-## Advanced Modifications
-
-### External Amplifier for Buzzer
-
-For louder races:
-
-**Circuit:**
-```
-GPIO6 → NPN Transistor (2N2222) → Piezo Buzzer (12V)
-         ↓ (Base)                    ↑
-         10kΩ to GND              Power Supply
-```
-
-### High-Power LED Driver
-
-For 100+ LED strips:
-
-- Use external 5V 10A supply
-- Level shifter for data (3.3V → 5V)
-- Power inject every 50 LEDs
-- Add 1000μF capacitor per injection point
-
-### Battery Monitoring Circuit
-
-The ESP32-S3 ADC reads up to about 3.3 V, and every LiPo pack is higher than
-that, so a resistor divider scales the pack voltage down to something the pin can
-survive. The firmware then multiplies back up using the **Voltage Divider Ratio**
-setting, which has to match the resistors you fit.
-
-```
-Battery+ --+-- R1 --+-- ADC pin
-           |        |
-          GND       R2
-                    |
-                   GND
-```
-
-```
-divider ratio = (R1 + R2) / R2
-pin voltage   = battery voltage / divider ratio
-```
-
-**Size the divider for the pack at full charge, not its nominal voltage.** These
-use common E12 values with `R2 = 10k`, targeting roughly 3.0 V at the pin when
-fully charged:
-
-| Pack | Max voltage | R1 | R2 | Ratio to enter | Pin sees at full charge |
-|---|---|---|---|---|---|
-| 1S | 4.2 V | 10k | 10k | 2.0 | 2.10 V |
-| 2S | 8.4 V | 22k | 10k | 3.2 | 2.63 V |
-| 3S | 12.6 V | 33k | 10k | 4.3 | 2.93 V |
-| 4S | 16.8 V | 47k | 10k | 5.7 | 2.95 V |
-| 6S | 25.2 V | 100k | 10k | 11.0 | 2.29 V |
-
-**Never let the pin exceed 3.3 V.** The compiled-in default ratio on most boards
-is 2.0, which suits a 1S pack only. A fully charged 2S pack through a 2:1 divider
-puts 4.2 V on the pin and risks damaging it, so 2S and above need a larger
-divider *and* the matching ratio set in the UI.
-
-The ADC pin differs per board — GPIO1 on the AIO, Solo, XIAO S3 Plus and
-DevKitC-1; GPIO0 on the SuperMini and Seeed XIAO; GPIO3 on the LilyGO T-Energy
-S3; GPIO5 on the Waveshare LCD-2.
-
-> Fitting the resistors is only half the job. Until the **Voltage Divider Ratio**
-> in Configuration -> System Setup matches them, the hardware is safe but the
-> voltage displayed is wrong. Note the ratio is the reciprocal of the divider
-> fraction: a 33k/10k divider passes 0.23 of the pack voltage, and the ratio to
-> enter is 1 / 0.23 = 4.3.
-
-See **[Battery Monitoring](BATTERY_MONITORING.md)** for the settings, calibration
-against a multimeter, per-board defaults and troubleshooting.
-
----
-
-## Next Steps
-
- **Hardware complete**   
- **[User Guide](USER_GUIDE.md)** - Learn to use all features  
- **[Features Guide](FEATURES.md)** - Deep dive into capabilities  
- **[Development Guide](DEVELOPMENT.md)** - Contribute to project
-
----
-
-**Questions? [GitHub Discussions](https://github.com/LouisHitchcock/FPVGate/discussions) | [Report Issues](https://github.com/LouisHitchcock/FPVGate/issues)**
+Run Diagnostics' self-test after assembly. Its 18 checks report pass/fail/skip
+by capability, and include temporary storage writes and a buzzer test. A pass
+does not establish real RF accuracy or certify an eight-transmitter setup.

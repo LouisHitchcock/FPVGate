@@ -1,7 +1,160 @@
 # Changelog
 
 All notable changes to FPVGate will be documented in this file.
-## [Unreleased]
+## [1.9.0-alpha-5] - 2026-10-24
+
+Fifth Multi-Pilot alpha, with RotorHazard timing fixes paired with FPVGate RH plugin v2.3.2-rc.1.
+Refreshed in place with the announcer and gate-race-completion branches, for all six boards:
+Seeed XIAO ESP32S3, Waveshare ESP32-S3-ETH, ESP32-S3 DevKitC-1 (8MB), FPVGate AIO, Solo and C5MK AIO.
+
+### Added
+- Dedicated C5MK AIO board identity, AIO outputs/SD pin map and forced C5 receiver
+  on defaults, saved-config load and receiver changes.
+- C5 gate-managed max-lap/heat-time stopping and one saved multi-pilot history
+  record, without an open browser. Failed saves can be retried without duplication.
+
+### Fixed
+- Restored 2-/3-consecutive-lap totals and max-lap stopping after the announcer.
+- C5 announcements use the selected consecutive mode independently per pilot.
+- C5 passes and RotorHazard RSSI history now use the timestamps of the peak
+  samples, including separate peak midpoints for the two RSSI resolutions.
+- The reference clock is read after peak snapshots so a newer sample cannot
+  produce a wrapped age and fall back to message-arrival timing.
+
+### Testing
+- Events results/next heat and non-C5 completion still need a browser.
+- Six-board physical qualification, real storage recovery and soak remain pending.
+- Use the matching plugin for live-versus-Marshal timestamp comparisons.
+- Full-rate timing traces remain opt-in development instrumentation and are
+  not enabled in the distributed binaries.
+- Camera validation and physical multi-transmitter race testing remain pending.
+
+## [1.9.0-Alpha-4] - 2026-10-18
+
+Fourth Multi-Pilot alpha, now named 1.9.0-Alpha-N: race analysis for C5
+races and a reworked race screen, and a fix for a crash when a browser
+disconnected.
+
+### Fixed
+- Race analysis in a C5 race: Fastest Lap and Fastest 3 Consecutive said to
+  complete a lap, and Best 3 Laps and Median Lap showed "--", however many laps
+  were flown. They read the single-pilot lap list, which a C5 race leaves
+  empty.
+- A USB flash of a gate last updated over the air left it starting its old
+  firmware: the flash wrote the new one to the first app slot, but the gate
+  still chose the second. Releases now include `boot_app0.bin`, written at
+  0xe000 in the flash instructions, which chooses the first slot.
+- A gate could reboot when a browser closed or lost its connection while a
+  message was being sent to it (seen on a XIAO on Multi-Alpha-3). The event
+  stream's connection is now cleared under its message lock and checked
+  before each send.
+
+### Added
+- RotorHazard: `POST /api/rh/testPass?node=n` sends RotorHazard a pass on a
+  node as if a quad had flown through, to check a setup such as split gates
+  without flying.
+
+### Changed
+- Race screen: Fastest Lap, Fastest 3 Consecutive, Best 3 Laps and Median Lap
+  are four boxes in a row, always shown. In a C5 race the first two are the
+  best of any pilot, with their name, and Best 3 and Median are the race
+  leader's, as in race history. The charts below are tabs for Consistency and
+  Lap Times, opening on Consistency, and Settings > User Interface > Race
+  Analytics Display turns those two on or off.
+
+## [1.9.0-Multi-Alpha-3] - 2026-10-12
+
+Third Multi-Pilot alpha: the Waveshare ESP32-S3-ETH is tested and fixed, the
+C5 receiver can be updated through the gate, the race director, and a set of
+stability fixes from overnight testing.
+
+### Fixed
+- Ethernet (Waveshare S3-ETH): uploads, OTA updates included, ran at about
+  10 KB/s and timed out. The Ethernet chip's receive buffer was being reset to
+  2 KB, one frame, by the order the drivers started in. It now gets its full
+  16 KB: uploads run at over 1 MB/s and a full OTA update takes about 10 s.
+- One fly-through counted as several passes: a dip in signal during a pass
+  ended it. A pass now ends only after 300 ms below Exit.
+- The C5 link lost data while the gate saved a race: the web server could hold
+  off the C5 reader for about a second. The web server now runs on the other
+  core, the C5 backlog is read in pieces, and the receive buffer is 16 KB.
+- A gate on Wi-Fi could run out of memory and freeze when several pages and
+  event streams loaded at once. Each connection now holds less, live RSSI
+  messages are skipped while a stream is backed up (passes and laps never
+  are), and file downloads are refused with "busy" before memory runs out.
+- Ethernet asks for an address again when the cable is replugged, and waits
+  45 s for DHCP before falling back to 192.168.8.1.
+
+### Added
+- Waveshare ESP32-S3-ETH: tested on hardware, and in the web flasher without
+  expert mode. USB networking switches off while Ethernet is connected, and
+  the header shows the Ethernet address.
+- C5 receiver firmware updates through the gate (Settings > System), from
+  FPVGateC5MK releases or a file, for C5s on C5MK 1.1.0 or later. The gate
+  checks the image is for that C5's board, and a C5 that can't reach the gate
+  after an update goes back to its old firmware.
+- Race director (Settings > User Interface > Event Mode, off by default):
+  pilots, groups, formats and a heat schedule, channel assignment within a
+  band, Elo and best-lap seeding, a Next Heat button, and import and export.
+- Manual +Lap for each C5 pilot on the race screen.
+- RotorHazard: RSSI 20 times a second with each pass's peak kept, so
+  RotorHazard's Marshal page works; full-resolution RSSI (0-1023) for the
+  plugin's **Full-resolution RSSI** option.
+- Diagnostics in `/api/system/info`: memory low-water mark and what was in
+  flight at the low, Ethernet link speed, duplex and counters.
+
+### Changed
+- Library versions are pinned, so a fresh build uses the same libraries as
+  the release.
+
+### Removed
+- The version 1 **RotorHazard** role in Settings > Sync, where the gate posted
+  laps to a RotorHazard server (RH Host IP, node seat, connection status and
+  clock sync), and its `/api/rh/status` and `/api/rh/syncClock` endpoints. The
+  RotorHazard plugin 2 connects to the gate instead and needs no setting on the
+  gate; plugin 2 also accepts laps from gates on older firmware. See
+  [RotorHazard Integration](docs/ROTORHAZARD_INTEGRATION.md).
+
+## [1.9.0-Multi-Alpha-2] - 2026-10-09
+
+Second Multi-Pilot alpha: USB networking stability, RotorHazard plugin 2
+support and the Waveshare ESP32-S3-ETH.
+
+### Fixed
+- USB networking no longer stops under sustained load. Two bugs in the USB
+  controller driver Arduino ships were to blame: a race that stalled the
+  network send pipe, and a local reset on an undocumented status bit that made
+  the gate drop its USB address. The driver is now built from a fixed copy.
+  Tested for 30 minutes at full load with no failure.
+- The web server could hang and the gate reboot when a page load and the LED
+  animation drew the RGB LEDs at the same moment.
+
+### Added
+- RotorHazard plugin 2 support: every pilot's passes, live RSSI, and
+  frequencies and Enter/Exit levels set from RotorHazard (`/api/rh/*`).
+- Waveshare ESP32-S3-ETH board with wired Ethernet (DHCP, or 192.168.8.1
+  without a DHCP server). Not yet tested on hardware.
+- Crash core dumps readable over Wi-Fi (`/api/coredump/summary`), and USB
+  link diagnostics (`/api/usbnet/status`).
+
+## [1.9.0-Multi-Alpha-1] - 2026-10-07
+
+First public alpha of the ESP32-C5 multi-pilot receiver support.
+
+### Added
+- Up to eight pilots, with individual channels, names, colours and calibration.
+- Multi-pilot standings, lap tables, browser announcements and race history.
+- Eight-channel RSSI recording on SD and per-pilot editing in the Visual Marshal.
+- Live receiver diagnostics and an RSSI debug window for all pilots.
+
+### Alpha limits
+- Requires a separate ESP32-C5 with FPVGate C5MK receiver firmware. Keep the
+  browser open for race completion, heat timeout and browser announcements.
+- Each pilot is limited to 64 crossings. Physical eight-pilot testing remains
+  outstanding; this release is for testing.
+- C5 mode does not support Master/Slave, daisy-chaining or RotorHazard roles.
+- See the [release notes](release/v1.9.0-Multi-Alpha-1/RELEASE_NOTES.md) and
+  [C5 setup guide](docs/C5_MULTI_PILOT.md) for wiring and other limitations.
 
 ## [1.8.4] - 2026-10-20
 

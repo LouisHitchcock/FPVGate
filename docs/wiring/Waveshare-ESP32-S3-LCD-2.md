@@ -1,34 +1,58 @@
-# Waveshare ESP32-S3-LCD-2 (16MB Flash / 8MB PSRAM) - Wiring Diagram
+# Waveshare ESP32-S3-LCD-2 wiring
 
-Board with built-in 2" LCD (ST7789), TF card slot, QMI8658 IMU, camera connector and LiPo charger.
+The [manufacturer's LCD-2 specification](https://docs.waveshare.com/ESP32-S3-LCD-2)
+lists a 240 × 320 ST7789T3 2-inch display, 16 MB flash and 8 MB PSRAM.
+This is not the S3-ETH board. FPVGate's source environment is
+`WaveshareESP32S3LCD2`; it is outside the six Alpha 5 release packages.
 
-## Pin Configuration
+## Current firmware pins
+
+These are the alpha definitions in `lib/CONFIG/config.h`, replacing the old
+GPIO4/17/21/18 receiver diagram.
+
+| Signal | GPIO |
+| --- | --- |
+| RX5808 RSSI | 8 |
+| RX5808 DATA / SELECT / CLOCK | 2 / 4 / 6 |
+| RX5808 high-side power control | 21 |
+| Passive buzzer (2700 Hz default) | 15 |
+| Power button, active low | 16 |
+| Battery ADC | 5 |
+| Built-in SD CS / SCK / MOSI / MISO | 41 / 39 / 38 / 40 |
+| LCD backlight | 1 |
+| LCD/touch I2C SDA / SCL | 48 / 47 |
+| Shared panel reset | 0 |
+| Touch interrupt | 46 |
+| QMI8658 interrupt | 3 |
+
+GPIO21 drives a PNP high-side power stage (emitter at 3.3 V, collector to the
+receiver supply, LOW enables it). It is not an RX5808 SELECT line or a direct
+receiver power source. Match the receiver supply circuit to the actual module.
+
+No external status LED or NeoPixel is enabled (`PIN_LED=-1`,
+`PIN_RGB_LED=-1`, `NUM_LEDS=0`). GPIO19/20 are native USB; do not repurpose them.
+Avoid camera use alongside the receiver wiring. LCD and SD share SPI and use
+the firmware's mutex and separate chip-select lines.
+
+## Build differences and limitations
+
+This target uses pioarduino, LVGL and the LCD/power-switch options.
+It declares a 16 MB flash chip but selects `custom_8mb.csv`: filesystem offset
+`0x410000` and size `0x3E0000`. Do not flash a 16 MB layout at `0x610000` merely
+because the board has 16 MB of physical flash. The target's comment claiming
+2 MB PSRAM conflicts with the manufacturer's 8 MB specification; check the
+actual board and build output when qualifying it.
+
+This build has Wi-Fi and CDC serial, but no `FPVGATE_USB_NET` networking flag.
+Touch controller compatibility must be checked for the board revision; the
+driver family is CST820/CST816D. Browser C5 support does not establish full
+multi-pilot LCD feature parity.
+
+```sh
+pio run -e WaveshareESP32S3LCD2 -t upload
+pio run -e WaveshareESP32S3LCD2 -t uploadfs
 ```
-ESP32-S3-LCD-2     RX5808              Built-in TF Card (SPI)    Optional
-GPIO4  (Header) -- RSSI             GPIO41 (onboard) -- CS
-GPIO17 (Header) -- CH1 (DATA)       GPIO39 (onboard) -- SCK
-GPIO21 (Header) -- CH2 (SELECT)     GPIO38 (onboard) -- MOSI
-GPIO18 (Header) -- CH3 (CLOCK)      GPIO40 (onboard) -- MISO
-GPIO9  (Header) --------------- Mode Switch
-GPIO6  (Header) --------------- Buzzer (+)
-GPIO15 (Header) --------------- NeoPixel DIN (optional)
-GPIO2  (Header) --------------- Status LED (optional)
-GND             -- GND              (onboard GND)
-5V (VUSB)       -- +5V              (onboard VCC)
-```
 
-## Built-in Features (no wiring needed)
-- **TF Card Slot**: Directly on the board (GPIO38/39/40/41). Insert a FAT32-formatted SD card.
-- **Battery Monitor**: GPIO5 via onboard 200K/100K voltage divider (3:1 ratio). Connect a 3.7V LiPo to the MX1.25 battery header.
-- **2" LCD**: ST7789T3 on SPI (GPIO38 MOSI, GPIO39 SCLK, GPIO42 DC) with CST820 capacitive touch. Used by the optional LCD UI (build target `WaveshareESP32S3LCD2` with `ENABLE_LCD_UI=1`).
-
-## Notes
-- The RX5808 pins use GPIOs that are shared with the camera connector (J1). Do NOT use the camera and RX5808 at the same time.
-- GPIO4 (RSSI) is on the camera HREF line. GPIO17 is CAM_PWDN. GPIO18 and GPIO21 are header pins shared with camera I2C/data.
-- The SD card SPI bus is shared with the LCD. The firmware uses separate CS lines so both can coexist.
-- GPIO33-37 are reserved for the onboard 8MB PSRAM (OPI) and cannot be used.
-- GPIO19/GPIO20 are USB D+/D- and should not be used for other purposes.
-
-## References
-- Waveshare wiki: https://www.waveshare.com/wiki/ESP32-S3-LCD-2
-- FPVGate target: `WaveshareESP32S3LCD2` (PlatformIO)
+For GPIO16 press/hold, release and wake behavior see
+[Power switch](../POWER_SWITCH.md). Battery calibration uses the runtime
+divider setting; see [Battery monitoring](../BATTERY_MONITORING.md).

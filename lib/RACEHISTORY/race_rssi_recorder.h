@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "storage.h"
 
 // Binary sidecar magic "FGRH"
@@ -23,6 +24,8 @@
 #define RACE_RSSI_MAX_SAMPLES 45000u
 
 struct RaceRssiMeta {
+    uint8_t version = 1;
+    uint8_t channels = 1;
     bool hasHistory = false;
     uint16_t intervalMs = RACE_RSSI_INTERVAL_MS;
     uint32_t sampleCount = 0;
@@ -90,8 +93,9 @@ class RaceRssiRecorder {
    public:
     RaceRssiRecorder();
     void init(Storage* storage);
-    void beginRace();
+    void beginRace(uint8_t channels = 1, uint32_t startMs = 0);
     void addSample(uint8_t rssi, uint32_t nowMs);
+    void addFrame(const uint8_t* values, uint32_t nowMs, uint8_t valueCount = 8);
     void endRace();
     void discardPending();
     bool hasPending() const { return pendingReady; }
@@ -117,6 +121,9 @@ class RaceRssiRecorder {
 
     Storage* storage;
     bool recording;
+    uint8_t channels = 1;
+    uint32_t raceStartMs = 0;
+    SemaphoreHandle_t captureMutex = nullptr;
     bool pendingReady;
     bool truncated;
     uint16_t intervalMs;

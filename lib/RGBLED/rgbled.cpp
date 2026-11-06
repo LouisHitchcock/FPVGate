@@ -9,7 +9,22 @@
 #define FLASH_DURATION_MS 200
 #define COUNTDOWN_PHASE_MS 1000  // 1 second per phase (Red, Yellow, Green)
 
+void RgbLed::show() {
+    if (!showMutex) {
+        FastLED.show();
+        return;
+    }
+    if (xSemaphoreTake(showMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+        showPending = true;   // handleRgbLed() draws it
+        return;
+    }
+    showPending = false;
+    FastLED.show();
+    xSemaphoreGive(showMutex);
+}
+
 void RgbLed::init() {
+    showMutex = xSemaphoreCreateMutex();
     // Use PIN_RGB_LED from config - must be compile-time constant for FastLED template
     FastLED.addLeds<WS2812, PIN_RGB_LED, GRB>(leds, NUM_LEDS);
     FastLED.setBrightness(80); // Medium-high brightness
@@ -17,11 +32,14 @@ void RgbLed::init() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = CRGB::Black;
     }
-    FastLED.show();
+    show();
     DEBUG("RGB LED initialized on GPIO%d with %d LEDs\n", PIN_RGB_LED, NUM_LEDS);
 }
 
 void RgbLed::handleRgbLed(uint32_t currentTimeMs) {
+    // A frame another task couldn't draw (see show()).
+    if (showPending) show();
+
     // Check if we need to re-enable LEDs after temporary disable
     if (temporarilyDisabled && currentTimeMs >= disableUntilMs) {
         temporarilyDisabled = false;
@@ -54,7 +72,7 @@ void RgbLed::handleRgbLed(uint32_t currentTimeMs) {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = color;
             }
-            FastLED.show();
+            show();
         } else {
             isFlashing = false;
             // If we're entering a temporarily disabled period, turn LEDs off
@@ -62,7 +80,7 @@ void RgbLed::handleRgbLed(uint32_t currentTimeMs) {
                 for (int i = 0; i < NUM_LEDS; i++) {
                     leds[i] = CRGB::Black;
                 }
-                FastLED.show();
+                show();
             } else {
                 restoreSavedState();  // Restore previous state after flash
             }
@@ -117,7 +135,7 @@ void RgbLed::flashGreen() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = flashColor;
     }
-    FastLED.show();
+    show();
     
     // Schedule: After flash ends (300ms), disable LEDs for 3 seconds
     temporarilyDisabled = true;
@@ -142,7 +160,7 @@ void RgbLed::flashLap() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = flashColor;
     }
-    FastLED.show();
+    show();
     
     // Schedule brightness restore after flash
     // Note: brightness will be restored in restoreSavedState() based on inRace flag
@@ -162,7 +180,7 @@ void RgbLed::flashReset() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = flashColor;
     }
-    FastLED.show();
+    show();
     
     // Schedule: After flashes end (200*6=1200ms), disable LEDs for 3 seconds
     temporarilyDisabled = true;
@@ -183,7 +201,7 @@ void RgbLed::off() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = CRGB::Black;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::setColor(CRGB color, rgb_mode_e mode) {
@@ -193,13 +211,13 @@ void RgbLed::setColor(CRGB color, rgb_mode_e mode) {
         for (int i = 0; i < NUM_LEDS; i++) {
             leds[i] = color;
         }
-        FastLED.show();
+        show();
     }
 }
 
 void RgbLed::setBrightness(uint8_t brightness) {
     FastLED.setBrightness(brightness);
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateCountdown(uint32_t currentTimeMs) {
@@ -225,7 +243,7 @@ void RgbLed::updateCountdown(uint32_t currentTimeMs) {
         for (int i = 0; i < NUM_LEDS; i++) {
             leds[i] = color;
         }
-        FastLED.show();
+        show();
     }
     
     // After 3 seconds (3 phases), countdown is done
@@ -248,7 +266,7 @@ void RgbLed::applyStatus() {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = targetColor;
             }
-            FastLED.show();
+            show();
             break;
         
         case STATUS_RACE_RUNNING:
@@ -257,7 +275,7 @@ void RgbLed::applyStatus() {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = targetColor;
             }
-            FastLED.show();
+            show();
             break;
         
         case STATUS_RACE_END:
@@ -266,7 +284,7 @@ void RgbLed::applyStatus() {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = targetColor;
             }
-            FastLED.show();
+            show();
             break;
         
         case STATUS_BATTERY_ALARM:
@@ -289,7 +307,7 @@ void RgbLed::updateRainbowWave() {
         leds[i] = color;
     }
     rainbowHue += rainbowSpeed;
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateAnimation(uint32_t currentTimeMs) {
@@ -365,7 +383,7 @@ void RgbLed::updateAnimation(uint32_t currentTimeMs) {
                 leds[i] = targetColor;
                 leds[i].nscale8(pulseValue);
             }
-            FastLED.show();
+            show();
             break;
         }
         
@@ -377,7 +395,7 @@ void RgbLed::updateAnimation(uint32_t currentTimeMs) {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = color;
             }
-            FastLED.show();
+            show();
             break;
         }
         
@@ -403,7 +421,7 @@ void RgbLed::setManualColor(uint32_t colorHex) {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = targetColor;
     }
-    FastLED.show();
+    show();
     DEBUG("RGB LED: Manual color set to #%06X\n", colorHex);
 }
 
@@ -450,7 +468,7 @@ void RgbLed::setRaceColor(uint32_t colorHex) {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = targetColor;
     }
-    FastLED.show();
+    show();
     DEBUG("RGB LED: Race color set to #%06X\n", colorHex);
 }
 
@@ -474,7 +492,7 @@ void RgbLed::clearRaceColor() {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = targetColor;
             }
-            FastLED.show();
+            show();
         }
     }
     DEBUG("RGB LED: Race color cleared, pre-race state restored\n");
@@ -550,7 +568,7 @@ void RgbLed::restoreSavedState() {
         for (int i = 0; i < NUM_LEDS; i++) {
             leds[i] = targetColor;
         }
-        FastLED.show();
+        show();
     } else if (currentMode == RGB_OFF) {
         off();
     }
@@ -564,7 +582,7 @@ void RgbLed::celebrateLap(uint8_t lapNumber) {
         for (int i = 0; i < NUM_LEDS; i++) {
             leds[i] = colors[c];
         }
-        FastLED.show();
+        show();
         delay(50);
     }
     restoreSavedState();
@@ -578,7 +596,7 @@ void RgbLed::celebrateRaceEnd(bool newRecord) {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = (random(0, 3) == 0) ? CRGB(255, 215, 0) : CRGB::Black;
             }
-            FastLED.show();
+            show();
             delay(100);
         }
     } else {
@@ -587,7 +605,7 @@ void RgbLed::celebrateRaceEnd(bool newRecord) {
             for (int i = 0; i < NUM_LEDS; i++) {
                 leds[i] = CRGB(0, brightness, 0);
             }
-            FastLED.show();
+            show();
             delay(10);
         }
         delay(500);
@@ -619,7 +637,7 @@ void RgbLed::updateErrorBlink(uint32_t currentTimeMs) {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateSparkle() {
@@ -634,7 +652,7 @@ void RgbLed::updateSparkle() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateBreathing() {
@@ -653,7 +671,7 @@ void RgbLed::updateBreathing() {
         leds[i] = targetColor;
         leds[i].nscale8(breath);
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateChase() {
@@ -664,7 +682,7 @@ void RgbLed::updateChase() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateFire() {
@@ -678,7 +696,7 @@ void RgbLed::updateFire() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateOcean() {
@@ -690,7 +708,7 @@ void RgbLed::updateOcean() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updatePolice() {
@@ -708,7 +726,7 @@ void RgbLed::updatePolice() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateStrobe() {
@@ -727,7 +745,7 @@ void RgbLed::updateStrobe() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::updateComet() {
@@ -742,7 +760,7 @@ void RgbLed::updateComet() {
     for (int i = 0; i < NUM_LEDS; i++) {
         leds[i] = color;
     }
-    FastLED.show();
+    show();
 }
 
 void RgbLed::setPreset(led_preset_e preset) {
@@ -761,7 +779,7 @@ void RgbLed::applyPreset(led_preset_e preset) {
             // Use currently set manual color (solid)
             currentMode = RGB_SOLID;
             for (int i = 0; i < NUM_LEDS; i++) leds[i] = targetColor;
-            FastLED.show();
+            show();
             break;
         case PRESET_RAINBOW:
             setRainbowWave(effectSpeed);
@@ -795,7 +813,7 @@ void RgbLed::applyPreset(led_preset_e preset) {
             // Use currently set manual color (pilot color) as solid
             currentMode = RGB_SOLID;
             for (int i = 0; i < NUM_LEDS; i++) leds[i] = targetColor;
-            FastLED.show();
+            show();
             break;
     }
 }

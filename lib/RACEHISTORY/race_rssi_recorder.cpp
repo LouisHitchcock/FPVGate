@@ -22,6 +22,7 @@ RaceRssiRecorder::RaceRssiRecorder()
 
 void RaceRssiRecorder::init(Storage* storageBackend) {
     storage = storageBackend;
+    if (!captureMutex) captureMutex = xSemaphoreCreateMutex();
     if (writerTask) {
         return;
     }
@@ -165,7 +166,7 @@ bool RaceRssiRecorder::writeHeaderPlaceholder() {
     hdr[1] = 'G';
     hdr[2] = 'R';
     hdr[3] = 'H';
-    hdr[4] = RACE_RSSI_VERSION;
+    hdr[4] = channels == 8 ? 2 : 1;
     hdr[5] = (uint8_t)(intervalMs & 0xFF);
     hdr[6] = (uint8_t)((intervalMs >> 8) & 0xFF);
     // sampleCount + flags filled on finalize
@@ -185,7 +186,7 @@ bool RaceRssiRecorder::finalizeHeader() {
     }
     // The file is the authority on how many samples actually landed. If a write
     // failed mid-race, trust the bytes on disk rather than the counter.
-    uint32_t onDisk = (uint32_t)(fileBytes - RACE_RSSI_HEADER_SIZE);
+    uint32_t onDisk = (uint32_t)(fileBytes - RACE_RSSI_HEADER_SIZE) / (channels == 8 ? 12 : 1);
     if (onDisk != sampleCount) {
         DEBUG("[RssiRec] Sample count %u does not match %u on disk - trusting disk\n",
               sampleCount, onDisk);
@@ -198,7 +199,7 @@ bool RaceRssiRecorder::finalizeHeader() {
     hdr[1] = 'G';
     hdr[2] = 'R';
     hdr[3] = 'H';
-    hdr[4] = RACE_RSSI_VERSION;
+    hdr[4] = channels == 8 ? 2 : 1;
     hdr[5] = (uint8_t)(intervalMs & 0xFF);
     hdr[6] = (uint8_t)((intervalMs >> 8) & 0xFF);
     hdr[7] = (uint8_t)(sampleCount & 0xFF);
@@ -211,6 +212,7 @@ bool RaceRssiRecorder::finalizeHeader() {
     }
     storage->deleteFile(RACE_RSSI_PENDING_PATH);
     if (!storage->renameFile(RACE_RSSI_ACTIVE_PATH, RACE_RSSI_PENDING_PATH)) {
+        if (channels == 8) return false; // never allocate a whole multi-channel capture
         // Fallback copy. Only reached if the backend cannot rename; it costs a
         // full read of the sidecar, which is why rename is tried first.
         std::vector<uint8_t> data;
@@ -224,7 +226,11 @@ bool RaceRssiRecorder::finalizeHeader() {
     return pendingReady;
 }
 
-void RaceRssiRecorder::beginRace() {
+void RaceRssiRecorder::beginRace(uint8_t channelCount, uint32_t startMs) {
+    if (!captureMutex) return;
+    // Lifecycle calls serialize with sampling; sampling never waits for SD.
+    xSemaphoreTake(captureMutex, portMAX_DELAY);
+    struct Unlock { SemaphoreHandle_t m; ~Unlock() { xSemaphoreGive(m); } } unlock{captureMutex};
     if (!storage) {
         return;
     }
@@ -245,8 +251,10 @@ void RaceRssiRecorder::beginRace() {
     // queued append would recreate the active sidecar after discardPending.
     recording = false;
     releaseActiveBuffer();
-    waitForWriterIdle(pdMS_TO_TICKS(2000));
+    if (!waitForWriterIdle(pdMS_TO_TICKS(2000))) return;
     discardPending();
+    channels = channelCount == 8 ? 8 : 1;
+    raceStartMs = startMs;
     pendingReady = false;
     truncated = false;
     writeFailed = false;
@@ -272,9 +280,16 @@ void RaceRssiRecorder::beginRace() {
 // If the writer has not kept up the sample is dropped rather than stalling
 // lap detection, and the capture is flagged truncated.
 void RaceRssiRecorder::addSample(uint8_t rssi, uint32_t nowMs) {
-    if (!recording || !storage) {
+    addFrame(&rssi, nowMs, 1);
+}
+
+void RaceRssiRecorder::addFrame(const uint8_t* values, uint32_t nowMs, uint8_t valueCount) {
+    if (!captureMutex || xSemaphoreTake(captureMutex, 0) != pdTRUE) return;
+    struct Unlock { SemaphoreHandle_t m; ~Unlock() { xSemaphoreGive(m); } } unlock{captureMutex};
+    if (!recording || !storage || !values || channels != valueCount) {
         return;
     }
+    if (channels == 8 && (int32_t)(nowMs - raceStartMs) < 0) return;
     if (sampleCount >= RACE_RSSI_MAX_SAMPLES) {
         if (!truncated) {
             truncated = true;
@@ -295,7 +310,19 @@ void RaceRssiRecorder::addSample(uint8_t rssi, uint32_t nowMs) {
         return;
     }
 
-    buffers[activeBuffer][stagingCount++] = rssi;
+    const uint8_t frameSize = channels == 8 ? 12 : 1;
+    if (stagingCount + frameSize > RACE_RSSI_STAGING_SIZE) {
+        postActiveBuffer();
+        if (!acquireBuffer(0)) { dropped++; truncated = true; return; }
+    }
+    if (channels == 8) {
+        // v2 frame: elapsed milliseconds LE, followed by slots 0..7.
+        // Explicit timestamps preserve alignment across loop stalls/drops.
+        uint32_t elapsed = nowMs - raceStartMs;
+        for (uint8_t b = 0; b < 4; ++b) buffers[activeBuffer][stagingCount++] = elapsed >> (b * 8);
+    }
+    memcpy(buffers[activeBuffer] + stagingCount, values, channels);
+    stagingCount += channels;
     sampleCount++;
 
     if (stagingCount >= RACE_RSSI_STAGING_SIZE) {
@@ -305,6 +332,9 @@ void RaceRssiRecorder::addSample(uint8_t rssi, uint32_t nowMs) {
 }
 
 void RaceRssiRecorder::endRace() {
+    if (!captureMutex) return;
+    xSemaphoreTake(captureMutex, portMAX_DELAY);
+    struct Unlock { SemaphoreHandle_t m; ~Unlock() { xSemaphoreGive(m); } } unlock{captureMutex};
     if (!recording) {
         return;
     }
@@ -324,6 +354,8 @@ void RaceRssiRecorder::endRace() {
     if (!waitForWriterIdle(pdMS_TO_TICKS(5000))) {
         DEBUG("[RssiRec] Writer did not drain in time\n");
         truncated = true;
+        pendingReady = false;
+        return;
     }
     if (writeFailed) {
         truncated = true;
@@ -347,6 +379,7 @@ bool RaceRssiRecorder::attachToRace(uint32_t timestamp, RaceRssiMeta& outMeta) {
     String base = sidecarBasenameForTimestamp(timestamp);
     storage->deleteFile(dest);
     if (!storage->renameFile(RACE_RSSI_PENDING_PATH, dest)) {
+        if (channels == 8) return false;
         // Fallback read/write
         std::vector<uint8_t> data;
         if (!storage->readBinaryFile(RACE_RSSI_PENDING_PATH, data)) {
@@ -358,6 +391,8 @@ bool RaceRssiRecorder::attachToRace(uint32_t timestamp, RaceRssiMeta& outMeta) {
         storage->deleteFile(RACE_RSSI_PENDING_PATH);
     }
     outMeta.hasHistory = true;
+    outMeta.version = channels == 8 ? 2 : 1;
+    outMeta.channels = channels;
     outMeta.intervalMs = intervalMs;
     outMeta.sampleCount = sampleCount;
     outMeta.truncated = truncated;
@@ -372,13 +407,16 @@ bool RaceRssiRecorder::readMetaFromFile(Storage* storage, const String& path, Ra
     if (!storage) {
         return false;
     }
-    std::vector<uint8_t> data;
-    if (!storage->readBinaryFile(path, data) || data.size() < RACE_RSSI_HEADER_SIZE) {
+    uint8_t data[RACE_RSSI_HEADER_SIZE];
+    if (storage->readBinaryRange(path, 0, data, sizeof(data)) != sizeof(data)) {
         return false;
     }
     if (data[0] != 'F' || data[1] != 'G' || data[2] != 'R' || data[3] != 'H') {
         return false;
     }
+    if (data[4] != 1 && data[4] != 2) return false;
+    meta.version = data[4];
+    meta.channels = data[4] == 2 ? 8 : 1;
     meta.intervalMs = (uint16_t)data[5] | ((uint16_t)data[6] << 8);
     meta.sampleCount = (uint32_t)data[7] | ((uint32_t)data[8] << 8) | ((uint32_t)data[9] << 16) | ((uint32_t)data[10] << 24);
     meta.truncated = data[11] != 0;
@@ -395,6 +433,7 @@ bool RaceRssiRecorder::loadSamples(Storage* storage, const String& basename, Rac
         return false;
     }
     String path = basename.startsWith("/") ? basename : (String("/races/") + basename);
+    if (!readMetaFromFile(storage, path, meta) || meta.version != 1) return false;
     std::vector<uint8_t> data;
     if (!storage->readBinaryFile(path, data) || data.size() < RACE_RSSI_HEADER_SIZE) {
         return false;
@@ -402,6 +441,7 @@ bool RaceRssiRecorder::loadSamples(Storage* storage, const String& basename, Rac
     if (data[0] != 'F' || data[1] != 'G' || data[2] != 'R' || data[3] != 'H') {
         return false;
     }
+    if (data[4] != 1) return false; // v2 is streamed as binary, never expanded in device RAM
     meta.intervalMs = (uint16_t)data[5] | ((uint16_t)data[6] << 8);
     meta.sampleCount = (uint32_t)data[7] | ((uint32_t)data[8] << 8) | ((uint32_t)data[9] << 16) | ((uint32_t)data[10] << 24);
     meta.truncated = data[11] != 0;

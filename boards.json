@@ -1,6 +1,11 @@
 {
   "boards": [
     {
+      "value": "fpvgatec5mkaio",
+      "label": "FPVGate C5MK AIO (ESP32-S3 + ESP32-C5)",
+      "expert_mode": 0
+    },
+    {
       "value": "fpvgateaio",
       "label": "FPVGate AIO - Recommended",
       "expert_mode": 0
@@ -39,6 +44,11 @@
       "value": "xiaos3plus",
       "label": "XIAO ESP32S3 Plus (16MB Flash)",
       "expert_mode": 1
+    },
+    {
+      "value": "waveshares3eth",
+      "label": "Waveshare ESP32-S3-ETH (16MB, Ethernet)",
+      "expert_mode": 0
     },
     {
       "value": "novablade",

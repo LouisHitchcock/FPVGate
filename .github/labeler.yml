@@ -12,13 +12,13 @@ web-ui:
       - 'data/**/*.html'
       - 'data/**/*.css'
       - 'data/**/*.js'
-      - 'electron/**'
 
 documentation:
   - changed-files:
     - any-glob-to-any-file:
       - '*.md'
       - 'docs/**'
+      - 'images/**'
 
 hardware:
   - changed-files:

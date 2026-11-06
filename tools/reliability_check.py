@@ -231,6 +231,29 @@ def preflight(transports, args, log, result):
 
 # ---------------------------------------------------------------- phase 2
 
+def rssi_sample_counts(body):
+    """Validate trace framing and return declared/actual sample counts."""
+    if body.startswith(b'FGRH'):
+        if len(body) < 12 or body[4] != 2:
+            raise ValueError('invalid binary RSSI header/version')
+        declared = int.from_bytes(body[7:11], 'little')
+        if not int.from_bytes(body[5:7], 'little') or body[11] not in (0, 1):
+            raise ValueError('invalid interval/flags')
+        payload = body[12:]
+        if len(payload) % 12:
+            raise ValueError('incomplete binary RSSI frame')
+        actual = len(payload) // 12
+        timestamps = [int.from_bytes(payload[i:i+4], 'little')
+                      for i in range(0, len(payload), 12)]
+        if any(b < a for a, b in zip(timestamps, timestamps[1:])):
+            raise ValueError('binary RSSI timestamps run backwards')
+    else:
+        doc = json.loads(body.decode("utf-8", "replace"))
+        declared = doc.get("sampleCount")
+        actual = len(doc.get("samples", []))
+    return declared, actual
+
+
 def diagnostics(transports, args, log, result):
     log("")
     log("=" * 68)
@@ -291,9 +314,7 @@ def diagnostics(transports, args, log, result):
                         healthy = False
                     else:
                         try:
-                            doc = json.loads(body2.decode("utf-8", "replace"))
-                            declared = doc.get("sampleCount")
-                            actual = len(doc.get("samples", []))
+                            declared, actual = rssi_sample_counts(body2)
                             if declared != actual:
                                 msg = f"marshal sampleCount {declared} but {actual} samples"
                                 log(f"           FAILED {msg}")

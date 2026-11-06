@@ -1,182 +1,43 @@
-# DEBUG Library
+# DEBUG library
 
-Color-coded logging system for FPVGate serial output.
-
-## Features
-
-- **Ring buffer** for storing last 100 log entries
-- **Color-coded prefixes** for serial monitor visualization
-- **Backwards compatible** with existing `DEBUG()` macro
-- **Timestamp support** (milliseconds since boot)
-
-## Usage
-
-### Log Levels
+`DEBUG(format, ...)` (from `debug.h`) takes printf-style arguments. Each call
+writes `[millis] message` to serial and to a log ring. Include a newline when
+you want one; a line is cut at 255 bytes.
 
 ```cpp
 #include "debug.h"
-
-// Error messages (Red in serial monitor)
-LOG_ERROR("Failed to initialize SD card\n");
-LOG_ERROR("Connection failed: %d\n", errorCode);
-
-// Warning messages (Orange in serial monitor)
-LOG_WARN("Battery voltage low: %.2fV\n", voltage);
-LOG_WARN("WiFi connection lost, reconnecting\n");
-
-// Info messages (Blue in serial monitor)
-LOG_INFO("WiFi SSID: %s\n", ssid);
-LOG_INFO("IP address: %s\n", ipAddress);
-
-// Success messages (Green in serial monitor)
-LOG_SUCCESS("WiFi connected successfully!\n");
-LOG_SUCCESS("SD card initialized\n");
-
-// Debug messages (Gray in serial monitor)
-LOG_DEBUG("RSSI value: %d\n", rssi);
-LOG_DEBUG("Free heap: %d bytes\n", freeHeap);
-
-// Legacy macro (no color prefix)
-DEBUG("Generic message\n");
+DEBUG("Receiver state=%s, samples=%lu\n", state, sampleCount);
 ```
 
-### Serial Monitor Compatibility
+## The log ring
 
-The logging system outputs prefixes that are recognized by modern serial monitors:
+`logring.h` holds the ring: 16 KB of the newest log text, kept in RAM that the
+ESP32 does not clear on a crash, watchdog or software reset. A checksum tells a
+ring left by the previous boot from power-on contents, so after a crash the
+lines that led up to it are still there. A power loss clears it. Each boot
+starts with a line giving the boot number and reset reason.
 
-| Macro | Prefix | Color |
-|-------|--------|-------|
-| `LOG_ERROR()` | `[ERROR]` | Red |
-| `LOG_WARN()` | `[WARN]` | Orange |
-| `LOG_INFO()` | `[INFO]` | Blue |
-| `LOG_SUCCESS()` | `[SUCCESS]` | Green |
-| `LOG_DEBUG()` | `[DEBUG]` | Gray |
-| `DEBUG()` | None | Default |
+`DebugLogger` copies into and out of the ring under a short critical section,
+so any task can log. It never holds the lock around I/O.
 
-### Output Format
+## Saving to the SD card
 
-```
-[ERROR] [1234] Failed to connect to WiFi
-[WARN] [5678] Battery low: 3.2V
-[INFO] [9012] SSID: FPVGate_ABC123
-[SUCCESS] [12345] WiFi connected!
-[DEBUG] [15678] RSSI: 85
-[90123] Legacy debug message
-```
+Off by default. When `/logs/enabled` exists on the SD card, a priority-1 task
+on core 0 appends the ring to `/logs/log.txt` every 5 seconds, in chunks of up
+to 2 KB, through `Storage` and its SPI lock. At 256 KB the file becomes
+`/logs/log.1.txt` (replacing the older one). The first write after a crash
+saves what the crash left unsaved. Nothing is written without a card, so the
+log never wears the board's flash. Messages logged by the writer task itself
+(storage diagnostics) go to serial only.
 
-Format: `[PREFIX] [TIMESTAMP_MS] Message`
+## Endpoints
 
-## API Reference
+- `GET /api/debuglog`: recent lines as `{logs: [{seq, timestamp, message}]}`.
+  `seq` orders lines across boots, where timestamps restart from zero.
+- `GET /api/log/status`: whether saving is on, bytes saved, unsaved, lost and
+  failed writes, and file sizes.
+- `POST /api/log/sd?enabled=1|0`: turn saving on or off (needs a card).
+- `GET /api/log/file?part=0|1`: download `log.txt` or `log.1.txt`.
 
-### Macros
-
-```cpp
-LOG_ERROR(format, ...)   // Red error messages
-LOG_WARN(format, ...)    // Orange warnings
-LOG_INFO(format, ...)    // Blue information
-LOG_SUCCESS(format, ...) // Green success messages
-LOG_DEBUG(format, ...)   // Gray debug output
-DEBUG(format, ...)       // Legacy (no color)
-```
-
-All macros support `printf`-style formatting.
-
-### DebugLogger Class
-
-```cpp
-// Get singleton instance
-DebugLogger& logger = DebugLogger::getInstance();
-
-// Log with specific level
-logger.logWithLevel(LOG_ERROR, "Error: %d\n", code);
-
-// Get log buffer
-const std::vector<LogEntry>& logs = logger.getBuffer();
-
-// Clear log buffer
-logger.clear();
-```
-
-### LogEntry Structure
-
-```cpp
-struct LogEntry {
-    unsigned long timestamp;  // Milliseconds since boot
-    char message[256];        // Log message (without prefix)
-};
-```
-
-## Configuration
-
-```cpp
-// In debuglogger.h:
-#define DEBUG_BUFFER_SIZE 100  // Ring buffer size
-
-// In debug.h:
-#define SERIAL_BAUD 460800     // Serial baud rate
-```
-
-## Best Practices
-
-1. **Use appropriate levels:**
-   - `LOG_ERROR` for critical failures
-   - `LOG_WARN` for recoverable issues
-   - `LOG_INFO` for status and configuration
-   - `LOG_SUCCESS` for successful operations
-   - `LOG_DEBUG` for detailed debugging
-
-2. **Always include newlines:**
-   ```cpp
-   LOG_INFO("WiFi connected\n");  // Correct
-   LOG_INFO("WiFi connected");    // Missing \n
-   ```
-
-3. **Format efficiently:**
-   ```cpp
-   LOG_INFO("IP: %s, RSSI: %d\n", ip, rssi);  // Good
-   LOG_INFO("IP: ");                           // Avoid multiple
-   LOG_INFO("%s", ip);                         // calls per line
-   LOG_INFO("\n");
-   ```
-
-4. **Keep messages concise:**
-   - Maximum 256 characters per message
-   - Focus on actionable information
-
-## Example: WiFi Status Logging
-
-```cpp
-void connectWiFi() {
-    LOG_INFO("Connecting to WiFi network\n");
-    
-    if (WiFi.begin(ssid, password)) {
-        LOG_SUCCESS("WiFi connected successfully!\n");
-        LOG_INFO("IP address: %s\n", WiFi.localIP().toString().c_str());
-        LOG_INFO("SSID: %s\n", WiFi.SSID().c_str());
-    } else {
-        LOG_ERROR("WiFi connection failed\n");
-        LOG_WARN("Falling back to AP mode\n");
-    }
-}
-```
-
-## Backwards Compatibility
-
-The `DEBUG()` macro remains unchanged for existing code:
-
-```cpp
-DEBUG("This works like before\n");  // No prefix, no color
-```
-
-To gradually migrate to color-coded logging:
-
-1. Identify log message purpose
-2. Replace `DEBUG()` with appropriate `LOG_*()` macro
-3. Test output in serial monitor
-
-## Notes
-
-- Serial baud rate is **460800** (configured in `debug.h`)
-- Log buffer stores last **100 entries** (ring buffer)
-- Timestamps are in **milliseconds** since ESP32 boot
-- Color rendering depends on serial monitor support
+The Diagnostics screen's **Download log.txt** combines these with system, C5
+and crash information into one file for bug reports.

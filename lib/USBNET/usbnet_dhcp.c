@@ -29,7 +29,7 @@ static void lease_timer(void *arg) {
     sys_timeout(DHCPS_COARSE_TIMER_SECS * 1000, lease_timer, arg);
 }
 
-// Called on lwIP's TCP/IP task, once for the lifetime of the USB netif.
+// Called on lwIP's TCP/IP task when the USB netif comes up.
 esp_err_t usbnet_dhcp_start(struct netif *interface) {
     dhcps_offer_t offers = 0; // USB provides local access, not an Internet gateway.
     usb_dhcps_set_new_lease_cb(lease_assigned);
@@ -41,5 +41,11 @@ esp_err_t usbnet_dhcp_start(struct netif *interface) {
     udp_bind_netif(interface->dhcps_pcb, interface);
     sys_timeout(DHCPS_COARSE_TIMER_SECS * 1000, lease_timer, NULL);
     return ESP_OK;
+}
+
+// Called on lwIP's TCP/IP task when the USB netif goes down.
+void usbnet_dhcp_stop(struct netif *interface) {
+    sys_untimeout(lease_timer, NULL);
+    usb_dhcps_stop(interface);
 }
 #endif

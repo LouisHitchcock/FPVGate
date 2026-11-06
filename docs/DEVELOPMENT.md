@@ -1,1089 +1,200 @@
-﻿# FPVGate Development Guide
+# FPVGate development guide
 
-Guide for building, modifying, and contributing to FPVGate.
+For the `V1.9.0-alpha` branch. The normal build label is
+`1.9.0-alpha-5`; `FPVGateC5MKAIO_EMAProbe` is a diagnostic variant.
+Version strings come from `lib/VERSION/version.h`, not `platformio.ini`.
 
-** Navigation:** [Home](../README.md) | [Getting Started](GETTING_STARTED.md) | [User Guide](USER_GUIDE.md) | [Hardware Guide](HARDWARE_GUIDE.md) | [Features](FEATURES.md)
+## Development setup
 
----
+Use Git and Python with PlatformIO Core (or the VS Code PlatformIO extension).
+CI currently uses Python 3.11. Node.js is required for the Jest tests and Node
+verification tools. A C++17 `g++` compiler is needed for native/config tests.
+The PowerShell native script calls `g++` directly; the Jest config test also
+supports `CXX`.
 
-## Table of Contents
-
-1. [Development Setup](#development-setup)
-2. [Building from Source](#building-from-source)
-3. [Project Structure](#project-structure)
-4. [Firmware Development](#firmware-development)
-5. [Web Interface Development](#web-interface-development)
-6. [Electron App Development](#electron-app-development)
-7. [Testing](#testing)
-8. [Contributing](#contributing)
-9. [Release Process](#release-process)
-10. [Troubleshooting Build Issues](#troubleshooting-build-issues)
-
----
-
-## Development Setup
-
-### Prerequisites
-
-**Required Tools:**
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| **PlatformIO** | Latest | ESP32 firmware compilation |
-| **Python** | 3.7+ | Build scripts, TTS generation |
-| **Node.js** | 14+ | Electron app (optional) |
-| **Git** | 2.0+ | Version control |
-| **VS Code** | Latest | Recommended IDE |
-
-### Installing PlatformIO
-
-**Option 1: VS Code Extension (Recommended)**
-
-1. Install VS Code
-2. Open Extensions (Ctrl+Shift+X)
-3. Search "PlatformIO IDE"
-4. Click Install
-5. Restart VS Code
-
-**Option 2: CLI Only**
-
-```bash
-pip install platformio
-```
-
-### Installing Python Dependencies
-
-```bash
+```sh
+git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
-pip install -r requirements.txt
+python -m pip install platformio
+npm install --prefix tests
 ```
 
-**Included Packages:**
-- `elevenlabs` - TTS generation
-- `esptool` - ESP32 flashing
-- `pyserial` - Serial communication
+`requirements.txt` contains ElevenLabs and dotenv for voice generation.
+It does not install PlatformIO, esptool or pyserial. Device serial diagnostic
+tools may require `python -m pip install pyserial` separately. Install the
+voice requirements only when generating packs. On Windows use PowerShell
+for PlatformIO builds; the package tools can reject an MSys/Git Bash environment.
 
-### Cloning the Repository
+## Build targets
 
-```bash
-git clone https://github.com/LouisHitchcock/FPVGate.git
-cd FPVGate
+Select the environment explicitly:
+
+| Environment | Purpose |
+| --- | --- |
+| `ESP32S3` | DevKitC-1 N8, 8 MB, no PSRAM |
+| `SeeedXIAOESP32S3` | Seeed XIAO S3, 8 MB |
+| `FPVGateAIO` | AIO, 8 MB |
+| `FPVGateSolo` | Solo, 8 MB |
+| `FPVGateC5MKAIO` | Dual-XIAO AIO, fixed C5 receiver, 8 MB |
+| `WaveshareS3ETH` | W5500 Ethernet board, 16 MB |
+| `ESP32S3SuperMini` | Retained 4 MB custom target |
+| `LilyGOTEnergyS3` | Retained custom target, 8 MB layout |
+| `WaveshareESP32S3LCD2` | Retained LCD target, pioarduino, 8 MB layout on 16 MB flash |
+| `XIAOS3Plus` | Retained 16 MB custom target |
+| `FPVGateC5MKAIO_EMAProbe` | Bench isolation only, inherited C5MK AIO environment |
+
+Only the first six are packaged by `tools/package_release.py` and the manual
+CI matrix. `FPVGateLCDAIO.ini` is not included in `extra_configs`.
+See [hardware limitations](HARDWARE_GUIDE.md#choose-a-timer-and-receiver)
+before treating retained targets as qualified builds.
+
+## Building from source
+
+```sh
+pio run -e SeeedXIAOESP32S3
+pio run -e SeeedXIAOESP32S3 -t buildfs
+pio run -e SeeedXIAOESP32S3 -t upload
+pio run -e SeeedXIAOESP32S3 -t uploadfs
+pio device monitor -e SeeedXIAOESP32S3
 ```
 
----
-
-## Building from Source
-
-### Quick Build
-
-**Using PlatformIO IDE (VS Code):**
-
-1. Open FPVGate folder in VS Code
-2. PlatformIO sidebar → PROJECT TASKS
-3. `esp32-s3-devkitc-1` → General → Build
-4. Wait for compilation (~2-3 minutes first time)
-
-**Using CLI:**
-
-```bash
-pio run -e esp32-s3-devkitc-1
-```
-
-### Uploading Firmware
-
-**With USB Connected:**
-
-```bash
-# Auto-detect port and upload
-pio run -e esp32-s3-devkitc-1 -t upload
-
-# Or specify port
-pio run -e esp32-s3-devkitc-1 -t upload --upload-port COM12
-```
-
-**Manual Upload (esptool):**
-
-```bash
-# Erase flash first (clean install)
-python -m esptool --port COM12 erase_flash
-
-# Upload firmware
-python -m esptool --port COM12 --baud 460800 write_flash 0x0 .pio/build/esp32-s3-devkitc-1/firmware.bin
-```
-
-### Build Targets
-
-**platformio.ini Environments:**
-
-```ini
-[env:esp32-s3-devkitc-1]
-platform = espressif32
-board = esp32-s3-devkitc-1
-framework = arduino
-```
-
-**Available Targets:**
-
-| Target | Description |
-|--------|-------------|
-| `build` | Compile firmware only |
-| `upload` | Compile and upload |
-| `uploadfs` | Upload filesystem (LittleFS) |
-| `monitor` | Open serial monitor |
-| `clean` | Clean build cache |
-| `erase` | Erase entire flash |
-
-### Building Filesystem
-
-**LittleFS contains:**
-- Web interface files (data/)
-- Configuration defaults
-- PiperTTS model
-
-**Build and Upload:**
-
-```bash
-# Build filesystem image
-pio run -e esp32-s3-devkitc-1 -t buildfs
-
-# Upload to ESP32
-pio run -e esp32-s3-devkitc-1 -t uploadfs
-```
-
-**Note:** Uploadfs erases `/config.json` and `/races.json` - backup first!
-
----
-
-## Project Structure
-
-### Firmware Architecture
-
-```
-FPVGate/
-├── src/
-│   └── main.cpp                  # Entry point
-├── lib/                          # Custom libraries
-│   ├── CALIBRATION/
-│   │   ├── calibration.h
-│   │   └── calibration.cpp       # RSSI calibration logic
-│   ├── CONFIG/
-│   │   ├── config.h
-│   │   └── config.cpp            # Configuration management
-│   ├── FASTLED/
-│   │   ├── fastled_control.h
-│   │   └── fastled_control.cpp   # LED animations
-│   ├── FREQUENCY/
-│   │   ├── frequency.h
-│   │   └── frequency.cpp         # Band/channel/MHz conversion
-│   ├── RACEHISTORY/
-│   │   ├── racehistory.h
-│   │   └── racehistory.cpp       # Race storage, export/import
-│   ├── RACELOGIC/
-│   │   ├── racelogic.h
-│   │   └── racelogic.cpp         # Timing state machine
-│   ├── RX5808/
-│   │   ├── rx5808.h
-│   │   └── rx5808.cpp            # RX5808 SPI driver
-│   ├── SELFTEST/
-│   │   ├── selftest.h
-│   │   └── selftest.cpp          # Hardware diagnostics
-│   ├── TRANSPORT/
-│   │   ├── transport.h           # Transport abstraction
-│   │   └── transport.cpp
-│   ├── TTS/
-│   │   ├── tts.h
-│   │   └── tts.cpp               # Text-to-speech management
-│   ├── USB/
-│   │   ├── usb.h
-│   │   └── usb.cpp               # USB Serial CDC transport
-│   ├── LCD_UI/                    # Optional touchscreen UI (Waveshare LCD board only)
-│   │   ├── fpv_lcd_ui.h
-│   │   ├── fpv_lcd_ui.cpp         # LVGL touchscreen UI (ported from StarForgeOS)
-│   │   ├── lv_conf.h              # LVGL configuration
-│   │   ├── CST820.h/.cpp          # Capacitive touch driver
-│   │   └── spi_mutex.h            # SPI bus sharing (LCD + SD card)
-│   ├── WEBSERVER/
-│   │   ├── webserver.h
-│   │   └── webserver.cpp         # HTTP + WebSocket server
-│   └── WIFIMAN/
-│       ├── wifiman.h
-│       └── wifiman.cpp           # WiFi AP management
-├── data/                         # Web interface (uploaded to LittleFS)
-│   ├── index.html
-│   ├── style.css
-│   ├── script.js
-│   ├── usb-transport.js
-│   └── themes.css
-├── tools/                        # Python utilities
-│   ├── tts_generator.py
-│   ├── upload_to_sd.py
-│   └── ...
-├── electron/                     # Desktop app
-│   ├── main.js
-│   ├── preload.js
-│   └── package.json
-├── platformio.ini                # PlatformIO config
-└── README.md
-```
-
-### Key Files
-
-#### main.cpp
-
-**Entry point** - Setup and main loop.
-
-**Key Functions:**
-- `setup()` - Initialize all subsystems
-- `loop()` - Main event loop
-
-**Subsystem Init Order:**
-1. Serial (debug output)
-2. LittleFS (filesystem)
-3. Config (load settings)
-4. RX5808 (SPI + frequency)
-5. FastLED (RGB LEDs)
-6. WiFi (Access Point)
-7. WebServer (HTTP + WebSocket)
-8. USB (Serial CDC)
-9. TTS (voice system)
-
-#### lib/RACELOGIC/racelogic.cpp
-
-**Core timing logic** - State machine for lap detection.
-
-**States:**
-- `IDLE` - Waiting for RSSI rise
-- `CROSSING` - In gate, watching for peak
-- `COOLDOWN` - Minimum lap time delay
-
-**Key Methods:**
-- `update()` - Called every loop (~100Hz)
-- `startRace()` - Begin countdown
-- `stopRace()` - End race, save
-- `addManualLap()` - Force lap at current time
-
-#### lib/WEBSERVER/webserver.cpp
-
-**HTTP + WebSocket server** - API endpoints and real-time events.
-
-**API Endpoints:**
-- `GET /` - Serve index.html
-- `GET /api/config` - Get configuration
-- `POST /api/config/...` - Update settings
-- `POST /timer/start` - Start race
-- `POST /timer/stop` - Stop race
-- `POST /timer/lap` - Manual lap
-- `POST /timer/clear` - Clear laps
-
-**WebSocket Events:**
-- `lap` - Lap detected
-- `raceStart` - Race starting
-- `raceStop` - Race stopped
-- `rssiUpdate` - RSSI value (calibration)
-
-#### lib/USB/usb.cpp
-
-**USB Serial CDC transport** - JSON command/event protocol.
-
-**Command Format:**
-```json
-{"method":"POST","path":"timer/start","data":{}}
-```
-
-**Event Format:**
-```json
-EVENT:{"type":"lap","data":{...}}
-```
-
----
-
-## Firmware Development
-
-### Adding a New Feature
-
-**Example: Add "Fastest Lap Voice Callout"**
-
-#### Step 1: Update Core Logic
-
-**lib/RACELOGIC/racelogic.cpp:**
-
-```cpp
-void RaceLogic::addLap(unsigned long lapTime) {
-  // Existing code...
-  laps.push_back(lap);
-  
-  // NEW: Check if fastest lap
-  if (lapTime < fastestLap || fastestLap == 0) {
-    fastestLap = lapTime;
-    
-    // Trigger TTS announcement
-    TTS::announceMessage("Fastest lap!");
-  }
-  
-  // Broadcast event
-  TransportManager::broadcast(/* ... */);
-}
-```
-
-#### Step 2: Add API Endpoint (if needed)
-
-**lib/WEBSERVER/webserver.cpp:**
-
-```cpp
-server.on("/api/race/fastest", HTTP_GET, [](AsyncWebServerRequest *request) {
-  StaticJsonDocument<200> doc;
-  doc["fastest_lap"] = RaceLogic::getFastestLap();
-  doc["lap_number"] = RaceLogic::getFastestLapNumber();
-  
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
-});
-```
-
-#### Step 3: Update Frontend
-
-**data/script.js:**
-
-```javascript
-function handleLapEvent(data) {
-  // Existing lap handling...
-  
-  // Check if fastest lap
-  if (data.isFastestLap) {
-    showNotification(" Fastest Lap!");
-  }
-}
-```
-
-#### Step 4: Test
-
-1. Build and upload firmware
-2. Test in browser
-3. Verify voice announcement
-4. Check API response
-
-### Debugging Techniques
-
-#### Serial Monitor
-
-**Enable Debug Output:**
-
-```cpp
-// main.cpp
-#define DEBUG_MODE 1
-
-#ifdef DEBUG_MODE
-  Serial.println("RX5808 initialized");
-  Serial.printf("RSSI: %d\n", rssi);
-#endif
-```
-
-**View Output:**
-
-```bash
-pio device monitor -b 115200
-```
-
-#### LED Debugging
-
-**Use LEDs for status:**
-
-```cpp
-void showDebugStatus() {
-  if (wifiConnected) {
-    FastLED::showColor(CRGB::Green);
-  } else {
-    FastLED::showColor(CRGB::Red);
-  }
-  delay(500);
-  FastLED::clear();
-}
-```
-
-#### Remote Logging
-
-**Send debug messages to web clients:**
-
-```cpp
-void debugLog(String message) {
-  StaticJsonDocument<200> doc;
-  doc["type"] = "debug";
-  doc["message"] = message;
-  
-  String output;
-  serializeJson(doc, output);
-  TransportManager::broadcast(output);
-}
-```
-
-### Memory Optimization
-
-**Check Memory Usage:**
-
-```cpp
-void printMemoryStats() {
-  Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
-  Serial.printf("Largest free block: %d bytes\n", ESP.getMaxAllocHeap());
-  Serial.printf("Flash size: %d bytes\n", ESP.getFlashChipSize());
-}
-```
-
-**Optimize Techniques:**
-- Use `PROGMEM` for large const data
-- Minimize String usage (use char[])
-- Free unused memory promptly
-- Use `const` and `static` where possible
-
----
-
-## Web Interface Development
-
-### Live Development Workflow
-
-**Option 1: Direct Edit on ESP32**
-
-1. Edit `data/` files locally
-2. Upload filesystem: `pio run -t uploadfs`
-3. Refresh browser
-
-**Option 2: Local HTTP Server (Faster Iteration)**
-
-1. Start local server:
-   ```bash
-   cd data/
-   python -m http.server 8000
-   ```
-
-2. Update API calls to point to ESP32:
-   ```javascript
-   const API_BASE = 'http://192.168.4.1';
-   ```
-
-3. Open `http://localhost:8000` in browser
-
-4. When done, revert API_BASE and upload to ESP32
-
-### Adding a New UI Component
-
-**Example: Add "Total Race Time" Display**
-
-#### Step 1: HTML Structure
-
-**data/index.html:**
-
-```html
-<div class="race-controls">
-  <!-- Existing controls -->
-  
-  <div class="stat-box">
-    <h3>Total Time</h3>
-    <p id="totalRaceTime">00:00:00</p>
-  </div>
-</div>
-```
-
-#### Step 2: Styling
-
-**data/style.css:**
-
-```css
-.stat-box {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 1rem;
-  text-align: center;
-}
-
-.stat-box h3 {
-  font-size: 0.9rem;
-  color: var(--text-secondary);
-  margin-bottom: 0.5rem;
-}
-
-.stat-box p {
-  font-size: 1.5rem;
-  font-weight: bold;
-  color: var(--accent-color);
-}
-```
-
-#### Step 3: JavaScript Logic
-
-**data/script.js:**
-
-```javascript
-function updateTotalRaceTime() {
-  const totalMs = laps.reduce((sum, lap) => sum + lap.time, 0);
-  const formatted = formatTime(totalMs);
-  document.getElementById('totalRaceTime').textContent = formatted;
-}
-
-// Call on lap events
-function handleLap(data) {
-  // Existing code...
-  updateTotalRaceTime();
-}
-```
-
-### Theme Development
-
-**Adding a New Theme:**
-
-**data/themes.css:**
-
-```css
-/* Custom Dark Blue Theme */
-[data-theme="dark-blue"] {
-  --bg-primary: #0a1929;
-  --bg-secondary: #132f4c;
-  --card-bg: #1a3a52;
-  --text-primary: #e7ebf0;
-  --text-secondary: #b0bec5;
-  --accent-color: #3399ff;
-  --accent-hover: #2288ee;
-  --border-color: #2d4a63;
-  --success-color: #4caf50;
-  --warning-color: #ff9800;
-  --error-color: #f44336;
-}
-```
-
-**Update Theme Selector:**
-
-**data/script.js:**
-
-```javascript
-const themes = [
-  // Existing themes...
-  { value: 'dark-blue', label: 'Dark Blue' }
-];
-```
-
----
-
-## Electron App Development
-
-### Setup
-
-```bash
-cd electron/
-npm install
-```
-
-### Development Mode
-
-**Run with hot reload:**
-
-```bash
-npm start
-```
-
-**File Watcher:**
-
-```bash
-# In separate terminal
-npm run watch
-```
-
-### Building Distributable
-
-**Windows:**
-```bash
-npm run build:win
-```
-
-**macOS:**
-```bash
-npm run build:mac
-```
-
-**Linux:**
-```bash
-npm run build:linux
-```
-
-**Output:** `electron/dist/`
-
-### Electron Main Process
-
-**electron/main.js:**
-
-```javascript
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true
-    }
-  });
-
-  // Load web interface
-  win.loadFile('../data/index.html');
-}
-
-app.whenReady().then(createWindow);
-```
-
-### USB Serial Integration
-
-**electron/preload.js:**
-
-```javascript
-const { contextBridge } = require('electron');
-const { SerialPort } = require('serialport');
-
-contextBridge.exposeInMainWorld('electronAPI', {
-  // List available ports
-  listPorts: async () => {
-    return await SerialPort.list();
-  },
-  
-  // Open serial connection
-  openPort: (path, baudRate) => {
-    return new SerialPort({ path, baudRate });
-  }
-});
-```
-
-**Usage in Renderer:**
-
-```javascript
-// Get available COM ports
-const ports = await window.electronAPI.listPorts();
-
-// Connect to selected port
-const port = window.electronAPI.openPort('COM12', 115200);
-
-port.on('data', (data) => {
-  // Handle incoming events
-  if (data.startsWith('EVENT:')) {
-    const event = JSON.parse(data.substring(6));
-    handleEvent(event);
-  }
-});
-
-// Send command
-port.write(JSON.stringify({
-  method: 'POST',
-  path: 'timer/start',
-  data: {}
-}));
-```
-
----
+Add `--upload-port COM3` (your actual port) to an upload when needed.
+Replace the environment for your board. `python -m platformio` works when
+the `pio` shim is unavailable in the active Python environment.
+
+Build both firmware and filesystem. `scripts/gzip_assets.py` compresses a staged
+copy of `data/` inside the build directory; edit uncompressed source assets.
+`scripts/patch_async_event_source.py` applies the disconnect-race fix to the
+downloaded web-server library. Do not hand-edit the PlatformIO dependency cache
+as the permanent fix.
+
+Uploading LittleFS replaces the partition. Back up SD/flash history and traces
+first. EEPROM configuration is separate, and an erase/full reflash may also
+lose it. Partition changes need a full wired flash, not OTA; see
+[Getting started](GETTING_STARTED.md#upgrades-and-recovery).
+
+## Project structure
+
+[Repository layout](REPOSITORY_LAYOUT.md) is the directory reference.
+
+| Source | Responsibility |
+| --- | --- |
+| `src/main.cpp` | Initialization, tasks and service polling |
+| `lib/CONFIG` | Board pins, EEPROM v24 and migrations |
+| `lib/LAPTIMER` | Conventional timer |
+| `lib/RX5808` | Conventional RSSI receiver |
+| `lib/C5LINK` | UART protocol, sample queues and per-pilot peak detector |
+| `lib/RACECONTROL` | C5 lifecycle, frozen race settings, completion and persistence |
+| `lib/RACEHISTORY` | History and RSSI sidecars |
+| `lib/WEBSERVER` | HTTP routes, Wi-Fi and SSE |
+| `lib/USBNET`, `lib/ETHNET` | RNDIS/CDC and W5500 networking |
+| `lib/LCD_UI`, `lib/POWER` | Optional LCD/power behavior |
+| `data/script.js` | Main page behavior |
+| `data/c5-multipilot.js`, `data/event.js` | C5 setup and Event director |
+| `data/race-editor.js`, `data/race-trace.js` | History editing and trace decoding |
+| `data/audio-announcer.js` | Pre-recorded/browser speech |
+| `data/i18n.js`, `data/locales/` | Locale loading and translations |
+
+HTTP listens on port 80. Live browser data is `/events` SSE; RotorHazard uses
+its separate `/api/rh/events` stream. The current UI does not need the old
+Electron wrapper or Web Serial transport. Do not describe SSE as WebSocket
+port 81.
+
+## Firmware development
+
+Board pin and feature definitions are in `lib/CONFIG/config.h`. Target build
+flags determine USB networking, Ethernet, LCD, PSRAM and dependencies. A field
+such as `speakerEnabled` surviving in EEPROM does not mean the feature is built.
+
+For EEPROM changes, preserve layout/migration compatibility and review config
+load, defaults, setters and JSON import/export together. Add board identity
+in the environment, `FPVGATE_BOARD_ID` and release metadata together.
+C5MK AIO must stay C5-only across every load/setter path.
+
+Keep sample reception and peak detection independent of HTTP/SD latency.
+C5 events carry sample-derived timestamps; host arrival time and the nominal
+20 ms review graph are not substitutes. HTTP race commands queue work for
+`C5RaceControl`; do not perform duplicate browser history saves for
+`gateManaged` sessions. [Gate completion](GATE_RACE_COMPLETION.md) documents
+asynchronous stop/save and retry semantics.
+
+`lib/EVENTDIRECTOR/` binds loaded Event heats to C5 races, persists results and
+loads the next group. Keep its lease, revision and journal boundaries intact;
+see [Event progression](GATE_EVENT_PROGRESSION.md). Never mirror a gate-owned
+Event result into a second browser-side record.
+
+The raw board definitions expose unresolved custom-target pin conflicts.
+Do not silently change an established wiring diagram by changing code during
+a documentation pass; qualify any proposed hardware change separately.
+
+## Web interface development
+
+Edit the source in `data/`, run focused tests, build/upload LittleFS and reload
+the browser. A simple static HTTP server can preview layout, but cannot supply
+the device API, SSE or storage. Use fixtures for isolated page tests; a preview
+alone does not validate timing or race persistence.
+
+New visible strings should use locale keys. Add English and the other locale
+entries or verify fallback behavior. Keep UI and firmware config units aligned:
+minimum lap is tenths of a second; heat time is 30-second blocks; RSSI display,
+raw C5 values and RH scaling differ.
+
+For themes, follow the variables and class names in `data/themes.css` and the
+existing UI selector. Test mobile layouts, an active race and history editing.
+Browser audio requires a gesture and may use OS voices even with SD packs.
 
 ## Testing
 
-### Unit Tests (Future)
+From the repository root:
 
-**Framework:** PlatformIO Unit Testing
-
-**Example Test:**
-
-```cpp
-// test/test_frequency.cpp
-#include <unity.h>
-#include "frequency.h"
-
-void test_frequency_calculation() {
-  int freq = Frequency::calculate('R', 1);
-  TEST_ASSERT_EQUAL(5658, freq);
-}
-
-void test_invalid_band() {
-  int freq = Frequency::calculate('Z', 1);
-  TEST_ASSERT_EQUAL(-1, freq);
-}
-
-void setup() {
-  UNITY_BEGIN();
-  RUN_TEST(test_frequency_calculation);
-  RUN_TEST(test_invalid_band);
-  UNITY_END();
-}
-
-void loop() {}
+```sh
+npm test --prefix tests -- --runInBand
 ```
 
-**Run Tests:**
+The suite executes extracted production page logic and includes compiled
+firmware configuration/race-controller coverage; it is no longer four
+browser-only suites. Check the test runner for current counts.
 
-```bash
-pio test -e esp32-s3-devkitc-1
+Native C5 completion/history checks on Windows:
+
+```powershell
+./tests/native/build_race_control.ps1
+./tests/native/build_event_director.ps1
+python -m unittest discover -s tests -p test_package_release.py -v
 ```
 
-### Integration Testing
+RH timing simulator (Bash and `g++`):
 
-**Manual Test Checklist:**
-
-- [ ] WiFi AP starts and accepts connections
-- [ ] Web interface loads correctly
-- [ ] Race start/stop functions
-- [ ] Lap detection works (real VTx)
-- [ ] RSSI calibration accurate
-- [ ] LED animations smooth
-- [ ] Voice announcements play
-- [ ] Configuration saves/loads
-- [ ] Race history export/import
-- [ ] USB connection works (ESP32-S3)
-- [ ] Multi-client sync (WiFi + USB)
-
-### Hardware-in-Loop Testing
-
-**Automated RSSI Simulation:**
-
-```cpp
-// test/simulate_race.cpp
-void simulateRace() {
-  Serial.println("Simulating race...");
-  
-  // Simulate race start
-  RaceLogic::startRace();
-  delay(5000);
-  
-  // Simulate 5 laps with varying RSSI
-  for (int i = 0; i < 5; i++) {
-    // Simulate RSSI rise
-    for (int rssi = 80; rssi < 150; rssi += 5) {
-      RaceLogic::update(rssi);
-      delay(50);
-    }
-    
-    // Simulate RSSI fall
-    for (int rssi = 150; rssi > 80; rssi -= 5) {
-      RaceLogic::update(rssi);
-      delay(50);
-    }
-    
-    delay(2000); // Inter-lap delay
-  }
-  
-  RaceLogic::stopRace();
-  Serial.println("Simulation complete");
-}
+```sh
+bash tests/native/build_rh_timing_sim.sh
+python -m unittest discover -s tests/native -p test_post_soak_diagnostics.py -v
 ```
 
----
-
-## Contributing
-
-### Contribution Workflow
-
-1. **Fork Repository**
-   ```bash
-   # Click "Fork" on GitHub
-   git clone https://github.com/YOUR_USERNAME/FPVGate.git
-   ```
-
-2. **Create Feature Branch**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-3. **Make Changes**
-   - Write code
-   - Test thoroughly
-   - Update documentation
-
-4. **Commit Changes**
-   ```bash
-   git add .
-   git commit -m "Add: Brief description of change"
-   ```
-
-   **Commit Message Format:**
-   - `Add:` - New feature
-   - `Fix:` - Bug fix
-   - `Update:` - Modify existing feature
-   - `Docs:` - Documentation only
-   - `Refactor:` - Code restructure
-
-5. **Push to Fork**
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-6. **Create Pull Request**
-   - Go to original repository on GitHub
-   - Click "Pull Requests" → "New Pull Request"
-   - Select your fork and branch
-   - Describe changes
-   - Submit
-
-### Code Style Guidelines
-
-**C++ (Firmware):**
-
-```cpp
-// Use camelCase for variables
-int currentLapTime = 0;
-
-// Use PascalCase for classes
-class RaceLogic {
-  // Public first, then private
-  public:
-    void startRace();
-  
-  private:
-    int lapCount;
-};
-
-// Use UPPER_CASE for constants
-const int MAX_LAPS = 50;
-
-// Comment complex logic
-void calculateStatistics() {
-  // Sort laps by time for median calculation
-  std::sort(laps.begin(), laps.end());
-  
-  // Find middle value
-  int medianIndex = laps.size() / 2;
-  medianLap = laps[medianIndex];
-}
-```
-
-**JavaScript (Web Interface):**
-
-```javascript
-// Use camelCase for variables and functions
-let currentLapTime = 0;
-
-function startRace() {
-  // Clear existing state
-  clearLaps();
-  
-  // Send start command to ESP32
-  fetch('/timer/start', { method: 'POST' })
-    .then(response => response.json())
-    .then(data => console.log('Race started', data))
-    .catch(error => console.error('Error:', error));
-}
-
-// Use descriptive names
-function calculateMedianLapTime(laps) {
-  const sorted = [...laps].sort((a, b) => a.time - b.time);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1].time + sorted[mid].time) / 2
-    : sorted[mid].time;
-}
-```
-
-### Documentation Standards
-
-**Code Documentation:**
-
-```cpp
-/**
- * Calculate median lap time from array of laps
- * 
- * @param laps Vector of lap times in milliseconds
- * @return Median lap time, or 0 if no laps
- * 
- * @note Excludes "Gate 1" from calculation
- */
-unsigned long calculateMedianLap(std::vector<unsigned long>& laps) {
-  // Implementation...
-}
-```
-
-**README Updates:**
-
-- Add new features to feature list
-- Update wiring diagrams if hardware changes
-- Include screenshots for UI changes
-- Update version number
-
----
-
-## Release Process
-
-### Version Numbering
-
-**Semantic Versioning:** `MAJOR.MINOR.PATCH`
-
-- **MAJOR:** Breaking changes
-- **MINOR:** New features (backward compatible)
-- **PATCH:** Bug fixes
-
-**Example:** `v1.2.1`
-
-### Creating a Release
-
-#### Step 1: Update Version
-
-**platformio.ini:**
-```ini
-build_flags = 
-  -D VERSION="1.3.0"
-```
-
-**package.json (Electron):**
-```json
-{
-  "version": "1.3.0"
-}
-```
-
-#### Step 2: Update CHANGELOG.md
-
-```markdown
-## [1.3.0] - 2024-12-04
-
-### Added
-- Fastest lap voice callout
-- Total race time display
-- New "Dark Blue" theme
-
-### Fixed
-- RSSI calibration edge case
-- LED flicker on startup
-- USB disconnect handling
-
-### Changed
-- Improved race history performance
-- Updated voice announcement timing
-```
-
-#### Step 3: Build Release Binaries
-
-**Firmware:**
-```bash
-pio run -e esp32-s3-devkitc-1
-cp .pio/build/esp32-s3-devkitc-1/firmware.bin release/fpvgate_v1.3.0_firmware.bin
-```
-
-**Filesystem:**
-```bash
-pio run -e esp32-s3-devkitc-1 -t buildfs
-cp .pio/build/esp32-s3-devkitc-1/littlefs.bin release/fpvgate_v1.3.0_filesystem.bin
-```
-
-**Electron App:**
-```bash
-cd electron/
-npm run build:win
-npm run build:mac
-npm run build:linux
-```
-
-#### Step 4: Create GitHub Release
-
-1. Go to GitHub repository
-2. Releases → "Draft a new release"
-3. Tag: `v1.3.0`
-4. Title: `FPVGate v1.3.0`
-5. Description: Copy from CHANGELOG
-6. Attach binaries:
-   - `fpvgate_v1.3.0_firmware.bin`
-   - `fpvgate_v1.3.0_filesystem.bin`
-   - `FPVGate-Setup-1.3.0.exe` (Windows)
-   - `FPVGate-1.3.0.dmg` (macOS)
-   - `FPVGate-1.3.0.AppImage` (Linux)
-7. Publish release
-
-#### Step 5: Announce
-
-- GitHub Discussions
-- Project README
-- Social media (if applicable)
-
----
-
-## Troubleshooting Build Issues
-
-### PlatformIO Issues
-
-**Problem:** `Error: Could not find the package with 'espressif32' requirements`
-
-**Solution:**
-```bash
-pio platform install espressif32
-```
-
-**Problem:** `Error: Please upgrade PlatformIO`
-
-**Solution:**
-```bash
-pio upgrade
-```
-
-**Problem:** `Upload failed`
-
-**Solution:**
-- Check USB cable (data cable, not charge-only)
-- Hold BOOT button while uploading
-- Try different USB port
-- Manually specify port: `--upload-port COM12`
-
-### Compilation Errors
-
-**Problem:** `fatal error: WiFi.h: No such file or directory`
-
-**Solution:** Ensure `framework = arduino` in platformio.ini
-
-**Problem:** `undefined reference to 'FastLED'`
-
-**Solution:** Add to platformio.ini:
-```ini
-lib_deps = 
-  fastled/FastLED@^3.6.0
-```
-
-**Problem:** `region 'iram0_0_seg' overflowed`
-
-**Solution:** Enable PSRAM or reduce code size:
-```ini
-board_build.arduino.memory_type = qio_opi
-board_build.partitions = custom_8mb.csv
-```
-
-### Filesystem Upload Issues
-
-**Problem:** `Error: File system image not found`
-
-**Solution:**
-```bash
-pio run -t buildfs
-```
-
-**Problem:** `Upload failed: No such file or directory`
-
-**Solution:** Ensure ESP32 connected and in download mode
-
-### Electron Build Issues
-
-**Problem:** `Cannot find module 'serialport'`
-
-**Solution:**
-```bash
-cd electron/
-npm install serialport --save
-```
-
-**Problem:** `Electron build fails on macOS`
-
-**Solution:** Install Xcode Command Line Tools:
-```bash
-xcode-select --install
-```
-
----
-
-## Next Steps
-
- **Ready to develop**   
- **[User Guide](USER_GUIDE.md)** - Master the features first  
- **[Hardware Guide](HARDWARE_GUIDE.md)** - Understand the hardware  
- **[Features Guide](FEATURES.md)** - Learn the architecture
-
----
-
-**Questions? [GitHub Discussions](https://github.com/LouisHitchcock/FPVGate/discussions) | [Report Issues](https://github.com/LouisHitchcock/FPVGate/issues)**
+The post-soak tests need separately checked-out RH/C5 sources and their
+documented environment variables. See [native tests](../tests/native/README.md)
+for diagnostic variants and [validation plan](../tools/VALIDATION_PLAN.md)
+for device/load checks.
+
+A native simulator does not test FreeRTOS timing, real SD media, RF peaks or a
+camera timing reference. Read the [post-soak investigation](RH_POST_SOAK_INVESTIGATION.md)
+before interpreting identical-input or live/Marshal comparisons as RF accuracy.
+
+## Debugging
+
+`DEBUG(...)` is the actual logging macro; `LOG_ERROR`/`LOG_WARN` macros described
+in older docs are not implemented. The ring buffer holds 100 entries.
+`lib/DEBUG/debug.h` sets 460800 baud; target monitor settings may differ
+(the LCD target uses 921600). USB CDC does not have a physical UART baud rate.
+
+Useful endpoints are `/version`, `/status`, `/api/system/info`,
+`/api/debuglog` and `/api/c5/race`. Diagnostics may expose more detailed USB
+and C5 traces; some options mutate/clear state, so read the implementation
+before using them as passive probes.
+
+## Contributing and release process
+
+Keep changes scoped, explain behavior and validation, and update the relevant
+current guide. Preserve historical release notes and dated experiments as
+records rather than rewriting them as current instructions.
+[Release process](RELEASE_PROCESS.md) is the single packaging/publishing guide.
+Changing `FPVGATE_VERSION` alone neither builds nor publishes artifacts.
