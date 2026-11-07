@@ -32,10 +32,14 @@ class I18n {
 
   async loadLocale(lang) {
     if (this.locales[lang]) return;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
-      // Use absolute path for mobile browser compatibility (Safari/Firefox)
+      // Use absolute path for mobile browser compatibility (Safari/Firefox).
+      // The timeout keeps a stalled catalogue request from holding up the app.
       const response = await fetch(`/locales/${lang}.json`, {
-        cache: 'no-cache'
+        cache: 'no-cache',
+        signal: controller.signal
       });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -53,6 +57,8 @@ class I18n {
         console.log(`[i18n] Falling back to: ${this.fallbackLang}`);
         await this.loadLocale(this.fallbackLang);
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

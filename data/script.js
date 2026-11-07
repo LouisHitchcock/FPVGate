@@ -1478,9 +1478,6 @@ async function updateConnectionStatus(mode, connected) {
 }
 
 onload = async function (e) {
-  // The first render builds table headers and analysis labels through t(), so
-  // wait for the locale catalogue instead of emitting raw keys.
-  if (i18n.ready) await i18n.ready;
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
@@ -1516,6 +1513,18 @@ onload = async function (e) {
     // Set defaults if config fetch fails
     configData = {};
   }
+
+  // Wait for the catalogue before hydrating translated labels, but keep the
+  // wait bounded: a stalled request must not freeze the whole interface. The
+  // chart, transport and /config request above are already running.
+  let localeReady = !i18n.ready;
+  if (i18n.ready) {
+    localeReady = await Promise.race([
+      i18n.ready.then(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+  }
+
   // Apply the authoritative slices of config to the UI FIRST, before the big
   // config-apply block below. Keeps hydration bulletproof - any later failure
   // in this handler can't leave these fields stuck at their HTML defaults.
@@ -1811,6 +1820,25 @@ onload = async function (e) {
   } finally {
     _refreshingFromDevice = false;
   }
+
+  // If the catalogue arrived after the bounded wait, refresh the labels that
+  // were built while it was still loading.
+  if (!localeReady && i18n.ready) {
+    i18n.ready.then(() => {
+      const wasRefreshing = _refreshingFromDevice;
+      _refreshingFromDevice = true;
+      try {
+        updateLapCounter();
+        updateSlaveModelUI();
+        if (maxLapsInput) updateMaxLaps(maxLapsInput, maxLapsInput.value);
+        if (maxHeatTimeInput) updateMaxHeatTime(maxHeatTimeInput, maxHeatTimeInput.value);
+        if (minLapInput) updateMinLap(minLapInput, minLapInput.value);
+        renderSyncDevicesList();
+      } finally {
+        _refreshingFromDevice = wasRefreshing;
+      }
+    }).catch(() => {});
+  }
 };
 
 let batteryVoltageInterval = null;
@@ -1947,6 +1975,9 @@ function triggerBatteryAlarm(voltageText) {
   const alarmVoltageEl = document.getElementById("batteryAlarmVoltage");
   
   if (alarmModal && alarmVoltageEl) {
+    // The modal starts with a translated placeholder; once a real reading is
+    // written, drop the binding so a later translatePage() cannot replace it.
+    alarmVoltageEl.removeAttribute("data-i18n");
     alarmVoltageEl.textContent = voltageText;
     alarmModal.style.display = "flex";
     
