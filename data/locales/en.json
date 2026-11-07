@@ -49,7 +49,8 @@
             "lap_plural": "{n} laps",
             "seconds_short": "s"
         },
-        "no_laps": "No laps recorded yet"
+        "no_laps": "No laps recorded yet",
+        "rssi_debug": "RSSI DEBUG"
     },
     "analysis": {
         "title": "Lap Analysis",
@@ -65,7 +66,22 @@
         "need_1_lap": "Need 1 lap",
         "need_3_laps": "Need 3 laps",
         "total": "Total: {n}s",
-        "total_prefix": "Total: "
+        "total_prefix": "Total: ",
+        "race_title": "Race Analysis",
+        "race_empty": "Enable at least one analytics tab in System Settings to display additional race analytics.",
+        "race_no_tab": "Enable an analytics tab to display race analytics",
+        "no_fastest_lap": "Complete at least 1 lap to see fastest lap",
+        "no_fastest_3": "Complete at least 3 laps to see fastest 3 consecutive",
+        "no_lap_chart": "Complete at least 1 lap to see chart",
+        "no_consistency_chart": "Complete at least 2 laps to see consistency chart",
+        "not_enough_chart": "Not enough laps to display chart",
+        "axis_lap": "Lap",
+        "axis_lap_time": "Lap Time (s)",
+        "showing_last_10": "Showing last 10 of {n} laps",
+        "panel_lap_times": "Lap Times",
+        "panel_consistency": "Consistency",
+        "max_panels": "You can enable up to {n} analytics panels at once.",
+        "lap_table": "Lap Table"
     },
     "history": {
         "title": "Race History",
@@ -159,7 +175,19 @@
         "stat_total_time": "Total Time",
         "stat_distance": "Distance",
         "total_race_time": "Total Race Time: {n}s",
-        "gate1_start": "Gate 1 (Start)"
+        "gate1_start": "Gate 1 (Start)",
+        "pilot_count": "{n} Pilots:",
+        "pilot_count_badge": "{n} PILOTS",
+        "unknown_pilot": "Unknown",
+        "fastest_label": "Fastest:",
+        "total_label": "Total:",
+        "marshal_time_aria": "time in seconds",
+        "marshal_zoom_in": "Zoom in",
+        "marshal_zoom_out": "Zoom out",
+        "marshal_chart_aria": "Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select.",
+        "marshal_pass_list_aria": "Pass list",
+        "marshal_passes_aria": "Recorded gate passes",
+        "marshal_details_aria": "Race details"
     },
     "calib": {
         "title": "RSSI Calibration",
@@ -206,7 +234,12 @@
         "ignore_clear": "Clear Ignored",
         "ignore_warning_title": "Not enough peaks!",
         "ignore_warning_desc": "Too many regions ignored. At least 3 peaks are needed to calculate thresholds.",
-        "rerecord": "Re-record Flight Data"
+        "rerecord": "Re-record Flight Data",
+        "enter_short": "Enter",
+        "exit_short": "Exit",
+        "ambient_short": "Ambient",
+        "noise_short": "Noise ({v})",
+        "peak_n": "Peak {n}"
     },
     "settings": {
         "title": "Settings",
@@ -291,7 +324,10 @@
                 "eleven_french_pack": "French Pack, fr",
                 "webspeech": "Web Speech (Browser TTS)"
             },
-            "examples": "Examples: \"Louis Lap 5, 12.34\" / \"Lap 5, 12.34\" / \"12.34\""
+            "examples": "Examples: \"Louis Lap 5, 12.34\" / \"Lap 5, 12.34\" / \"12.34\"",
+            "speaker_output": "Speaker Output (I2S):",
+            "speaker_note": "Plays announcements through the attached MAX98357A speaker",
+            "testing_sound": "Testing sound for pilot {name}"
         },
         "pilot": {
             "title": "Pilot Info",
@@ -322,6 +358,12 @@
                 "brown": "Brown",
                 "spring_green": "Spring Green",
                 "hot_pink": "Hot Pink"
+            },
+            "system_options": {
+                "analog": "Analog",
+                "hdzero": "HDZero",
+                "walksnail": "Walksnail",
+                "dji": "DJI"
             }
         },
         "tracks": {
@@ -367,7 +409,35 @@
             "race_stop": "Race Stop Flash:",
             "race_stop_tip": "Send /RaceStop webhook (2x Red flashes)",
             "lap_flash": "Lap Flash:",
-            "lap_flash_tip": "Send /Lap webhook (White flash)"
+            "lap_flash_tip": "Send /Lap webhook (White flash)",
+            "race_leader_color": "Race Leader Color:",
+            "leader_disabled": "Disabled",
+            "leader_highest_lap": "Highest Lap Count",
+            "leader_fastest_lap": "Fastest Lap",
+            "leader_fastest_3": "Fastest 3 Consecutive",
+            "leader_most_recent": "Most Recent Lap",
+            "leader_fastest_average": "Fastest Average",
+            "leader_tip": "Automatically set gate LEDs to the race leader's pilot color",
+            "gate_control_title": "Gate LED Control",
+            "all_gates": "All Gates",
+            "master_control": "Master Control",
+            "effect": "Effect:",
+            "color": "Color:",
+            "brightness_short": "Brightness:",
+            "speed_short": "Speed:",
+            "apply_all_gates": "Apply to All Gates",
+            "gate_n": "Gate {n}",
+            "apply_gate_n": "Apply to Gate {n}",
+            "loading_gates": "Loading gate devices...",
+            "no_gate_devices": "No gate devices configured. Add webhook IPs in the Webhooks tab.",
+            "effects": {
+                "off": "Off",
+                "solid": "Solid",
+                "rainbow": "Rainbow",
+                "fade": "Color Fade",
+                "pulse": "Pulse",
+                "sparkle": "Sparkle"
+            }
         },
         "elrs": {
             "title": "ELRS Backpack",
@@ -462,7 +532,30 @@
             "role_personal": "Personal",
             "role_master": "Master",
             "role_slave": "Slave",
-            "info_note": "Set one device as Master to control race start/stop. Other devices set as Slave will follow the Master and send their lap times to it."
+            "info_note": "Set one device as Master to control race start/stop. Other devices set as Slave will follow the Master and send their lap times to it.",
+            "test_connection": "Test connection",
+            "remove_device": "Remove device",
+            "rh_host_ip": "RH Host IP:",
+            "rh_host_placeholder": "e.g. 192.168.0.50",
+            "rh_host_tip": "IP address of the RotorHazard server (port 5000 is used automatically)",
+            "rh_node_seat": "Node Seat (0-7):",
+            "rh_seat_n": "Seat {n}",
+            "rh_node_tip": "Which RH node seat this FPVGate corresponds to",
+            "rh_connection_status": "Connection Status:",
+            "rh_unknown": "Unknown",
+            "rh_refresh": "Refresh",
+            "rh_clock_sync": "Clock Sync:",
+            "rh_not_synced": "Not synced",
+            "rh_sync_now": "Sync Now",
+            "rh_checking": "Checking...",
+            "rh_disabled": "Disabled",
+            "rh_connected": "Connected",
+            "rh_disconnected": "Disconnected",
+            "rh_error": "Error",
+            "rh_synced_rtt": "Synced (RTT: {ms}ms)",
+            "rh_syncing": "Syncing...",
+            "rh_sync_failed": "Sync failed - check RH Host IP",
+            "rh_error_msg": "Error: {msg}"
         },
         "webhooks": {
             "title": "Webhooks",
@@ -527,7 +620,13 @@
             "language": "Language:",
             "theme": "Theme:",
             "notes_auto_open": "Open Race Notes on Race End:",
-            "notes_auto_open_tip": "Automatically open race notes when a race is stopped."
+            "notes_auto_open_tip": "Automatically open race notes when a race is stopped.",
+            "race_analytics_title": "Race Analytics Display",
+            "race_analytics_desc": "Choose which multi-pilot race analytics panels to display in the Race tab (up to 3 enabled at once).",
+            "race_analytics_fastest_lap_desc": "Show fastest lap time and lap number details",
+            "race_analytics_fastest_3_desc": "Show best 3-lap consecutive block and lap range",
+            "race_analytics_lap_times_desc": "Show per-lap trend chart for all pilots",
+            "race_analytics_consistency_desc": "Show distribution and spread of lap times"
         },
         "osd": {
             "title": "On Screen Displays",
@@ -616,7 +715,16 @@
             "whats_new": "What's new",
             "details": "Details",
             "file_firmware_short": "Firmware",
-            "file_filesystem_short": "Filesystem"
+            "file_filesystem_short": "Filesystem",
+            "progress": "{label} {pct}% ({loaded} of {total})",
+            "err_connection_lost": "connection lost during upload",
+            "err_upload_timeout": "upload timed out",
+            "err_gate_not_back": "gate did not come back in time",
+            "err_not_ready": "device is not ready",
+            "err_too_small": "{label}: {size} is too small to be a valid image",
+            "err_start_failed": "start failed: {msg}",
+            "err_http": "{label}: HTTP {status}",
+            "version_aria": "Version"
         },
         "themes": {
             "title": "Themes",
@@ -629,7 +737,12 @@
             "text": "Text Color:",
             "menu": "Menu/Panel Color:",
             "secondary": "Secondary Color:",
-            "reset": "Reset to Default"
+            "reset": "Reset to Default",
+            "custom_option": "Custom Theme",
+            "group_material": "Material",
+            "group_popular": "Popular",
+            "group_classic": "Classic",
+            "group_custom": "Custom"
         },
         "diagnostics": {
             "title": "Diagnostics",
@@ -662,123 +775,7 @@
             "spi_pass": "SPI Mod Verified",
             "spi_fail": "SPI Mod Not Detected",
             "spi_run_again": "Run SPI Test Again",
-            "c5_title": "C5 Receiver Checks",
-            "c5_description": "Checks the C5 receiver's connection, firmware version, tuning, RSSI samples and link errors over a few seconds. Run it with no race in progress.",
-            "c5_run": "Run C5 Checks",
-            "c5_running": "Checking the receiver...",
-            "c5_checks": {
-                "connected": "Receiver connected",
-                "race": "Race in progress",
-                "version": "Receiver firmware",
-                "tuning": "Tuning",
-                "slots": "Racing slots",
-                "samples": "RSSI samples arriving",
-                "link": "Link errors"
-            },
-            "log_title": "Logs",
-            "log_description": "Download one text file with the gate and receiver status, the last crash, the latest checks and the log, to attach to a bug report. The gate keeps its recent log through a crash or restart, but not a power loss; saving to the SD card keeps much more.",
-            "log_sd_label": "Save Log to SD Card",
-            "log_download": "Download log.txt",
-            "log_status_unknown": "Log status unavailable.",
-            "log_status_no_sd": "No SD card: only the recent log in memory is kept.",
-            "log_status_off": "Off: only the recent log in memory is kept.",
-            "log_status_on": "Saving every few seconds; {size} on the card.",
-            "log_status_recovered": "Lines from before the last restart are kept.",
-            "log_switch_failed": "Could not change log saving: {error}"
-        }
-    },
-    "modals": {
-        "track": {
-            "create_title": "Create Track",
-            "edit_title": "Edit Track",
-            "name": "Track Name:",
-            "distance": "Distance (meters):",
-            "tags": "Tags:",
-            "notes": "Notes:",
-            "placeholder_name": "e.g. My Local Track",
-            "placeholder_tags": "e.g. outdoor, technical, fast",
-            "placeholder_notes": "Optional notes about the track...",
-            "placeholder_distance": "e.g. 150.5",
-            "save": "Save Track",
-            "update": "Update Track",
-            "cancel": "Cancel",
-            "unit_meters": "{n} meters"
-        }
-    },
-    "battery_alarm": {
-        "dismiss": "Dismiss"
-    },
-    "messages": {
-        "confirm_clear_history": "Are you sure you want to clear all race history? This cannot be undone.",
-        "config_imported": "Configuration imported successfully! Page will reload.",
-        "calib_peaks_marked": "All peaks marked! Click \"Calculate Thresholds\"",
-        "calib_auto_few_peaks": "Auto-detection found only {n} peak(s). Please mark peaks manually.",
-        "calib_applied": "Calibration applied! Enter, Exit, and Min Lap Time have been set. Fine-tune in the sliders if needed.",
-        "wifi_apply_confirm": "Apply WiFi settings? The device will restart.",
-        "track_save_error": "Error saving track",
-        "track_delete_confirm": "Are you sure you want to delete this track?",
-        "webhook_enter_ip": "Please enter an IP address",
-        "webhook_valid_ip": "Please enter a valid IP address (e.g., 192.168.0.75)",
-        "webhook_add_error": "Error adding webhook",
-        "webhook_remove_confirm": "Remove webhook for {ip}?",
-        "webhook_remove_error": "Error removing webhook",
-        "race_update_error": "Error updating race",
-        "race_import_success": "Races imported successfully!",
-        "race_import_error": "Error importing races",
-        "race_invalid_json": "Invalid JSON file",
-        "race_edit_invalid_laps": "Please enter valid lap times (positive numbers)",
-        "race_edit_no_laps": "Cannot save race with no laps. Delete the race instead.",
-        "wifi_excellent": "Excellent",
-        "wifi_good": "Good",
-        "wifi_fair": "Fair",
-        "wifi_weak": "Weak",
-        "wifi_error": "Unable to fetch WiFi details",
-        "osd_opened_copy_fail": "OSD opened, but failed to copy URL. URL: {url}",
-        "config_download_error": "Error downloading configuration",
-        "config_import_error": "Error importing configuration",
-        "config_invalid": "Invalid configuration file",
-        "calib_wizard_error": "Error starting calibration wizard",
-        "calib_not_enough_data": "Not enough data recorded. Please try again with at least 3 clear gate passes.",
-        "calib_process_error": "Error processing calibration data",
-        "calib_mark_all_peaks": "Please mark all 3 peaks before calculating thresholds",
-        "wifi_enter_ssid": "Please enter a WiFi SSID",
-        "wifi_password_empty": "WiFi password is empty. Continue?",
-        "wifi_applied_restarting": "WiFi settings applied. Device is restarting...",
-        "wifi_reset_confirm": "Reset WiFi settings to current values?",
-        "track_enter_name": "Please enter a track name",
-        "track_enter_distance": "Please enter a valid distance",
-        "track_delete_error": "Error deleting track",
-        "webhook_test_sent": "Test flash sent to all configured webhooks!\n\nCheck your LED controller to verify.",
-        "error_generic": "Error: {n}",
-        "url_copied": "✓ URL Copied!",
-        "invalid_ip": "Invalid IP address format (e.g. 192.168.0.75)",
-        "enter_timer_hostname": "Please enter a timer hostname",
-        "timer_already_added": "This timer is already in the list",
-        "max_timers_reached": "Maximum of 5 synced timers allowed",
-        "enter_device_address": "Please enter a device address",
-        "device_already_added": "This device is already in the list",
-        "max_devices_reached": "Maximum 6 devices allowed"
-    },
-    "osd": {
-        "lap": "Lap {n}",
-        "lap_of": "Lap {n} / {total}",
-        "current_lap": "Current Lap",
-        "last_lap": "Last Lap",
-        "fastest_lap": "Fastest Lap",
-        "best_3_consec": "Best 3 Consec",
-        "median": "Median",
-        "recent_laps": "Recent Laps",
-        "table_lap": "Lap",
-        "table_time": "Time",
-        "table_gap": "Gap",
-        "gate1_short": "G1",
-        "lap_prefix": "L",
-        "connection_error": "Connection Error"
-    },
-    "conn": {
-        "wifi_connected": "WiFi Connected",
-        "usb_connected": "USB Connected",
-        "loading": "Loading...",
-        "disconnected": "Disconnected"
-    }
-}
+,
+            "skipped": "SKIPPED",
+            "summary": "{passed} passed, {skipped} skipped, {failed} failed (of {total})",
+            "spread": "Spread: {spread} | Min: {min} | Max: {max}"
