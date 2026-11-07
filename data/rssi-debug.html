@@ -97,18 +97,18 @@
   <body>
     <div class="rssi-debug-root">
       <div class="rssi-debug-header">
-        <span class="rssi-debug-title">RSSI DEBUG</span>
-        <span class="rssi-debug-stat live">Live:<b id="liveValue">--</b></span>
-        <span class="rssi-debug-stat enter">Enter:<b id="enterValue">--</b></span>
-        <span class="rssi-debug-stat exit">Exit:<b id="exitValue">--</b></span>
-        <span class="rssi-debug-stat">Min:<b id="minValue">--</b></span>
-        <span class="rssi-debug-stat">Max:<b id="maxValue">--</b></span>
+        <span class="rssi-debug-title" data-i18n="race.rssi_debug">RSSI DEBUG</span>
+        <span class="rssi-debug-stat live"><span data-i18n="rssi_debug.live">Live:</span><b id="liveValue">--</b></span>
+        <span class="rssi-debug-stat enter"><span data-i18n="rssi_debug.enter">Enter:</span><b id="enterValue">--</b></span>
+        <span class="rssi-debug-stat exit"><span data-i18n="rssi_debug.exit">Exit:</span><b id="exitValue">--</b></span>
+        <span class="rssi-debug-stat"><span data-i18n="rssi_debug.min">Min:</span><b id="minValue">--</b></span>
+        <span class="rssi-debug-stat"><span data-i18n="rssi_debug.max">Max:</span><b id="maxValue">--</b></span>
         <span class="rssi-debug-stat">
-          Crossing<span id="crossingDot" class="rssi-debug-crossing"></span>
+          <span data-i18n="rssi_debug.crossing">Crossing</span><span id="crossingDot" class="rssi-debug-crossing"></span>
         </span>
         <span class="rssi-debug-conn">
           <span id="connDot" class="rssi-debug-conn-dot"></span>
-          <span id="connLabel">Connecting...</span>
+          <span id="connLabel" data-i18n="rssi_debug.connecting">Connecting...</span>
         </span>
       </div>
       <div class="rssi-debug-chart-wrap">
@@ -116,6 +116,7 @@
       </div>
     </div>
 
+    <script src="i18n.js?v=1.7.2"></script>
     <script src="smoothie.js?v=1.7.2"></script>
     <script src="rssi-debug.js?v=1.7.2"></script>
   </body>

@@ -76,7 +76,9 @@ const bandNames = ['A',
                    'WalkSnail-50'];
 
 // Initialize on load
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  // Wait for the locale so the connection-error fallback is not a raw key.
+  if (i18n.ready) await i18n.ready;
   console.log('FPVGate OSD loaded');
   loadConfig();
   connectToEvents();

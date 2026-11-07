@@ -646,7 +646,7 @@ function resetLapDisplay() {
   // Clear race analysis
   const raceAnalysisContent = document.getElementById("raceAnalysisContent");
   if (raceAnalysisContent) {
-    raceAnalysisContent.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
+    raceAnalysisContent.innerHTML = `<p class="no-data">${i18n.t("analysis.race_no_tab")}</p>`;
   }
   
   // Clear remote pilots data
@@ -1081,6 +1081,9 @@ async function updateConnectionStatus(mode, connected) {
 }
 
 onload = async function (e) {
+  // The first render builds table headers and analysis labels through t(), so
+  // wait for the locale catalogue instead of emitting raw keys.
+  if (i18n.ready) await i18n.ready;
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
@@ -1566,7 +1569,7 @@ function triggerBatteryAlarm(voltageText) {
     
     // Audio announcement
     if (audioEnabled && audioAnnouncer) {
-      audioAnnouncer.speak("BATTERY CRITICAL");
+      audioAnnouncer.speak(i18n.t("battery_alarm.critical"));
     }
   }
 }
@@ -2712,24 +2715,24 @@ function addLap(lapStr) {
     case "2lap":
       if (lapNo == 0) {
         if (raceSyncMode === 1 || raceSyncMode === 2) {
-          queueSpeak(`<p>${pilotName} Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${pilotName} ${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         } else {
-          queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         }
       } else if (last2lapStr != "") {
-        const text2 = "<p>" + pilotName + " 2 laps " + last2lapStr + "</p>";
+        const text2 = "<p>" + i18n.t("settings.tts.laps_2", { n: pilotName, time: last2lapStr }) + "</p>";
         queueSpeak(text2);
       }
       break;
     case "3lap":
       if (lapNo == 0) {
         if (raceSyncMode === 1 || raceSyncMode === 2) {
-          queueSpeak(`<p>${pilotName} Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${pilotName} ${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         } else {
-          queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         }
       } else if (last3lapStr != "") {
-        const text3 = "<p>" + pilotName + " 3 laps " + last3lapStr + "</p>";
+        const text3 = "<p>" + i18n.t("settings.tts.laps_3", { n: pilotName, time: last3lapStr }) + "</p>";
         queueSpeak(text3);
       }
       break;
@@ -3151,7 +3154,7 @@ function generateAudio() {
 
   const pilotName = pilotNameInput.value;
   const phoneticName = document.getElementById("pphonetic")?.value || pilotName;
-  queueSpeak(`<div>Testing sound for pilot ${phoneticName}</div>`);
+  queueSpeak(`<div>${i18n.t("settings.tts.testing_sound", { name: phoneticName })}</div>`);
   for (let i = 1; i <= 3; i++) {
     queueSpeak("<div>" + i + "</div>");
   }
@@ -3707,7 +3710,7 @@ function removeSyncedTimer(hostname) {
 async function testSyncedTimer(hostname) {
   const statusSpan = document.getElementById(`status-${hostname.replace(/\./g, '-')}`);
   if (statusSpan) {
-    statusSpan.textContent = "Testing...";
+    statusSpan.textContent = i18n.t("messages.status_testing");
     statusSpan.style.color = "var(--secondary-color)";
   }
   
@@ -3725,13 +3728,13 @@ async function testSyncedTimer(hostname) {
     if (response.ok) {
       const data = await response.json();
       if (statusSpan) {
-        statusSpan.textContent = `Online (${data.hostname || 'connected'})`;
+        statusSpan.textContent = i18n.t("messages.status_online_host", { host: data.hostname || i18n.t("messages.status_online") });
         statusSpan.style.color = "#2ecc71";
       }
       console.log(`[Sync] Ping OK: ${hostname}`, data);
     } else {
       if (statusSpan) {
-        statusSpan.textContent = "Error: " + response.status;
+        statusSpan.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
         statusSpan.style.color = "#e74c3c";
       }
     }
@@ -3739,9 +3742,9 @@ async function testSyncedTimer(hostname) {
     console.warn(`[Sync] Ping failed for ${hostname}:`, err.message);
     if (statusSpan) {
       if (err.name === 'AbortError') {
-        statusSpan.textContent = "Timeout (5s)";
+        statusSpan.textContent = i18n.t("messages.status_timeout_5s");
       } else {
-        statusSpan.textContent = "Unreachable";
+        statusSpan.textContent = i18n.t("messages.status_unreachable");
       }
       statusSpan.style.color = "#e74c3c";
     }
@@ -3781,7 +3784,7 @@ async function testMasterConnection() {
   statusDiv.style.display = "block";
   statusDiv.style.backgroundColor = "rgba(52, 152, 219, 0.2)";
   statusDiv.style.color = "#3498db";
-  statusDiv.textContent = "Step 1: Testing connection to master...";
+  statusDiv.textContent = i18n.t("messages.sync_step1");
   
   try {
     // Step 1: Test direct connection to master via browser fetch
@@ -3800,7 +3803,7 @@ async function testMasterConnection() {
       console.log("[Slave] Master ping OK:", data);
       
       // Step 2: Test slave-to-master connection via backend
-      statusDiv.textContent = "Step 2: Testing slave firmware -> master...";
+      statusDiv.textContent = i18n.t("messages.sync_step2");
       
       try {
         const backendResponse = await fetch("/timer/testSlaveToMaster", { method: "POST" });
@@ -3809,17 +3812,17 @@ async function testMasterConnection() {
         
         statusDiv.style.backgroundColor = "rgba(46, 204, 113, 0.2)";
         statusDiv.style.color = "#2ecc71";
-        statusDiv.innerHTML = `<div>Browser -> Master: OK (${data.hostname})</div><div>Firmware -> Master: Sent test lap (check master console)</div>`;
+        statusDiv.innerHTML = `<div>${i18n.t("messages.sync_browser_master_ok", { host: data.hostname })}</div><div>${i18n.t("messages.sync_firmware_sent")}</div>`;
       } catch (backendErr) {
         console.warn("[Slave] Backend test failed:", backendErr.message);
         statusDiv.style.backgroundColor = "rgba(241, 196, 15, 0.2)";
         statusDiv.style.color = "#f1c40f";
-        statusDiv.innerHTML = `<div>Browser -> Master: OK</div><div>Firmware -> Master: Error - ${backendErr.message}</div>`;
+        statusDiv.innerHTML = `<div>${i18n.t("messages.sync_browser_master_ok_plain")}</div><div>${i18n.t("messages.sync_firmware_error", { msg: backendErr.message })}</div>`;
       }
     } else {
       statusDiv.style.backgroundColor = "rgba(231, 76, 60, 0.2)";
       statusDiv.style.color = "#e74c3c";
-      statusDiv.textContent = (i18n.t("messages.master_error") || "Error") + ": HTTP " + response.status;
+      statusDiv.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
     }
   } catch (err) {
     console.warn("[Slave] Master ping failed:", err.message);
@@ -3977,10 +3980,10 @@ function renderSyncDevicesList() {
             ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''}>RotorHazard</option>` : ''}
           </select>
           ${!isThisDevice ? `
-            <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="Test connection">
+            <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="${i18n.t("settings.sync.test_connection")}">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </button>
-            <button onclick="removeSyncDevice(${index})" style="padding: 4px 8px; background-color: #e74c3c; font-size: 12px;" title="Remove device">X</button>
+            <button onclick="removeSyncDevice(${index})" style="padding: 4px 8px; background-color: #e74c3c; font-size: 12px;" title="${i18n.t("settings.sync.remove_device")}">X</button>
           ` : ''}
         </div>
       </div>
@@ -4090,7 +4093,7 @@ async function testSyncDevice(index) {
   const statusSpan = document.getElementById(`status-${safeId}`);
   
   if (statusSpan) {
-    statusSpan.textContent = 'Testing...';
+    statusSpan.textContent = i18n.t("messages.status_testing");
     statusSpan.style.color = 'var(--secondary-color)';
   }
   
@@ -4108,13 +4111,13 @@ async function testSyncDevice(index) {
     if (response.ok) {
       const data = await response.json();
       if (statusSpan) {
-        statusSpan.textContent = `Online`;
+        statusSpan.textContent = i18n.t("messages.status_online");
         statusSpan.style.color = '#2ecc71';
       }
       console.log(`[Sync] Ping OK: ${device.address}`, data);
     } else {
       if (statusSpan) {
-        statusSpan.textContent = 'Error: ' + response.status;
+        statusSpan.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
         statusSpan.style.color = '#e74c3c';
       }
     }
@@ -4122,9 +4125,9 @@ async function testSyncDevice(index) {
     console.warn(`[Sync] Ping failed for ${device.address}:`, err.message);
     if (statusSpan) {
       if (err.name === 'AbortError') {
-        statusSpan.textContent = 'Timeout';
+        statusSpan.textContent = i18n.t("messages.status_timeout");
       } else {
-        statusSpan.textContent = 'Unreachable';
+        statusSpan.textContent = i18n.t("messages.status_unreachable");
       }
       statusSpan.style.color = '#e74c3c';
     }
@@ -4488,7 +4491,7 @@ function renderLapHistory() {
   html += "</div>";
 
   if (validLaps.length > 10) {
-    html += `<p style="text-align: center; margin-top: 16px; color: var(--secondary-color); font-size: 14px;">Showing last 10 of ${validLaps.length} laps</p>`;
+    html += `<p style="text-align: center; margin-top: 16px; color: var(--secondary-color); font-size: 14px;">${i18n.t("analysis.showing_last_10", { n: validLaps.length })}</p>`;
   }
 
   document.getElementById("analysisContent").innerHTML = html;
@@ -4546,12 +4549,12 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
 }
 function renderFastest3ConsecPanel(stats) {
   if (!stats || stats.fastest3ConsecValue == null) {
-    return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
+    return `<p class="no-data">${i18n.t("analysis.no_fastest_3")}</p>`;
   }
   return `
     <div class="stats-boxes" style="max-width: 420px; margin: 0 auto;">
       <div class="stat-box">
-        <div class="stat-label">Fastest 3 Consecutive</div>
+        <div class="stat-label">${i18n.t("analysis.fastest_3_consec")}</div>
         <div class="stat-value">${stats.fastest3ConsecValue.toFixed(2)}s</div>
         <div class="stat-sublabel">${stats.fastest3ConsecLaps}</div>
       </div>
@@ -4625,10 +4628,10 @@ function getEnabledRaceAnalyticsTabs() {
 }
 
 function getRaceAnalyticsTabLabel(tabKey) {
-  if (tabKey === "fastestLap") return "Fastest Lap";
-  if (tabKey === "fastest3Consec") return "Fastest 3 Consecutive";
-  if (tabKey === "lapTimes") return "Lap Times";
-  if (tabKey === "consistency") return "Consistency";
+  if (tabKey === "fastestLap") return i18n.t("analysis.fastest_lap");
+  if (tabKey === "fastest3Consec") return i18n.t("analysis.fastest_3_consec");
+  if (tabKey === "lapTimes") return i18n.t("analysis.panel_lap_times");
+  if (tabKey === "consistency") return i18n.t("analysis.panel_consistency");
   return tabKey;
 }
 
@@ -4648,7 +4651,7 @@ function toggleRaceAnalyticsPanel(panelKey, enabled) {
 
   const alreadyEnabled = !!raceAnalyticsDisplaySettings[panelKey];
   if (enabled && !alreadyEnabled && getEnabledRaceAnalyticsCount() >= MAX_ENABLED_RACE_ANALYTICS) {
-    alert(`You can enable up to ${MAX_ENABLED_RACE_ANALYTICS} analytics panels at once.`);
+    alert(i18n.t("analysis.max_panels", { n: MAX_ENABLED_RACE_ANALYTICS }));
     syncRaceAnalyticsToggleUI();
     return;
   }
@@ -4720,14 +4723,14 @@ function computeRaceStats() {
 }
 
 function renderFastestLapPanel(stats) {
-  if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
+  if (!stats) return `<p class="no-data">${i18n.t("analysis.no_fastest_lap")}</p>`;
 
   return `
     <div class="stats-boxes" style="max-width: 360px; margin: 0 auto;">
       <div class="stat-box">
-        <div class="stat-label">Fastest Lap</div>
+        <div class="stat-label">${i18n.t("analysis.fastest_lap")}</div>
         <div class="stat-value">${stats.fastest.toFixed(2)}s</div>
-        <div class="stat-sublabel">Lap ${stats.fastestIndex}</div>
+        <div class="stat-sublabel">${i18n.t("race.lap_counter", { n: stats.fastestIndex })}</div>
       </div>
     </div>
   `;
@@ -4747,7 +4750,7 @@ function updateRaceAnalysisView() {
 
   if (enabledTabs.length === 0) {
     tabsContainer.innerHTML = "";
-    contentContainer.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
+    contentContainer.innerHTML = `<p class="no-data">${i18n.t("analysis.race_no_tab")}</p>`;
     return;
   }
 
@@ -4826,7 +4829,7 @@ function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
   });
   
   if (maxLaps < 1) {
-    container.innerHTML = '<p class="no-data">Complete at least 1 lap to see chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_lap_chart")}</p>`;
     return;
   }
   
@@ -4872,7 +4875,7 @@ function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
     const x = padding.left + (chartWidth / maxLaps) * (i - 0.5);
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">L${i}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap</text>`;
+  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap")}</text>`;
   svg += '</g>';
   
   // Draw lines and points for each pilot
@@ -4953,7 +4956,7 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
   }).filter(s => s !== null);
   
   if (pilotStats.length === 0) {
-    container.innerHTML = '<p class="no-data">Complete at least 2 laps to see consistency chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_consistency_chart")}</p>`;
     return;
   }
   
@@ -4994,7 +4997,7 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
     const time = globalMin + ((globalMax - globalMin) / 10) * i;
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">${time.toFixed(1)}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap Time (s)</text>`;
+  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap_time")}</text>`;
   svg += '</g>';
   
   // Draw box plots for each pilot
@@ -5263,8 +5266,8 @@ function renderRaceHistory() {
     // Build pilots display for multi-pilot races
     let pilotsDisplay = "";
     if (isMultiPilot) {
-      const pilotNames = race.pilots.map(p => p.name || p.callsign || "Unknown").join(", ");
-      pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;"><strong>${pilotCount} Pilots:</strong> ${pilotNames}</div>`;
+      const pilotNames = race.pilots.map(p => p.name || p.callsign || i18n.t("history.unknown_pilot")).join(", ");
+      pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;"><strong>${i18n.t("history.pilot_count", { n: pilotCount })}</strong> ${pilotNames}</div>`;
     } else if (pilotCallsign) {
       pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;">${i18n.t("history.item_pilot", { n: pilotCallsign })}</div>`;
     }
@@ -5280,7 +5283,7 @@ function renderRaceHistory() {
           <div>
             ${tag ? '<span class="race-tag">' + tag + "</span>" : ""}
             ${syncModeLabel ? '<span class="race-tag" style="background-color: var(--primary-color); margin-left: 4px;">' + syncModeLabel + "</span>" : ""}
-            ${isMultiPilot ? '<span class="race-tag" style="background-color: var(--accent-color); margin-left: 4px;">' + pilotCount + ' PILOTS</span>' : ""}
+            ${isMultiPilot ? '<span class="race-tag" style="background-color: var(--accent-color); margin-left: 4px;">' + i18n.t("history.pilot_count_badge", { n: pilotCount }) + '</span>' : ""}
             <div class="race-date">${dateStr}</div>
             ${name ? '<div class="race-name">' + name + "</div>" : ""}
             ${pilotsDisplay}
@@ -5524,7 +5527,7 @@ function renderRaceTimeline(race) {
       // Regular laps
       events.push({
         type: "lap",
-        label: `Lap ${index}`,
+        label: i18n.t("race.lap_counter", { n: index }),
         time: cumulativeTime,
         percentage: percentage,
       });
@@ -5820,9 +5823,9 @@ function updateRaceDetailTabs() {
   
   if (isMultiPilot) {
     tabsContainer.innerHTML = `
-      <button class="analysis-tab active" onclick="switchDetailMode('history')">Lap Table</button>
-      <button class="analysis-tab" onclick="switchDetailMode('lapTimesChart')">Lap Times</button>
-      <button class="analysis-tab" onclick="switchDetailMode('consistencyChart')">Consistency</button>
+      <button class="analysis-tab active" onclick="switchDetailMode('history')">${i18n.t("analysis.lap_table")}</button>
+      <button class="analysis-tab" onclick="switchDetailMode('lapTimesChart')">${i18n.t("analysis.panel_lap_times")}</button>
+      <button class="analysis-tab" onclick="switchDetailMode('consistencyChart')">${i18n.t("analysis.panel_consistency")}</button>
     `;
   } else {
     tabsContainer.innerHTML = `
@@ -5842,7 +5845,7 @@ function renderHistoryLapTimesChart() {
   
   // Convert pilots data for chart rendering
   const pilots = currentDetailRace.pilots.map((pilot, idx) => ({
-    name: pilot.name || pilot.callsign || 'Unknown',
+    name: pilot.name || pilot.callsign || i18n.t("history.unknown_pilot"),
     color: '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0'),
     lapTimes: (pilot.lapTimes || []).map(t => t / 1000), // Convert ms to seconds
     isLocal: pilot.isLocal || false
@@ -5863,7 +5866,7 @@ function renderHistoryLapTimesChart() {
   });
   
   if (maxLaps < 1) {
-    container.innerHTML = '<p class="no-data">Not enough laps to display chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.not_enough_chart")}</p>`;
     return;
   }
   
@@ -5909,7 +5912,7 @@ function renderHistoryLapTimesChart() {
     const x = padding.left + (chartWidth / maxLaps) * (i - 0.5);
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">L${i}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap</text>`;
+  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap")}</text>`;
   svg += '</g>';
   
   // Draw lines and points for each pilot
@@ -5979,7 +5982,7 @@ function renderHistoryConsistencyChart() {
   
   // Convert pilots data
   const pilots = currentDetailRace.pilots.map((pilot, idx) => ({
-    name: pilot.name || pilot.callsign || 'Unknown',
+    name: pilot.name || pilot.callsign || i18n.t("history.unknown_pilot"),
     color: '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0'),
     lapTimes: (pilot.lapTimes || []).map(t => t / 1000),
     isLocal: pilot.isLocal || false
@@ -6015,7 +6018,7 @@ function renderHistoryConsistencyChart() {
   }).filter(s => s !== null);
   
   if (pilotStats.length === 0) {
-    container.innerHTML = '<p class="no-data">Complete at least 2 laps to see consistency chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_consistency_chart")}</p>`;
     return;
   }
   
@@ -6056,7 +6059,7 @@ function renderHistoryConsistencyChart() {
     const time = globalMin + ((globalMax - globalMin) / 10) * i;
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">${time.toFixed(1)}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap Time (s)</text>`;
+  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap_time")}</text>`;
   svg += '</g>';
   
   // Draw box plots for each pilot
@@ -6159,7 +6162,7 @@ function renderMultiPilotDetailHistory() {
   for (const pilot of pilots) {
     const colorHex = '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0');
     const localBadge = pilot.isLocal ? ' *' : '';
-    html += `<th style="background-color: ${colorHex}; color: white;">${pilot.name || pilot.callsign || 'Unknown'}${localBadge}</th>`;
+    html += `<th style="background-color: ${colorHex}; color: white;">${pilot.name || pilot.callsign || i18n.t("history.unknown_pilot")}${localBadge}</th>`;
   }
   html += '</tr></thead><tbody>';
   
@@ -6194,9 +6197,9 @@ function renderMultiPilotDetailHistory() {
     const totalTime = pilot.lapTimes ? (pilot.lapTimes.reduce((a, b) => a + b, 0) / 1000).toFixed(2) : '-';
     html += `
       <div style="padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; border-left: 4px solid ${colorHex}; min-width: 150px;">
-        <div style="font-weight: bold; margin-bottom: 8px;">${pilot.name || 'Unknown'}${pilot.isLocal ? ' *' : ''}</div>
-        <div style="font-size: 13px; color: var(--secondary-color);">Fastest: <strong style="color: var(--primary-color);">${fastest}s</strong></div>
-        <div style="font-size: 13px; color: var(--secondary-color);">Total: <strong>${totalTime}s</strong></div>
+        <div style="font-weight: bold; margin-bottom: 8px;">${pilot.name || i18n.t("history.unknown_pilot")}${pilot.isLocal ? ' *' : ''}</div>
+        <div style="font-size: 13px; color: var(--secondary-color);">${i18n.t("history.fastest_label")} <strong style="color: var(--primary-color);">${fastest}s</strong></div>
+        <div style="font-size: 13px; color: var(--secondary-color);">${i18n.t("history.total_label")} <strong>${totalTime}s</strong></div>
       </div>
     `;
   }
@@ -6467,7 +6470,7 @@ function renderLapEditList() {
       return `
       <div class="marshal-lap-edit-row${i === 0 ? " is-gate" : ""}">
         <span class="marshal-lap-edit-label">${label}</span>
-        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} time in seconds" />
+        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} ${i18n.t("history.marshal_time_aria")}" />
         <span>s</span>
         <button type="button" class="marshal-btn marshal-btn-danger" onclick="deleteLapFromEditor(${i})" title="${i18n.t("history.delete")}">&times;</button>
       </div>`;
@@ -7016,9 +7019,9 @@ function drawMarshalChart() {
 
   ctx.font = "bold 12px sans-serif";
   ctx.fillStyle = "#ff8a80";
-  ctx.fillText("ENTER " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
+  ctx.fillText(i18n.t("calib.enter_short") + " " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
   ctx.fillStyle = "#ffd54f";
-  ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
+  ctx.fillText(i18n.t("calib.exit_short") + " " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
 
   // RSSI line in view
   ctx.beginPath();
@@ -7374,7 +7377,7 @@ function onOtaVersionChange() {
 function otaFetchPart(url, name, label, expectedSize) {
   otaProgress(0, `${i18n.t("settings.firmware.label_downloading")} ${label}`);
   return fetch(url, { cache: "no-store" }).then((r) => {
-    if (!r.ok) throw new Error(`${label}: HTTP ${r.status}`);
+    if (!r.ok) throw new Error(i18n.t("settings.firmware.err_http", { label: label, status: r.status }));
     return r.blob().then((blob) => {
       // Content-Length is deliberately NOT used here. The host serves these
       // gzipped, so the header carries the compressed length while blob.size is
@@ -7394,7 +7397,7 @@ function otaFetchPart(url, name, label, expectedSize) {
         );
       }
       if (blob.size < 65536) {
-        throw new Error(`${label}: ${formatBytes(blob.size)} is too small to be a valid image`);
+        throw new Error(i18n.t("settings.firmware.err_too_small", { label: label, size: formatBytes(blob.size) }));
       }
       return new File([blob], name);
     });
@@ -7518,7 +7521,7 @@ function checkOtaSizes(firmwareFile, filesystemFile) {
 function otaUpload(file, mode, label) {
   return fetch(`/ota/start?mode=${mode}`)
     .then((r) => {
-      if (!r.ok) return r.text().then((t) => { throw new Error(`start failed: ${t || r.status}`); });
+      if (!r.ok) return r.text().then((t) => { throw new Error(i18n.t("settings.firmware.err_start_failed", { msg: t || r.status })); });
       return new Promise((resolve, reject) => {
         const form = new FormData();
         form.append("file", file, file.name);
@@ -7527,14 +7530,19 @@ function otaUpload(file, mode, label) {
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
           const pct = (e.loaded / e.total) * 100;
-          otaProgress(pct, `${label} ${Math.round(pct)}% (${formatBytes(e.loaded)} of ${formatBytes(e.total)})`);
+          otaProgress(pct, i18n.t("settings.firmware.progress", {
+            label: label,
+            pct: Math.round(pct),
+            loaded: formatBytes(e.loaded),
+            total: formatBytes(e.total),
+          }));
         };
         xhr.onload = () => {
           if (xhr.status === 200) resolve();
           else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
         };
-        xhr.onerror = () => reject(new Error("connection lost during upload"));
-        xhr.ontimeout = () => reject(new Error("upload timed out"));
+        xhr.onerror = () => reject(new Error(i18n.t("settings.firmware.err_connection_lost")));
+        xhr.ontimeout = () => reject(new Error(i18n.t("settings.firmware.err_upload_timeout")));
         xhr.timeout = 180000;
         xhr.send(form);
       });
@@ -7547,9 +7555,9 @@ function waitForReboot(timeoutMs) {
   const deadline = Date.now() + (timeoutMs || 45000);
   const attempt = () =>
     fetch("/version", { cache: "no-store" })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("not ready"))))
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(i18n.t("settings.firmware.err_not_ready")))))
       .catch(() => {
-        if (Date.now() > deadline) throw new Error("gate did not come back in time");
+        if (Date.now() > deadline) throw new Error(i18n.t("settings.firmware.err_gate_not_back"));
         return new Promise((r) => setTimeout(r, 1500)).then(attempt);
       });
   return new Promise((r) => setTimeout(r, 4000)).then(attempt);
@@ -8450,7 +8458,7 @@ function drawResultsChart(previewStart, previewEnd) {
     ctx.beginPath(); ctx.moveTo(ax, pad); ctx.lineTo(ax, h - pad); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "11px Arial"; ctx.textAlign = "center";
-    ctx.fillText("Ambient", ax / 2 + pad / 2, pad - 6);
+    ctx.fillText(i18n.t("calib.ambient_short"), ax / 2 + pad / 2, pad - 6);
   }
 
   // Threshold lines (only if enough active peaks)
@@ -8464,8 +8472,8 @@ function drawResultsChart(previewStart, previewEnd) {
       ctx.fillStyle = color; ctx.font = "11px Arial"; ctx.textAlign = "right";
       ctx.fillText(label + " (" + val + ")", w - pad - 4, y - 4);
     }
-    drawHLine(wizardState.calculatedEnter, "#ff5555", "Enter");
-    drawHLine(wizardState.calculatedExit, "#ff9944", "Exit");
+    drawHLine(wizardState.calculatedEnter, "#ff5555", i18n.t("calib.enter_short"));
+    drawHLine(wizardState.calculatedExit, "#ff9944", i18n.t("calib.exit_short"));
   }
   // Always draw noise ceiling
   var noiseY = h - pad - ((wizardState.noiseCeiling - minR) / range) * ch;
@@ -8473,7 +8481,7 @@ function drawResultsChart(previewStart, previewEnd) {
   ctx.beginPath(); ctx.moveTo(pad, noiseY); ctx.lineTo(w - pad, noiseY); ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "11px Arial"; ctx.textAlign = "right";
-  ctx.fillText("Noise (" + wizardState.noiseCeiling + ")", w - pad - 4, noiseY - 4);
+  ctx.fillText(i18n.t("calib.noise_short", { v: wizardState.noiseCeiling }), w - pad - 4, noiseY - 4);
 
   // Peak markers - all peaks from allPeaks, greyed out if ignored
   var activeSet = new Set(activePeaks.map(function(p) { return p.index; }));
@@ -8547,7 +8555,7 @@ function drawWizardChart() {
     var y = h - pad - ((rssi - minR) / range) * ch;
     ctx.fillStyle = "#ff5555"; ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.fill();
     ctx.fillStyle = "#fff"; ctx.font = "14px Arial"; ctx.textAlign = "center";
-    ctx.fillText("Peak " + (idx + 1), x, y - 12);
+    ctx.fillText(i18n.t("calib.peak_n", { n: idx + 1 }), x, y - 12);
   });
 
   canvas.onclick = function (event) {
@@ -8676,7 +8684,11 @@ function refreshRHStatus() {
   const badge = document.getElementById("rhStatusBadge");
   const syncStatus = document.getElementById("rhSyncStatus");
   if (!badge) return;
-  badge.textContent = "Checking...";
+  // These become live status readouts; drop the static placeholder binding so
+  // a later translatePage() does not reset them.
+  badge.removeAttribute("data-i18n");
+  if (syncStatus) syncStatus.removeAttribute("data-i18n");
+  badge.textContent = i18n.t("settings.sync.rh_checking");
   badge.style.backgroundColor = "var(--bg-secondary)";
   badge.style.color = "var(--secondary-color)";
 
@@ -8684,32 +8696,32 @@ function refreshRHStatus() {
     .then((response) => response.json())
     .then((data) => {
       if (!data.enabled) {
-        badge.textContent = "Disabled";
+        badge.textContent = i18n.t("settings.sync.rh_disabled");
         badge.style.backgroundColor = "rgba(100,100,100,0.2)";
         badge.style.color = "var(--secondary-color)";
       } else if (data.connected) {
-        badge.textContent = "Connected";
+        badge.textContent = i18n.t("settings.sync.rh_connected");
         badge.style.backgroundColor = "rgba(74, 222, 128, 0.2)";
         badge.style.color = "#4ade80";
       } else {
-        badge.textContent = "Disconnected";
+        badge.textContent = i18n.t("settings.sync.rh_disconnected");
         badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
         badge.style.color = "#ff5555";
       }
       // Update clock sync status
       if (syncStatus) {
         if (data.clockSynced) {
-          syncStatus.textContent = "Synced (RTT: " + data.rttMs + "ms)";
+          syncStatus.textContent = i18n.t("settings.sync.rh_synced_rtt", { ms: data.rttMs });
           syncStatus.style.color = "#4ade80";
         } else {
-          syncStatus.textContent = "Not synced";
+          syncStatus.textContent = i18n.t("settings.sync.rh_not_synced");
           syncStatus.style.color = "var(--secondary-color)";
         }
       }
     })
     .catch((err) => {
       console.error("Failed to fetch RH status:", err);
-      badge.textContent = "Error";
+      badge.textContent = i18n.t("settings.sync.rh_error");
       badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
       badge.style.color = "#ff5555";
     });
@@ -8720,8 +8732,9 @@ async function syncRHClock() {
   const status = document.getElementById("rhSyncStatus");
   if (!btn || !status) return;
 
+  status.removeAttribute("data-i18n");
   btn.disabled = true;
-  status.textContent = "Syncing...";
+  status.textContent = i18n.t("settings.sync.rh_syncing");
   status.style.color = "var(--secondary-color)";
 
   try {
@@ -8731,14 +8744,14 @@ async function syncRHClock() {
     const resp = await fetch("/api/rh/status");
     const data = await resp.json();
     if (data.clockSynced) {
-      status.textContent = "Synced (RTT: " + data.rttMs + "ms)";
+      status.textContent = i18n.t("settings.sync.rh_synced_rtt", { ms: data.rttMs });
       status.style.color = "#4ade80";
     } else {
-      status.textContent = "Sync failed - check RH Host IP";
+      status.textContent = i18n.t("settings.sync.rh_sync_failed");
       status.style.color = "#ff5555";
     }
   } catch (e) {
-    status.textContent = "Error: " + e.message;
+    status.textContent = i18n.t("settings.sync.rh_error_msg", { msg: e.message });
     status.style.color = "#ff5555";
   } finally {
     btn.disabled = false;
@@ -8925,7 +8938,7 @@ function runSelfTest() {
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 20px; color: ${statusColor};">${statusIcon}</span>
                 <span style="font-weight: bold; font-size: 16px;">${test.name}</span>
-                ${status === "skip" ? '<span style="font-size: 11px; color: var(--secondary-color); border: 1px solid var(--secondary-color); border-radius: 3px; padding: 1px 6px; margin-left: 4px;">SKIPPED</span>' : ""}
+                ${status === "skip" ? `<span style="font-size: 11px; color: var(--secondary-color); border: 1px solid var(--secondary-color); border-radius: 3px; padding: 1px 6px; margin-left: 4px;">${i18n.t("settings.diagnostics.skipped")}</span>` : ""}
               </div>
               <span style="font-size: 12px; color: var(--secondary-color);">${durationMs}ms</span>
             </div>
@@ -8943,10 +8956,12 @@ function runSelfTest() {
         ? i18n.t("settings.diagnostics.some_failed")
         : i18n.t("settings.diagnostics.all_passed");
 
-      let summaryLine = `${passedCount} passed`;
-      if (skippedCount > 0) summaryLine += `, ${skippedCount} skipped`;
-      if (failedCount > 0) summaryLine += `, ${failedCount} failed`;
-      summaryLine += ` (of ${totalCount})`;
+      const summaryLine = i18n.t("settings.diagnostics.summary", {
+        passed: passedCount,
+        skipped: skippedCount,
+        failed: failedCount,
+        total: totalCount,
+      });
 
       html =
         `
@@ -9015,7 +9030,7 @@ function runSPITest() {
             <span style="font-weight: bold; font-size: 16px;">${verdictText}</span>
           </div>
           <div style="font-size: 14px; color: var(--secondary-color);">
-            Spread: ${data.spread} | Min: ${data.min} | Max: ${data.max}
+            ${i18n.t("settings.diagnostics.spread", { spread: data.spread, min: data.min, max: data.max })}
           </div>
         </div>
       `;
@@ -9428,12 +9443,12 @@ function saveTrack() {
   const notes = document.getElementById("trackNotes").value.trim();
 
   if (!name) {
-    alert("Please enter a track name");
+    alert(i18n.t("messages.track_enter_name"));
     return;
   }
 
   if (!distance || distance <= 0) {
-    alert("Please enter a valid distance");
+    alert(i18n.t("messages.track_enter_distance"));
     return;
   }
 
@@ -9634,7 +9649,7 @@ function addWebhook() {
         loadWebhooks(); // Reload list
         console.log("Webhook added:", ip);
       } else {
-        alert(i18n.t("messages.webhook_add_error") + ": " + (data.message || "Unknown error"));
+        alert(i18n.t("messages.webhook_add_error") + ": " + (data.message || i18n.t("messages.unknown_error")));
       }
     })
     .catch((error) => {
@@ -9666,7 +9681,7 @@ function removeWebhook(ip) {
     })
     .catch((error) => {
       console.error("Error removing webhook:", error);
-      alert("Error removing webhook");
+      alert(i18n.t("messages.webhook_remove_error"));
     });
 }
 
@@ -9805,7 +9820,7 @@ function renderGateDevices(webhooks) {
   if (!container) return;
 
   if (webhooks.length === 0) {
-    container.innerHTML = '<p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">No gate devices configured. Add webhook IPs in the Webhooks tab.</p>';
+    container.innerHTML = `<p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">${i18n.t("settings.led.no_gate_devices")}</p>`;
     return;
   }
 
@@ -9818,42 +9833,42 @@ function renderGateDevices(webhooks) {
       <div style="padding: 14px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 8px; border-left: 4px solid var(--accent-color)">
         <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer" onclick="toggleGateDetail('${eid}')">
           <div>
-            <span style="font-weight: bold; font-size: 14px">Gate ${idx + 1}</span>
+            <span style="font-weight: bold; font-size: 14px">${i18n.t("settings.led.gate_n", { n: idx + 1 })}</span>
             <span style="font-size: 12px; color: var(--secondary-color); margin-left: 8px">${ip}</span>
           </div>
           <span id="gateArrow_${eid}" style="font-size: 12px; color: var(--secondary-color); transition: transform 0.2s">&#9660;</span>
         </div>
         <div id="gateDetail_${eid}" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color)">
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Effect:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.effect")}</label>
             <select id="gateEffect_${eid}" style="flex: 1">
-              <option value="off">Off</option>
-              <option value="solid" selected>Solid</option>
-              <option value="rainbow">Rainbow</option>
-              <option value="fade">Color Fade</option>
-              <option value="pulse">Pulse</option>
-              <option value="sparkle">Sparkle</option>
+              <option value="off">${i18n.t("settings.led.effects.off")}</option>
+              <option value="solid" selected>${i18n.t("settings.led.effects.solid")}</option>
+              <option value="rainbow">${i18n.t("settings.led.effects.rainbow")}</option>
+              <option value="fade">${i18n.t("settings.led.effects.fade")}</option>
+              <option value="pulse">${i18n.t("settings.led.effects.pulse")}</option>
+              <option value="sparkle">${i18n.t("settings.led.effects.sparkle")}</option>
             </select>
           </div>
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Color:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.color")}</label>
             <input type="color" id="gateColor_${eid}" value="#FF0000" style="height: 36px; flex: 1; max-width: 80px; border: 2px solid var(--border-color); border-radius: 4px" />
           </div>
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Brightness:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.brightness_short")}</label>
             <div style="flex: 1; display: flex; align-items: center; gap: 8px">
               <input type="range" id="gateBri_${eid}" min="0" max="255" value="200" style="flex: 1" oninput="document.getElementById('gateBriV_${eid}').textContent=this.value" />
               <span id="gateBriV_${eid}" style="font-size: 13px; min-width: 28px">200</span>
             </div>
           </div>
           <div class="config-item" style="margin-bottom: 12px">
-            <label style="min-width: 80px">Speed:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.speed_short")}</label>
             <div style="flex: 1; display: flex; align-items: center; gap: 8px">
               <input type="range" id="gateSpd_${eid}" min="1" max="100" value="50" style="flex: 1" oninput="document.getElementById('gateSpdV_${eid}').textContent=this.value" />
               <span id="gateSpdV_${eid}" style="font-size: 13px; min-width: 28px">50</span>
             </div>
           </div>
-          <button onclick="sendToGate('${ip}')" style="width: 100%; background-color: var(--accent-color)">Apply to Gate ${idx + 1}</button>
+          <button onclick="sendToGate('${ip}')" style="width: 100%; background-color: var(--accent-color)">${i18n.t("settings.led.apply_gate_n", { n: idx + 1 })}</button>
         </div>
       </div>
     `;
@@ -9923,7 +9938,7 @@ function testWebhook() {
     .then((response) => {
       if (!response.ok) {
         return response.json().then((data) => {
-          throw new Error(data.message || "Unknown error");
+          throw new Error(data.message || i18n.t("messages.unknown_error"));
         });
       }
       return response.json();
@@ -9932,7 +9947,7 @@ function testWebhook() {
       if (data.status === "OK") {
         alert(i18n.t("messages.webhook_test_sent"));
       } else {
-        alert(i18n.t("messages.error_generic", { n: data.message || "Unknown error" }));
+        alert(i18n.t("messages.error_generic", { n: data.message || i18n.t("messages.unknown_error") }));
       }
     })
     .catch((error) => {

@@ -6,6 +6,20 @@
 (function () {
   'use strict';
 
+  // Locale loading is async; fall back to English if a status label is needed
+  // before the catalogue has arrived, then re-apply once it is ready.
+  const tr = (key, fallback) => {
+    const value = i18n.t(key);
+    return value === key ? fallback : value;
+  };
+  let lastStatusKey = null;
+  const whenI18nReady = (fn) => {
+    if (i18n.ready) return i18n.ready.then(fn);
+    window.addEventListener('load', () => {
+      if (i18n.ready) i18n.ready.then(fn);
+    }, { once: true });
+  };
+
   const liveEl = document.getElementById('liveValue');
   const enterEl = document.getElementById('enterValue');
   const exitEl = document.getElementById('exitValue');
@@ -58,13 +72,22 @@
     ];
   }
 
-  function setConnected(ok, label) {
+  function setConnected(ok, key, fallback) {
     if (ok) {
       connDot.classList.add('connected');
     } else {
       connDot.classList.remove('connected');
     }
-    if (label) connLabel.textContent = label;
+    if (key) {
+      lastStatusKey = key;
+      connLabel.textContent = tr(key, fallback);
+      // The label is now live status, not the static placeholder, so a later
+      // translatePage() must not reset it to "Connecting...".
+      connLabel.removeAttribute('data-i18n');
+      whenI18nReady(() => {
+        if (lastStatusKey === key) connLabel.textContent = i18n.t(key);
+      });
+    }
   }
 
   async function fetchConfig() {
@@ -110,16 +133,16 @@
 
   function setupEvents() {
     if (!window.EventSource) {
-      setConnected(false, 'SSE not supported');
+      setConnected(false, 'rssi_debug.sse_unsupported', 'SSE not supported');
       return;
     }
     eventSource = new EventSource('/events');
     const source = eventSource;
 
-    source.addEventListener('open', () => setConnected(true, 'Connected'));
+    source.addEventListener('open', () => setConnected(true, 'rssi_debug.connected', 'Connected'));
     source.addEventListener('error', (e) => {
       if (e.target.readyState !== EventSource.OPEN) {
-        setConnected(false, 'Reconnecting...');
+        setConnected(false, 'rssi_debug.reconnecting', 'Reconnecting...');
       }
     });
 
