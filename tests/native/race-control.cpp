@@ -210,5 +210,15 @@ int main() {
         assert(count == 3);
         assert(writes == 1); // no extra local history record
     }
+    {
+        Fixture f(1, 0, 1);
+        f.config.persistOk = false;
+        assert(f.control.requestStart());
+        f.control.update();
+        assert(!f.control.status().running);
+        assert(f.config.persistCalls == 1);
+        assert(f.control.status().error != nullptr);
+        assert(writes == 0);
+    }
     std::cout << "PASS: C5 gate completion, heat limits, history, retries, idempotency and continued RH passes\n";
 }

@@ -30,6 +30,10 @@ public:
     std::shared_ptr<Lease> editLease();
     bool commitUpload(uint32_t& revision); // caller holds an edit lease
     void update(); // recover a persisted result/session after reboot
+#ifdef C5_UART_TRACE
+    bool debugLocked() const { return locked_.load(); }
+    bool debugActive() const { return active_.load(); }
+#endif
     bool takeChanged() { return changed_.exchange(false); }
 
 private:

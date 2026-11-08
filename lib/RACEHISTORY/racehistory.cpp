@@ -1,4 +1,5 @@
 #include "racehistory.h"
+#include "history_snapshot.h"
 #include <algorithm>
 #include <time.h>
 #include "debug.h"
@@ -6,6 +7,7 @@
 
 namespace {
 SemaphoreHandle_t historyMutex = nullptr;
+HistorySnapshotAllocator snapshotAllocator;
 // HTTP reads on core 0 while loop() saves on core 1. Never hold a spinlock
 // across filesystem operations or JSON allocation.
 struct HistoryLock {
@@ -513,7 +515,15 @@ bool RaceHistory::tryToJsonString(String& output) {
     // A busy response lets the caller retry without exposing partial history.
     HistoryLock lock(0);
     if (!lock.acquired) return false;
-    JsonDocument doc;
+    JsonDocument doc(&snapshotAllocator);
+    writeHistoryDocument(doc);
+    if (doc.overflowed()) return false;
+    output = "";
+    serializeJson(doc, output);
+    return true;
+}
+
+void RaceHistory::writeHistoryDocument(JsonDocument& doc) const {
     JsonArray racesArray = doc["races"].to<JsonArray>();
 
     size_t racesToOutput = std::min(races.size(), (size_t)MAX_RACES);
@@ -522,8 +532,23 @@ bool RaceHistory::tryToJsonString(String& output) {
         writeRaceObject(raceObj, races[i]);
     }
 
-    output = "";
-    serializeJson(doc, output);
+}
+
+bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length) {
+    output.reset();
+    length = 0;
+    HistoryLock lock(0);
+    if (!lock.acquired) return false;
+    JsonDocument doc(&snapshotAllocator);
+    writeHistoryDocument(doc);
+    if (doc.overflowed()) return false;
+    const size_t bytes = measureJson(doc);
+    char* raw = static_cast<char*>(snapshotAllocator.allocate(bytes + 1));
+    if (!raw) return false;
+    std::shared_ptr<char> snapshot(raw, std::free);
+    if (serializeJson(doc, raw, bytes + 1) != bytes) return false;
+    length = bytes;
+    output = std::move(snapshot);
     return true;
 }
 

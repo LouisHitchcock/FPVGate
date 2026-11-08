@@ -39,6 +39,7 @@ using std::min; using std::max;
 #define ${board} 1
 #define DEBUG(...) ((void)0)
 class JsonObject {}; class AsyncResponseStream {};
+using SemaphoreHandle_t = void*;
 ${header}
 static size_t strlcpy(char* dst, const char* src, size_t n) {
     size_t len = strlen(src); if (n) { size_t k = std::min(len, n - 1); memcpy(dst, src, k); dst[k] = 0; } return len;
@@ -50,7 +51,7 @@ ${method('void Config::setDefaults(void)')}
 ${method('void Config::load(void)')}
 ${method('uint8_t Config::getReceiverRadio()')}
 ${method('void Config::setReceiverRadio(uint8_t radio)')}
-void Config::write() { EEPROM.image = conf; modified = false; }
+bool Config::write() { EEPROM.image = conf; modified = false; return true; }
 bool Config::loadFromSD() { return false; }
 int main() {
     assert(strcmp(FPVGATE_BOARD_ID, "${boardId}") == 0);

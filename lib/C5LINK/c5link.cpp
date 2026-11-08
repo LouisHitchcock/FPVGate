@@ -2,6 +2,22 @@
 #include <LittleFS.h>
 #include "debug.h"
 
+#ifdef C5_UART_TRACE
+static void traceC5Tasks(const char* reason, uint32_t detail) {
+    const char* names[] = {"loopTask", "c5Task", "async_tcp", "rssi_write"};
+    UBaseType_t priorities[4] = {};
+    int states[4] = {-1, -1, -1, -1};
+    // Snapshot before logging: the logger itself can wait on a mutex.
+    for (unsigned i = 0; i < 4; ++i) {
+        TaskHandle_t task = xTaskGetHandle(names[i]);
+        if (task) { priorities[i] = uxTaskPriorityGet(task); states[i] = (int)eTaskGetState(task); }
+    }
+    DEBUG("[C5TRACE] %s=%lu loop=%u/%d c5=%u/%d async=%u/%d writer=%u/%d\n",
+          reason, (unsigned long)detail, priorities[0], states[0], priorities[1], states[1],
+          priorities[2], states[2], priorities[3], states[3]);
+}
+#endif
+
 static uint8_t xorChecksum(const char *s) {
     uint8_t c = 0;
     while (*s) c ^= (uint8_t)*s++;
@@ -35,6 +51,31 @@ void C5Link::begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t tx
     gainDirty_ = true;
     port_->setRxBufferSize(RX_BUFFER_BYTES);   // must precede begin()
     port_->begin(BAUD, SERIAL_8N1, rxPin, txPin);
+    // The core defaults to 120 of 128 FIFO bytes at this baud rate, leaving
+    // only ~87 us before overflow. Interrupt at half full instead: ~694 us
+    // of headroom while retaining bulk reads into the existing 16 KB ring.
+    if (!port_->setRxFIFOFull(64)) {
+        DEBUG("C5 link: could not configure UART FIFO threshold\n");
+        port_->end();
+        port_ = nullptr;
+        return;
+    }
+    // Keep driver errors visible during the regression run and normal use.
+    port_->onReceiveError([this](hardwareSerial_error_t error) {
+#ifdef C5_UART_TRACE
+        // Error storms must not become high-priority logging storms.
+        static bool tracedError = false;
+        if (!tracedError) { tracedError = true; traceC5Tasks("uart_error", (uint32_t)error); }
+#endif
+        switch (error) {
+            case UART_FIFO_OVF_ERROR: ++uartFifoOverflows_; break;
+            case UART_BUFFER_FULL_ERROR: ++uartBufferFull_; break;
+            case UART_FRAME_ERROR: ++uartFrameErrors_; break;
+            case UART_PARITY_ERROR: ++uartParityErrors_; break;
+            case UART_BREAK_ERROR: ++uartBreaks_; break;
+            default: break;
+        }
+    });
     sendPayload("Q");
     activePilot_ = C5_MAX_PILOTS - 1;   // the first slot tuned is the first enabled one
     tuneNext();
@@ -46,6 +87,27 @@ uint8_t C5Link::enabledCount() const {
     uint8_t n = 0;
     for (uint8_t i = 0; i < C5_MAX_PILOTS; ++i) n += config_ && config_->getC5Frequency(i) ? 1 : 0;
     return n;
+}
+
+bool C5Link::pauseForStorage(uint32_t timeoutMs) {
+    if (!port_ || !online(millis())) return true;
+    if (updating()) return false;
+    storagePauseReady_ = false;
+    __sync_synchronize();
+    storagePauseRequested_ = true;
+    const uint32_t started = millis();
+    while (!storagePauseReady_) {
+        if ((uint32_t)(millis() - started) >= timeoutMs) {
+            resumeAfterStorage();
+            return false;
+        }
+        vTaskDelay(1);
+    }
+    return true;
+}
+
+void C5Link::resumeAfterStorage() {
+    storagePauseRequested_ = false;
 }
 
 void C5Link::tuneNext() {
@@ -64,12 +126,15 @@ void C5Link::tuneNext() {
 
 void C5Link::sendPayload(const char *payload) {
     if (!port_) return;
-    port_->print(payload);
-    port_->print('*');
+    size_t written = port_->print(payload);
+    written += port_->print('*');
     char checksum[3];
     snprintf(checksum, sizeof(checksum), "%02X", xorChecksum(payload));
-    port_->print(checksum);
-    port_->print('\n');
+    written += port_->print(checksum);
+    written += port_->print('\n');
+    ++commandsSent_;
+    commandBytesWritten_ += written;
+    if (written != strlen(payload) + 4) ++commandWriteFailures_;
 }
 
 void C5Link::sendTune(uint8_t pilot) {
@@ -119,7 +184,22 @@ void C5Link::sendSlots(uint32_t nowMs) {
 
 bool C5Link::poll(uint32_t nowMs) {
     if (!port_) return false;
-    if (config_->getC5Gain() != gain_) {
+    if (!storagePauseRequested_ && storagePauseSent_) {
+        storagePauseSent_ = false;
+        storagePauseReady_ = false;
+        slotsSent_ = false;
+        cycleSeqValid_ = false;
+    }
+    if (storagePauseRequested_ && !storagePauseSent_) {
+        // Only this task writes the UART. Stop the sender and wait for its
+        // status before flash erases disable the non-IRAM receive interrupt.
+        storagePauseSent_ = true;
+        storagePauseReady_ = false;
+        cycleSeqValid_ = false;
+        tuningReady_ = false;
+        sendPayload(firmware_ >= 2 ? "P,0,0,0,0,0,0,0,0" : "F,0");
+    }
+    if (!storagePauseRequested_ && config_->getC5Gain() != gain_) {
         gain_ = config_->getC5Gain();
         gainDirty_ = true;
         if (scanMode_) {
@@ -134,6 +214,9 @@ bool C5Link::poll(uint32_t nowMs) {
         }
     }
     const uint32_t pollUs = micros();
+#ifdef C5_UART_TRACE
+    if (lastPollUs_ && pollUs - lastPollUs_ > 20000) traceC5Tasks("poll_gap_us", pollUs - lastPollUs_);
+#endif
     if (lastPollUs_ && pollUs - lastPollUs_ > pollGapMaxUs_) pollGapMaxUs_ = pollUs - lastPollUs_;
     lastPollUs_ = pollUs;
     uint32_t bytes = 0;
@@ -158,6 +241,7 @@ bool C5Link::poll(uint32_t nowMs) {
         ++bytes;
         if (recState_ == 1) {
             if (b < 7 || b > RECORD_MAX) {
+                ++badLengths_;
                 ++badRecords_;
                 recState_ = 0;
                 continue;
@@ -175,7 +259,7 @@ bool C5Link::poll(uint32_t nowMs) {
             }
             recState_ = 0;
             if (crc8(rec_, recLen_ + 1u) == b) handleRecord(nowMs);
-            else ++badRecords_;
+            else { ++badCrcs_; ++badRecords_; }
             continue;
         }
         // Outside a record, 0xA5 starts one: it never appears in a line.
@@ -212,6 +296,7 @@ bool C5Link::poll(uint32_t nowMs) {
             updateState_ == UpdateState::Finishing)
             return more;
     }
+    if (storagePauseRequested_) return more;
     if (scanMode_) {
         // Send the slot list when it changes, and again while the C5 isn't
         // scanning it (it rebooted, or the P was lost).
@@ -290,6 +375,12 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             firmware_ = fields >= 4 ? (uint8_t)firmware : 1;
             strlcpy(version_, fields >= 6 ? version : "", sizeof(version_));
             strlcpy(board_, fields >= 6 ? board : "", sizeof(board_));
+            if (storagePauseSent_) {
+                storagePauseReady_ = freq == 0 && strcmp(status, "ERR_FREQ") == 0;
+                tuningReady_ = false;
+                online_ = true;
+                return;
+            }
             const bool canScan = fields >= 4 && firmware >= 2;
             if (canScan && !scanMode_) {
                 scanMode_ = true;   // poll() sends the slot list next
@@ -338,11 +429,12 @@ void C5Link::handleRecord(uint32_t nowMs) {
         if (sentSlots_[i]) wantMask |= (uint8_t)(1u << i);
     }
     if (recLen_ != 7u + 4u * slots) {
+        ++badShapes_;
         ++badRecords_;
         return;
     }
     // Records from before the current slot list took effect are dropped.
-    if (!scanMode_ || awaitingScanAck_ || mask != wantMask) return;
+    if (storagePauseSent_ || !scanMode_ || awaitingScanAck_ || mask != wantMask) return;
     ++scanRecords_;
     const uint8_t seq = p[1];
     if (cycleSeqValid_ && seq != (uint8_t)(lastCycleSeq_ + 1u)) ++sampleSequenceGaps_;

@@ -167,6 +167,18 @@ void C5RaceControl::start(uint32_t timestamp) {
         event_ = "startFailed";
         return;
     }
+    // Serialize against an in-progress background save, and persist changed
+    // heat settings while sampling is still allowed to pause, before timing.
+    if (!config_->write()) {
+        const bool cancelled = !events_ || events_->cancel();
+        portENTER_CRITICAL(&mux_);
+        status_ = {};
+        status_.saveFailed = status_.eventFailed = !cancelled;
+        status_.error = cancelled ? "Configuration could not be saved; retry Start" : events_->error();
+        portEXIT_CRITICAL(&mux_);
+        event_ = "startFailed";
+        return;
+    }
     race_.minLapMs = config_->getMinLapMs();
     race_.syncMode = 3;
     heatMs_ = (uint32_t)config_->getMaxHeatTime30s() * 30000u;

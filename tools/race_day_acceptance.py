@@ -3,7 +3,7 @@ Never deletes baseline race IDs. All case evidence is kept independently of devi
 """
 import argparse,base64,concurrent.futures,copy,ctypes,datetime,hashlib,json,os,pathlib,random,re,sqlite3,subprocess,sys,threading,time,traceback
 import requests,socketio,secrets,shutil
-from race_day_contracts import RaceJournal, deterministic_timing, live_counts, saved_counts_complete
+from race_day_contracts import RaceJournal, deterministic_timing, live_counts, saved_counts_complete, validate_candidate_identity
 from race_day_stop import watch_stop_file
 ROOT=pathlib.Path.cwd()/'.dev/race-day-acceptance'
 REPO=pathlib.Path(__file__).resolve().parents[1]
@@ -28,7 +28,7 @@ def replace_evidence(temp,path,attempts=50,delay=.1):
    if attempt==attempts-1:raise
    time.sleep(delay)
 def record(board,case,status,**detail):
- row={'utc':now(),'board':board,'case':case,'status':status,'stimulus':'HTTP injected crossings unless explicitly stated',**detail}
+ row={'utc':now(),'board':board,'case':case,'status':status,'stimulus':'Real C5 native USB polling; race laps are RH manual simulation' if board=='usb' else 'HTTP injected crossings unless explicitly stated',**detail}
  with LOCK:
   RESULTS.append(row)
   if FAIL_FAST and status in ('FAIL','ERROR'):STOP.set()
@@ -66,6 +66,13 @@ class Gate:
  def state(self):
   self.last_state=self.call('/api/c5/race');return self.last_state
  def stopped(self):return wait(lambda:(lambda s:s if not s['running'] and not s['busy'] else None)(self.state()),60)
+ def wait_started(self,seconds=30):
+  def ready():
+   state=self.state()
+   if state['running']:return state
+   if not state.get('busy') and state.get('error'):raise RuntimeError('Gate refused Start: '+state['error'])
+   return None
+  return wait(ready,seconds)
  def claim_current(self):
   state=self.state();assert state['running'],state;self.journal.claim_running(state['timestamp']);atomic(self.out/'active-race.json',{'timestamp':state['timestamp'],'phase':self.phase,'utc':now()})
  def configure(self,n,reason='maxLaps',lap_format=0):
@@ -91,7 +98,7 @@ class Gate:
   self.call('/races/delete',form={'timestamp':stamp});self.created.remove(stamp);atomic(self.out/'owned-races.json',sorted(self.created))
   assert all(r['timestamp']!=stamp for r in self.call('/races')['races'])
  def local_heat(self,index,n,reason,interval):
-  self.configure(n,reason,index%3);self.phase='local-race';self.call('/timer/start',{});wait(lambda:self.state()['running']);self.claim_current()
+  self.configure(n,reason,index%3);self.phase='local-race';self.call('/timer/start',{});self.wait_started();self.claim_current()
   started=time.monotonic()
   rounds=2 if reason=='heatTime' else 4
   for crossing in range(rounds):
@@ -139,13 +146,13 @@ class Gate:
     time.sleep(.25)
    raise RuntimeError('Event stayed busy')
   try:
-   upload(fixture);self.call('/config',{'eventMode':1});self.call('/timer/start',{});wait(lambda:self.state()['running']);self.claim_current()
+   upload(fixture);self.call('/config',{'eventMode':1});self.call('/timer/start',{});self.wait_started();self.claim_current()
    self.call('/api/c5/addLap?pilot=0',{});time.sleep(2.2);self.call('/api/c5/addLap?pilot=0',{});saved=self.stopped()
    stamp=saved['savedTimestamp'];assert stamp and stamp not in self.old_ids;self.created.add(stamp)
    event=self.call('/api/event');assert len(event['races'])==1 and event['schedule']['pos']==1 and event['schedule']['reviewRaceId']
    self.call('/timer/start',{});time.sleep(.5);blocked=self.stopped();assert not blocked['running'] and 'Confirm' in blocked['error']
    event['schedule']['reviewRaceId']=None;event['active']={'groupId':11,'seats':[2,3,None,None,None,None,None,None],'step':1};upload(event)
-   assert not self.state()['running'];self.call('/timer/start',{});wait(lambda:self.state()['running']);self.claim_current();self.call('/timer/stop',{});self.stopped()
+   assert not self.state()['running'];self.call('/timer/start',{});self.wait_started();self.claim_current();self.call('/timer/stop',{});self.stopped()
    atomic(self.out/f'event-{index:04d}.json',{'saved':saved,'reviewBlocked':blocked,'after':self.call('/api/event')})
   finally:
    self.call('/timer/stop',{});self.stopped();upload(prior)
@@ -182,12 +189,14 @@ class Gate:
 
 class RH:
  def __init__(self,gate):
-  self.gate=gate;self.label=gate.label;self.data=ROOT/('rh-'+gate.label);self.port=5061 if gate.label=='aio' else 5062;self.process=None;self.sio=None;self.status={};self.beats={};self.live={};self.full=False;self.saving=False
+  self.gate=gate;self.label=gate.label;self.data=ROOT/('rh-'+gate.label);self.port={'aio':5061,'eth':5062,'usb':5063}[gate.label];self.process=None;self.sio=None;self.status={};self.beats={};self.live={};self.full=False;self.saving=False
  def read(self,sql,args=()):
   with sqlite3.connect(self.data/'database.db') as db:
    db.row_factory=sqlite3.Row;return [dict(x) for x in db.execute(sql,args)]
  def start(self,full=False):
-  self.stop();config=json.loads((self.data/'config.json').read_text());config['FPVGate'].update(address=self.gate.base.split('://')[1],node_count=8,mirror_race='1',full_rssi='1' if full else '0');config['GENERAL']['MOCK_NODES']=0;deterministic_timing(config);atomic(self.data/'config.json',config);self.full=full
+  self.stop();config=json.loads((self.data/'config.json').read_text())
+  if self.label!='usb':config['FPVGate'].update(address=self.gate.base.split('://')[1],node_count=8,mirror_race='1',full_rssi='1' if full else '0')
+  config['GENERAL']['MOCK_NODES']=0;deterministic_timing(config);atomic(self.data/'config.json',config);self.full=full
   out=(ROOT/f'rh-{self.label}-active-console.log').open('a');err=(ROOT/f'rh-{self.label}-active-error.log').open('a')
   self.process=subprocess.Popen([sys.executable,'-u',str(REPO/'tools/run_rh_bench.py'),str(self.data),str(RH_SERVER)],cwd=REPO,stdout=out,stderr=err,creationflags=0x08000000 if os.name=='nt' else 0);atomic(ROOT/f'rh-{self.label}-process.json',{'pid':self.process.pid,'port':self.port,'scale':4 if full else 1});out.close();err.close()
   wait(lambda:requests.get(f'http://127.0.0.1:{self.port}',timeout=2).status_code==200,45)
@@ -200,7 +209,7 @@ class RH:
   wait(lambda:len(self.read('select id from heat_node where heat_id=?',(self.heat,)))==8,30);slots=self.read('select id,node_index from heat_node where heat_id=?',(self.heat,))
   for s in slots:self.emit('alter_heat',{'heat':self.heat,'slot_id':s['id'],'pilot':pilots[s['node_index']]['id']})
   wait(lambda:all(r['pilot_id']==pilots[r['node_index']]['id'] for r in self.read('select node_index,pilot_id from heat_node where heat_id=?',(self.heat,))),30);self.emit('set_current_heat',{'heat':self.heat});self.emit('alter_race_format',{'format_id':1,'format_name':'QA ACCEPTANCE UNLIMITED','unlimited_time':1,'staging_fixed_tones':0,'start_delay_min_ms':1000,'start_delay_max_ms':0,'start_behavior':0,'win_condition':0,'number_laps_win':0});self.emit('set_race_format',{'race_format':1});self.emit('set_min_lap',{'min_lap':0})
-  time.sleep(1);record(self.label,'rh-production-plugin-startup-eight-nodes','PASS',scale=4 if full else 1)
+  time.sleep(1);record(self.label,'rh-native-usb-startup-eight-nodes' if self.label=='usb' else 'rh-production-plugin-startup-eight-nodes','PASS',scale=4 if full else 1)
  def emit(self,event,data=None):self.sio.emit(event,data);time.sleep(.12)
  def stop(self):
   if self.saving and self.process and self.process.poll() is None:
@@ -228,7 +237,7 @@ class RH:
    slots=g.call('/config')['c5Pilots']
    return all(p['frequency']==(FREQ[i] if i<n else 0) and p['enterRssi']==250 and p['exitRssi']==240 for i,p in enumerate(slots))
   wait(invariant,20)
-  before=self.read('select coalesce(max(id),0) as id from saved_race_meta')[0]['id'];self.emit('stage_race');wait(lambda:self.status.get('race_status')==1,20);wait(lambda:g.state()['running'],20);g.claim_current();g.phase='rh-race';sent=[];passes_before=g.call('/api/system/info').get('rhPasses')
+  before=self.read('select coalesce(max(id),0) as id from saved_race_meta')[0]['id'];self.emit('stage_race');wait(lambda:self.status.get('race_status')==1,20);g.wait_started(20);g.claim_current();g.phase='rh-race';sent=[];passes_before=g.call('/api/system/info').get('rhPasses')
   for crossing in range(4):
    if crossing:time.sleep(max(1.2,interval))
    for slot in range(n):
@@ -279,8 +288,10 @@ def wait_for_lanes(threads,limit=900):
 def lane(g,args):
  rh=RH(g);g.rh=rh;index=0;started=time.monotonic();deadline=None
  try:
-  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');assert info['version']=='1.9.0-rc.5' and receiver['c5']['version']=='1.2.5',(info,receiver)
-  atomic(g.out/'source-identity.json',{'gate':info,'receiver':receiver});rh.start();threading.Thread(target=stress,args=(g,),daemon=True).start();end=time.monotonic()+args.seconds;deadline=end
+  info=g.call('/api/system/info');receiver=g.call('/api/c5/update');validate_candidate_identity(g.label,info,receiver,getattr(args,g.label+'_receiver_version','1.2.5'))
+  atomic(g.out/'source-identity.json',{'gate':info,'receiver':receiver});rh.start();
+  if not args.no_asset_stress:threading.Thread(target=stress,args=(g,),daemon=True).start()
+  end=time.monotonic()+args.seconds;deadline=end
   while time.monotonic()<end and not STOP.is_set():
    index+=1;n=[1,2,4,8][(index-1)%4];reason=['maxLaps','manual','heatTime'][(index-1)%3]
    try:
@@ -318,7 +329,7 @@ def lane(g,args):
   record(g.label,'lane-terminal','PASS' if completed and exercised and not failed else 'FAIL',completedDuration=completed,elapsedSeconds=round(time.monotonic()-started,2),lastHeat=index)
 def main():
  global ROOT,RH_SERVER,FAIL_FAST
- p=argparse.ArgumentParser();p.add_argument('--seconds',type=float,default=300);p.add_argument('--lap-interval',type=float,default=8);p.add_argument('--between-heats',type=float,default=30);p.add_argument('--boards',nargs='+',default=['aio','eth']);p.add_argument('--allow-littlefs',action='store_true');p.add_argument('--continue-on-failure',action='store_true');p.add_argument('--out',type=pathlib.Path,required=True);p.add_argument('--config-template',type=pathlib.Path,required=True);p.add_argument('--rh-source',type=pathlib.Path,default=CODE/'rotorHazard/RotorHazard-4.5.1');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--seconds',type=float,default=300);p.add_argument('--lap-interval',type=float,default=8);p.add_argument('--between-heats',type=float,default=30);p.add_argument('--boards',nargs='+',default=['aio','eth']);p.add_argument('--allow-littlefs',action='store_true');p.add_argument('--no-asset-stress',action='store_true',help='Diagnostic UART isolation only');p.add_argument('--continue-on-failure',action='store_true');p.add_argument('--out',type=pathlib.Path,required=True);p.add_argument('--config-template',type=pathlib.Path,required=True);p.add_argument('--rh-source',type=pathlib.Path,default=CODE/'rotorHazard/RotorHazard-4.5.1');p.add_argument('--aio-image',type=pathlib.Path);p.add_argument('--eth-image',type=pathlib.Path);p.add_argument('--aio-receiver-version',default='1.2.5');p.add_argument('--eth-receiver-version',default='1.2.5');a=p.parse_args()
  assert a.seconds>0 and a.lap_interval>=1,'Positive duration and lap interval >=1s required'
  FAIL_FAST=not a.continue_on_failure
  ROOT=a.out.resolve();RH_SERVER=a.rh_source.resolve()/'src/server'
@@ -332,13 +343,18 @@ def main():
   out=ROOT/label/'baseline';out.mkdir(parents=True)
   status=requests.get(base+'/status',timeout=10);status.raise_for_status();storage=status.text.split('Chip:',1)[0];(out/'storage.txt').write_text(storage,encoding='utf-8');assert a.allow_littlefs or re.search(r'Type:\s*SD\b',storage),'SD data unavailable; stop instead of accepting a fallback baseline'
   for name,path in [('config','/config'),('history','/races'),('event','/api/event'),('tracks','/tracks'),('system','/api/system/info')]:
-   response=requests.get(base+path,timeout=20);response.raise_for_status();atomic(out/(name+'.json'),response.json())
+   for attempt in range(20):
+    response=requests.get(base+path,timeout=20)
+    if response.status_code!=503:break
+    time.sleep(.15)
+   response.raise_for_status();atomic(out/(name+'.json'),response.json())
   data=ROOT/('rh-'+label);data.mkdir();cfg=json.loads(a.config_template.read_text(encoding='utf-8'));cfg['GENERAL']['HTTP_PORT']=5061 if label=='aio' else 5062;cfg['GENERAL']['SERIAL_PORTS']=[];cfg['SECRETS']['ADMIN_USERNAME']='race-day';cfg['SECRETS']['ADMIN_PASSWORD']=secrets.token_urlsafe(24);deterministic_timing(cfg);atomic(data/'config.json',cfg);shutil.copytree(CODE/'fpvgate-rh-plugin-release/custom_plugins/fpvgate',data/'plugins/fpvgate',ignore=shutil.ignore_patterns('__pycache__'))
- atomic(ROOT/'manifest.json',{'createdUTC':now(),'pid':os.getpid(),'rhSource':str(a.rh_source),'durationSeconds':a.seconds,'fixedCalibration':True,'stimulus':'HTTP injected; rig must be off for initial acceptance','harnessSHA256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'gateCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True).strip(),'firmwareHashes':{b:hashlib.sha256((REPO/'.pio/build'/b/'firmware.bin').read_bytes()).hexdigest() for b in ['FPVGateC5MKAIO','WaveshareS3ETH']}})
+ atomic(ROOT/'manifest.json',{'createdUTC':now(),'pid':os.getpid(),'rhSource':str(a.rh_source),'durationSeconds':a.seconds,'fixedCalibration':True,'assetStressEnabled':not a.no_asset_stress,'stimulus':'HTTP injected; rig must be off for initial acceptance','harnessSHA256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'gateCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=REPO,text=True).strip(),'firmwareHashes':{b:hashlib.sha256((getattr(a,label+'_image') or REPO/'.pio/build'/b/'firmware.bin').read_bytes()).hexdigest() for label,b in [('aio','FPVGateC5MKAIO'),('eth','WaveshareS3ETH')] if label in a.boards}})
  if os.name=='nt':ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
  gates={n:Gate(n,b) for n,b in [('aio','http://192.168.7.1'),('eth','http://192.168.0.65')] if n in a.boards}
  for feature in ['RF crossing timing accuracy/independent transmitters','native C5 USB/RH full saved-race timing accuracy','ELRS physical switch/loss/binding','physical power-cut/full-media failures','LED/buzzer/speech physical observation','physical USB browser flash']:
   record('coverage',feature,'BLOCKED',reason='Focused injected acceptance; this run does not exercise the listed hardware feature')
+ if a.no_asset_stress:record('coverage','concurrent asset load','BLOCKED',reason='Explicit UART isolation replay; full-load heap qualification excluded')
  stop_file=ROOT.parent/(ROOT.name+'.stop.json')
  threading.Thread(target=watch_stop_file,args=(stop_file,STOP,lambda reason:record('qualification','external-stop','FAIL',reason=reason)),daemon=True).start()
  threads=[threading.Thread(target=lane,args=(gates[n],a),name=n) for n in a.boards]

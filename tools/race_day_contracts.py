@@ -4,6 +4,17 @@ import os
 from pathlib import Path
 
 
+def validate_candidate_identity(label, info, receiver, expected_version):
+    """Require the declared physical receiver matrix; never silently accept a swap."""
+    expected_gate = {'aio': 'FPVGateC5MKAIO', 'eth': 'WaveshareS3ETH'}[label]
+    expected_receiver = {'aio': 'xiaoc5', 'eth': 'c5zero'}[label]
+    actual = receiver.get('c5', {})
+    if (info.get('version') != '1.9.0-rc.5' or info.get('board') != expected_gate
+            or not actual.get('online') or actual.get('board') != expected_receiver
+            or actual.get('version') != expected_version):
+        raise ValueError(f'Candidate identity mismatch for {label}: {info.get("board")}, {actual}')
+
+
 def deterministic_timing(config):
     config.setdefault('TIMING', {}).update(
         calibrationMode=0, startThreshLowerAmount=0, startThreshLowerDuration=0)

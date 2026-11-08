@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <memory>
 #include "storage.h"
 #include "race_rssi_recorder.h"
 
@@ -66,6 +67,7 @@ class RaceHistory {
     bool clearAll();
     String toJsonString();
     bool tryToJsonString(String& output);
+    bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length);
     bool fromJsonString(const String& json);
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
@@ -78,6 +80,7 @@ class RaceHistory {
     RaceRssiRecorder* rssiRecorder;
 
     void writeRaceObject(JsonObject raceObj, const RaceSession& race) const;
+    void writeHistoryDocument(JsonDocument& doc) const;
     void readRssiMeta(JsonObject raceObj, RaceSession& race) const;
     bool writeRaceFile(const RaceSession& race);
     void deleteSidecar(const RaceSession& race);

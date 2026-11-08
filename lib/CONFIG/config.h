@@ -494,7 +494,8 @@ class Config {
    public:
     void init();
     void load();
-    void write();
+    bool write();
+    void setWriteHooks(bool (*before)(), void (*after)()) { beforeWrite_ = before; afterWrite_ = after; }
     void toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor = nullptr);
     void toJsonString(AsyncResponseStream& destination);
     void fromJson(JsonObject source);
@@ -657,6 +658,8 @@ class Config {
     bool modified;
     volatile uint32_t checkTimeMs = 0;
     Storage* storage = nullptr;
+    bool (*beforeWrite_)() = nullptr;
+    void (*afterWrite_)() = nullptr;
     void setDefaults();
     // v24 C5 pilot fields: empty names, the Calibration tab's slot colours,
     // and the slot on the main frequency racing (all slots if none is).

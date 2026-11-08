@@ -65,6 +65,11 @@ public:
     uint32_t sampleSequenceGaps() const { return sampleSequenceGaps_; }
     uint32_t sampleQueueDrops() const { return sampleQueueDrops_; }
     uint32_t acceptedSamples() const { return acceptedSamples_; }
+    uint32_t commandsSent() const { return commandsSent_; }
+    uint32_t commandBytesWritten() const { return commandBytesWritten_; }
+    uint32_t commandWriteFailures() const { return commandWriteFailures_; }
+    bool pauseForStorage(uint32_t timeoutMs = 1500);
+    void resumeAfterStorage();
     uint32_t tuneToTuningUs() const { return tuneToTuningUs_; }
     uint32_t tuningToReadyUs() const { return tuningToReadyUs_; }
     uint32_t readyToFirstSampleUs() const { return readyToFirstSampleUs_; }
@@ -75,6 +80,14 @@ public:
     bool scanMode() const { return scanMode_; }
     uint32_t scanRecords() const { return scanRecords_; }
     uint32_t badRecords() const { return badRecords_; }
+    uint32_t badLengths() const { return badLengths_; }
+    uint32_t badCrcs() const { return badCrcs_; }
+    uint32_t badShapes() const { return badShapes_; }
+    uint32_t uartFifoOverflows() const { return uartFifoOverflows_; }
+    uint32_t uartBufferFull() const { return uartBufferFull_; }
+    uint32_t uartFrameErrors() const { return uartFrameErrors_; }
+    uint32_t uartParityErrors() const { return uartParityErrors_; }
+    uint32_t uartBreaks() const { return uartBreaks_; }
     // Longest time between poll() calls and most bytes read by one poll()
     // since the last call to these (telemetry; read from the web task).
     uint32_t takePollGapMaxUs() { uint32_t v = pollGapMaxUs_; pollGapMaxUs_ = 0; return v; }
@@ -116,6 +129,12 @@ public:
 private:
     Config *config_ = nullptr;
     HardwareSerial *port_ = nullptr;
+    volatile uint32_t commandsSent_ = 0;
+    volatile uint32_t commandBytesWritten_ = 0;
+    volatile uint32_t commandWriteFailures_ = 0;
+    volatile bool storagePauseRequested_ = false;
+    bool storagePauseSent_ = false;
+    volatile bool storagePauseReady_ = false;
     uint32_t lastSlotMs_ = 0;
     uint32_t lastStatusMs_ = 0;
     struct Sample {
@@ -171,6 +190,10 @@ private:
     bool cycleSeqValid_ = false;
     uint32_t scanRecords_ = 0;
     uint32_t badRecords_ = 0;
+    uint32_t badLengths_ = 0, badCrcs_ = 0, badShapes_ = 0;
+    // Arduino dispatches hardware errors from its UART event task.
+    volatile uint32_t uartFifoOverflows_ = 0, uartBufferFull_ = 0;
+    volatile uint32_t uartFrameErrors_ = 0, uartParityErrors_ = 0, uartBreaks_ = 0;
     // C5 clock -> micros(): the smallest (arrival - C5 time) seen, creeping
     // up 1 us every 16 records so it follows crystal drift either way.
     uint32_t clockOffset_ = 0;

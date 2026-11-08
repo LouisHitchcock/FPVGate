@@ -2,8 +2,11 @@
 
 #include <EEPROM.h>
 #include <LittleFS.h>
+#include <freertos/semphr.h>
 
 #include "debug.h"
+
+static SemaphoreHandle_t configWriteMutex = nullptr;
 
 static float sanitizeBatteryDivider(float ratio) {
 #if defined(WAVESHARE_ESP32S3_LCD2)
@@ -90,6 +93,7 @@ static void getBandChannelFromFreq(uint16_t freq, int8_t* bandIndex, int8_t* cha
 }
 
 void Config::init(void) {
+    if (!configWriteMutex) configWriteMutex = xSemaphoreCreateMutex();
     if (sizeof(laptimer_config_t) > EEPROM_RESERVED_SIZE) {
         DEBUG("Config size too big, adjust reserved EEPROM size\n");
         return;
@@ -463,22 +467,27 @@ void Config::load(void) {
     }
 }
 
-void Config::write(void) {
-    if (!modified) return;
+bool Config::write(void) {
+    if (!configWriteMutex || xSemaphoreTake(configWriteMutex, portMAX_DELAY) != pdTRUE) return false;
+    if (!modified) { xSemaphoreGive(configWriteMutex); return true; }
+    if (beforeWrite_ && !beforeWrite_()) { xSemaphoreGive(configWriteMutex); return false; }
 
     DEBUG("Writing to EEPROM (timerNumber=%d)\n", conf.timerNumber);
 
     EEPROM.put(0, conf);
-    EEPROM.commit();
+    const bool committed = EEPROM.commit();
 
     DEBUG("Writing to EEPROM done\n");
     
     // Also backup to SD card if available
-    if (saveToSD()) {
+    if (committed && saveToSD()) {
         DEBUG("Config backed up to SD card\n");
     }
 
-    modified = false;
+    if (committed) modified = false;
+    if (afterWrite_) afterWrite_();
+    xSemaphoreGive(configWriteMutex);
+    return committed;
 }
 
 void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor) {

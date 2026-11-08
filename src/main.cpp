@@ -218,10 +218,15 @@ static void c5Task(void *) {
 // so a gate that never uses one keeps the task's stack for the web server.
 static TaskHandle_t c5TaskHandle = nullptr;
 
+#ifndef C5_TASK_PRIORITY
+#define C5_TASK_PRIORITY 12
+#endif
 static void startC5Task() {
     if (c5TaskHandle) return;
-    // loop() runs at priority 1 on core 1.
-    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, 3, &c5TaskHandle, 1);
+    // Storage callers can inherit AsyncTCP priority 10 while holding an SD/FS
+    // mutex. The UART consumer must outrun that inherited priority, not only
+    // loopTask's base priority 1, or the 16 KB receive ring can overflow.
+    xTaskCreatePinnedToCore(c5Task, "c5Task", 6144, NULL, C5_TASK_PRIORITY, &c5TaskHandle, 1);
 }
 
 static void onSdCardReady() {
@@ -568,6 +573,10 @@ void setup() {
         c5Link.begin(&config, &Serial1, C5_UART_RX_PIN, C5_UART_TX_PIN);
         c5MultiPilot.begin(&config, &c5Link);
         startC5Task();
+        config.setWriteHooks([]() -> bool {
+            if (c5RaceControl.status().running) return false;
+            return c5Link.pauseForStorage();
+        }, []() { c5Link.resumeAfterStorage(); });
     }
 }
 

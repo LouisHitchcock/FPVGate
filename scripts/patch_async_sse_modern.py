@@ -94,6 +94,34 @@ def patch_dependency(build_env):
     print('patch_async_sse_modern: verified AsyncTCP accepted-byte accounting')
 
 
+def patch_response_memory(build_env):
+    from pathlib import Path
+    src = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src'
+    header = src / 'WebResponseImpl.h'
+    source = src / 'WebResponses.cpp'
+    support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/response_buffer.h').as_posix()
+    text = header.read_text(encoding='utf-8')
+    old_size = '#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS * 2'
+    new_size = '#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS // FPVGate one-segment response window'
+    if old_size in text: text = text.replace(old_size, new_size, 1)
+    elif new_size not in text: raise RuntimeError('Web response window changed; review TCP cap agreement')
+    before = 'std::unique_ptr<std::array<uint8_t, ASYNC_RESPONCE_BUFF_SIZE> > _send_buffer;'
+    after = 'std::unique_ptr<FpvResponseBuffer<ASYNC_RESPONCE_BUFF_SIZE>> _send_buffer;'
+    if before in text:
+        text = text.replace(before, after, 1)
+        text = text.replace('#include <vector>', '#include <vector>\n#include "' + support + '" // FPVGate external response buffers', 1)
+    elif after not in text:
+        raise RuntimeError('Web response buffer layout changed; review PSRAM patch')
+    if text != header.read_text(encoding='utf-8'): header.write_text(text, encoding='utf-8')
+    text = source.read_text(encoding='utf-8')
+    before = 'new (std::nothrow) std::array<uint8_t, ASYNC_RESPONCE_BUFF_SIZE>'
+    after = 'new (std::nothrow) FpvResponseBuffer<ASYNC_RESPONCE_BUFF_SIZE>'
+    if before in text: text = text.replace(before, after, 1)
+    elif after not in text: raise RuntimeError('Web response allocation changed; review PSRAM patch')
+    if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
+    print('patch_async_sse_modern: verified external response buffers')
+
+
 try:
     Import('env')  # noqa: F821
 except NameError:
@@ -105,6 +133,7 @@ if env is not None:
     def configure_with_sse_patch(build_env):
         builder = _configure_before_sse_patch()
         patch_dependency(build_env)
+        patch_response_memory(build_env)
         return builder
 
     env.AddMethod(configure_with_sse_patch, 'ConfigureProjectLibBuilder')

@@ -3,6 +3,9 @@
 #include "Arduino.h"
 class Config {
 public:
+    bool persistOk = true;
+    unsigned persistCalls = 0;
+    bool write() { ++persistCalls; return persistOk; }
     uint8_t radio = 2, maxLaps = 0, raceMask = 3, heat = 0;
     uint8_t enter = 120, exit = 100;
     uint32_t minLap = 2000;

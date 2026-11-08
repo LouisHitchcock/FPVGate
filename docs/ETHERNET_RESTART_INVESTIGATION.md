@@ -88,3 +88,39 @@ production candidate.
 A separate 300-second read-only AIO idle monitor recorded 280 fresh requests,
 294 held requests and 290 pings with no failures. This does not clear the USB
 interruptions or low-heap finding from the earlier race-day workload.
+
+### Heap investigation checkpoint, 6 November
+
+The subsequent retry was stopped on qualification failure; no overnight run is
+active. The harness now stops on its first FAIL/ERROR and accepts an external
+stop file so heap and network monitors can stop it and restore saved data.
+The existing 40,000-byte internal-heap qualification floor remains unchanged.
+
+An isolated AIO history request with a 33,567-byte response reduced internal
+heap to 37,152 bytes. An experimental immutable history snapshot, allocating
+its JSON tree and response in PSRAM where available, raised that isolated
+minimum to 70,960 bytes while preserving the response contents. This is a
+partial improvement, not a qualified fix. Five concurrent history/static-file
+responses with a drained RotorHazard event stream still reached 35,112 bytes
+after an additional experimental PSRAM response-buffer change. That check
+failed and no long soak followed it. Both candidate application installs
+passed configuration, history and Event preservation checks.
+
+At the next diagnostic attempt, the AIO's USB network adapter and COM23 were
+absent from Windows; its first HTTP connection timed out and ping failed.
+The probe stopped before sending any further workload. Ethernet remained
+reachable. Whether the AIO was physically disconnected or failed in firmware
+has not yet been established. Do not attribute this disappearance to the
+candidate without that distinction. Evidence is held locally under
+`.dev/rc-evidence/heap-investigation-20261106/`.
+
+
+## Confirmed Ethernet UART FIFO overflow ? 7 November 2026
+
+Run-06-uart-diagnostic reproduced the failure at 12:53:40 UTC during one-pilot RH heat 21, about 13m43s into its diagnostic phase. At the same event the driver reported **one UART FIFO overflow**, the parser reported **two CRC errors**, and sequence-discontinuity events rose by two. Invalid lengths, invalid record shapes, driver ring-buffer-full, sample queue drops, framing, parity and break counts were all zero. Receiver stayed online. Both lanes stopped and gate config/history plus native scanner restoration passed. Run-05 is preserved as a preflight-only 503 busy failure; no races started there.
+
+Confirmed mechanism: bytes lost at the S3 UART hardware FIFO. This explains this test failure; it does NOT establish the cause of the older Ethernet warm-restart hang, or rule out a separate AIO hardware fault. The exact critical section/interrupt delay causing overflow is not yet isolated. No EEPROM write appears immediately around either observed active-race failure.
+
+Candidate mitigation: configure the C5 UART RX-full interrupt at 64 bytes instead of Arduino core default 120, retaining 921600 baud and the existing 16 KB software ring. On a 128-byte FIFO, nominal remaining wire time increases from roughly 87 us to 694 us. Startup refuses to continue if configuring the threshold fails. Retain hardware and CRC/length/shape counters and fail on their increase. Tradeoff: more frequent RX interrupts; a long mixed-workload regression is required. Do not claim fixed/qualified before results.
+
+Only Ethernet firmware is changed; AIO remains parked. Next run: Ethernet + standalone COM29, 20-minute rehearsal then eight hours if it passes, strict first-failure stop and baseline restoration. Physical RF coverage remains excluded.

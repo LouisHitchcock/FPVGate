@@ -3,6 +3,8 @@
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
+#include <soc/gpio_reg.h>
+#include <soc/gpio_sig_map.h>
 #include <esp_core_dump.h>
 #include "logring.h"
 #ifdef FPVGATE_ETH_W5500
@@ -637,6 +639,14 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         rssiDoc["multi"] = c5MultiPilot->multiRace();
         rssiDoc["records"] = c5Link->scanRecords();
         rssiDoc["badRecords"] = c5Link->badRecords();
+        rssiDoc["badLengths"] = c5Link->badLengths();
+        rssiDoc["badCrcs"] = c5Link->badCrcs();
+        rssiDoc["badShapes"] = c5Link->badShapes();
+        rssiDoc["uartFifoOverflows"] = c5Link->uartFifoOverflows();
+        rssiDoc["uartBufferFull"] = c5Link->uartBufferFull();
+        rssiDoc["uartFrameErrors"] = c5Link->uartFrameErrors();
+        rssiDoc["uartParityErrors"] = c5Link->uartParityErrors();
+        rssiDoc["uartBreaks"] = c5Link->uartBreaks();
         rssiDoc["pollGapMaxUs"] = c5Link->takePollGapMaxUs();
         rssiDoc["pollBytesMax"] = c5Link->takePollBytesMax();
         String payload;
@@ -1612,6 +1622,18 @@ EEPROM:\n";
     server.on("/api/c5/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
         static const char *const states[] = {"idle", "starting", "sending", "finishing", "restarting", "done", "failed"};
         JsonDocument doc;
+        if (c5Link) {
+            JsonObject link = doc["link"].to<JsonObject>();
+            link["commandsSent"] = c5Link->commandsSent();
+            link["bytesWritten"] = c5Link->commandBytesWritten();
+            link["writeFailures"] = c5Link->commandWriteFailures();
+            link["txPin"] = C5_UART_TX_PIN;
+            link["rxPin"] = C5_UART_RX_PIN;
+            link["txSignal"] = REG_READ(GPIO_FUNC0_OUT_SEL_CFG_REG + 4 * C5_UART_TX_PIN) & GPIO_FUNC0_OUT_SEL;
+            link["expectedTxSignal"] = U1TXD_OUT_IDX;
+            if (TaskHandle_t task = xTaskGetHandle("c5Task"))
+                link["taskPriority"] = (unsigned)uxTaskPriorityGet(task);
+        }
         JsonObject c5 = doc["c5"].to<JsonObject>();
         c5["online"] = c5Link && c5Link->online(millis());
         c5["firmware"] = c5Link ? c5Link->firmware() : 0;
@@ -1743,6 +1765,43 @@ EEPROM:\n";
     //
     // The reply is sent first and the restart deferred, so the client sees a
     // response rather than a dropped connection.
+#ifdef C5_UART_TRACE
+    server.on("/api/c5/diagState", HTTP_GET, [this](AsyncWebServerRequest *request) {
+        JsonDocument doc;
+        if (eventDirector) {
+            doc["eventError"] = eventDirector->error();
+            doc["eventLocked"] = eventDirector->debugLocked();
+            doc["eventActive"] = eventDirector->debugActive();
+        }
+        for (const char* name : {"loopTask", "c5Task", "async_tcp", "rssi_write"}) {
+            if (TaskHandle_t task = xTaskGetHandle(name)) {
+                doc[name]["priority"] = (unsigned)uxTaskPriorityGet(task);
+                doc[name]["state"] = (int)eTaskGetState(task);
+            }
+        }
+        String result; serializeJson(doc, result);
+        request->send(200, "application/json", result);
+    });
+    // Bench-only A/B control. Never present in a normal firmware build.
+    server.on("/api/c5/diagPriority", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        if (timer->isRaceRunning() || (c5RaceControl && c5RaceControl->status().busy)) {
+            request->send(409, "text/plain", "Stop the race first"); return;
+        }
+        if (!request->hasParam("priority", true)) {
+            request->send(400, "text/plain", "priority required"); return;
+        }
+        const String value = request->getParam("priority", true)->value();
+        if (value != "3" && value != "12") {
+            request->send(400, "text/plain", "Only diagnostic priorities 3 and 12 are supported"); return;
+        }
+        TaskHandle_t task = xTaskGetHandle("c5Task");
+        if (!task) { request->send(409, "text/plain", "Receiver task missing"); return; }
+        vTaskPrioritySet(task, value.toInt());
+        char result[48];
+        snprintf(result, sizeof(result), "{\"priority\":%u}", (unsigned)uxTaskPriorityGet(task));
+        request->send(200, "application/json", result);
+    });
+#endif
     server.on("/api/system/reboot", HTTP_POST, [this](AsyncWebServerRequest *request) {
         request->send(200, "application/json", "{\"status\":\"OK\",\"message\":\"Rebooting\"}");
         _rebootRequestedMs = millis();
@@ -2272,14 +2331,21 @@ EEPROM:\n";
     });
 
     server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        String json;
-        if (!history->tryToJsonString(json)) {
+        std::shared_ptr<char> json;
+        size_t length = 0;
+        if (!history->tryToJsonSnapshot(json, length)) {
             auto* response = request->beginResponse(503, "application/json", "{\"error\":\"Race history is busy; retry shortly\"}");
             response->addHeader("Retry-After", "1");
             request->send(response);
             return;
         }
-        request->send(200, "application/json", json);
+        request->send(request->beginChunkedResponse("application/json",
+            [json, length](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+                if (index >= length) return 0;
+                const size_t count = std::min(maxLen, length - index);
+                memcpy(buffer, json.get() + index, count);
+                return count;
+            }));
         led->on(200);
     }).setFilter([](AsyncWebServerRequest *request) {
         // The pinned server also matches child paths. Do not intercept

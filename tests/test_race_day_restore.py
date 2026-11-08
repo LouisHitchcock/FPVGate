@@ -114,3 +114,18 @@ class RestorationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StartRefusalTests(unittest.TestCase):
+    def test_explicit_start_refusal_fails_without_polling_until_timeout(self):
+        gate = object.__new__(acceptance.Gate)
+        gate.state = Mock(return_value={'running': False, 'busy': False, 'error': 'Configuration could not be saved'})
+        with self.assertRaisesRegex(RuntimeError, 'Gate refused Start: Configuration'):
+            gate.wait_started()
+        self.assertEqual(gate.state.call_count, 1)
+
+    def test_busy_start_waits_but_running_state_finishes(self):
+        gate = object.__new__(acceptance.Gate)
+        gate.state = Mock(side_effect=[{'running': False, 'busy': True, 'error': ''}, {'running': True, 'busy': False, 'error': ''}])
+        with patch.object(acceptance.time, 'sleep'):
+            self.assertTrue(gate.wait_started()['running'])
