@@ -64,7 +64,7 @@
         "total": "总计：{n} 秒",
         "total_prefix": "总计：",
         "race_title": "比赛分析",
-        "race_empty": "请先在系统设置中启用至少一个分析面板，以显示更多比赛分析。",
+        "race_empty": "请在设置的用户界面中开启一致性或圈速图表。",
         "race_no_tab": "启用一个分析面板以显示比赛分析",
         "no_fastest_lap": "完成至少 1 圈后查看最快圈",
         "no_fastest_3": "完成至少 3 圈后查看最快连续 3 圈",
@@ -571,7 +571,7 @@
             "notes_auto_open": "比赛结束时打开比赛备注：",
             "notes_auto_open_tip": "比赛停止时自动打开比赛备注。",
             "race_analytics_title": "比赛分析显示",
-            "race_analytics_desc": "选择在比赛页显示哪些多人比赛分析面板（最多同时启用 3 个）。",
+            "race_analytics_desc": "比赛页面始终显示最快圈、最快连续三圈、最佳三圈和圈速中位数。选择在下方显示的图表，每项启用后会显示为一个标签页。",
             "race_analytics_fastest_lap_desc": "显示最快圈速及对应圈号",
             "race_analytics_fastest_3_desc": "显示最佳连续 3 圈及其圈号范围",
             "race_analytics_lap_times_desc": "显示所有飞手的逐圈圈速趋势图",
@@ -837,7 +837,8 @@
         "connecting": "连接中…",
         "connected": "已连接",
         "reconnecting": "正在重连…",
-        "sse_unsupported": "浏览器不支持 SSE"
+        "sse_unsupported": "浏览器不支持 SSE",
+        "pilot": "飞手："
     },
     "common": {
         "loading": "正在加载 FPVGate"

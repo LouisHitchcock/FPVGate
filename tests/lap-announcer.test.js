@@ -10,6 +10,14 @@
 const fs = require("fs");
 const path = require("path");
 
+const english = require("../data/locales/en.json");
+function translated(k, p = {}) {
+  if (["settings.tts.gate1", "settings.tts.laps_2", "settings.tts.laps_3"].includes(k)) {
+    return Object.entries(p).reduce((v, [key, value]) => v.replaceAll(`{${key}}`, value), k.split(".").reduce((v, key) => v[key], english));
+  }
+  return Object.keys(p).length ? `${k}:${p.n}` : k;
+}
+
 const SRC = fs.readFileSync(path.join(__dirname, "..", "data", "script.js"), "utf8");
 
 function extractBody(name) {
@@ -36,7 +44,7 @@ function race({ mode, maxLaps = 0, pilot = "Ann", sync = 0, format = "full", pho
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
     announcerExtras: () => extras,
-    i18n: { t: (k, p) => (p ? `${k}:${p.n}` : k) },
+    i18n: { t: translated },
     resetCurrentLapTimer: () => {},
     renderUnifiedRaceView: () => {},
     updateLapCounter: () => {},
@@ -124,7 +132,7 @@ test.each([1, 2])("consecutive announcements include the pilot in sync mode %p",
 test("every-lap and beep modes are unchanged", () => {
   const r = race({ mode: "1lap" });
   ["1.00", "10.00"].forEach((t) => r.addLap(t));
-  expect(r.spoken).toEqual(["settings.tts.gate1:1.00", "Ann, 10.00"]);
+  expect(r.spoken).toEqual(["Gate 1 1.00", "Ann, 10.00"]);
   const b = race({ mode: "beep" });
   ["1.00", "10.00"].forEach((t) => b.addLap(t));
   expect(b.spoken).toEqual(["BEEP", "BEEP"]);
@@ -143,7 +151,7 @@ function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false, extras = {}) {
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
     announcerExtras: () => extras,
-    i18n: { t: (k, p) => p ? `${k}:${p.n}` : k },
+    i18n: { t: translated },
     renderUnifiedRaceView: () => {},
     updateAnalysisSectionVisibility: () => {},
     updateRaceLeader: () => {},
@@ -174,7 +182,7 @@ test.each([
   r.pass(3, 2, 11);
   r.pass(5, 2, 21);
   r.pass(3, 3, 12);
-  expect(r.spoken).toEqual(["Bea settings.tts.gate1:1.20", "Cal settings.tts.gate1:2.50", ...totals]);
+  expect(r.spoken).toEqual(["Bea Gate 1 1.20", "Cal Gate 1 2.50", ...totals]);
   r.flush();
   expect(r.stops).toEqual([]);
 });
@@ -200,7 +208,7 @@ test.each(["none", "", "beep", "1lap", "2lap", "3lap"])("C5 %p stops only after 
 });
 
 test.each([
-  ["1lap", ["Bea settings.tts.gate1:1.20", "Bea, 10.00"]],
+  ["1lap", ["Bea Gate 1 1.20", "Bea, 10.00"]],
   ["beep", ["BEEP", "BEEP"]],
   ["none", []],
   ["", []],
