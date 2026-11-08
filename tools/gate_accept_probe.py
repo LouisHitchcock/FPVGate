@@ -36,13 +36,13 @@ class Series:
         self.lock = threading.Lock()
         self.samples = []
 
-    def add(self, ok, elapsed, error=None):
+    def add(self, ok, elapsed, error=None, detail=None):
         with self.lock:
             self.samples.append((time.time(), ok, round(elapsed, 3), error))
             if self.sink and not ok:
                 with self.sink.open('a', encoding='utf-8') as f:
                     f.write(json.dumps({'utc': time.strftime('%H:%M:%S', time.gmtime()), 'series': self.name,
-                                        'elapsed': round(elapsed, 3), 'error': error}) + '\n')
+                                        'elapsed': round(elapsed, 3), 'error': error, 'detail': detail}) + '\n')
 
     def report(self, gap_s):
         with self.lock:
@@ -70,14 +70,46 @@ class Series:
 
 
 def fresh_once(host):
-    sock = socket.create_connection((host, 80), timeout=FRESH_TIMEOUT_S)
+    sock = None
+    started = time.monotonic()
+    detail = {'phase': 'connect', 'receivedBytes': 0, 'headerComplete': False}
+    header = bytearray()
     try:
+        sock = socket.create_connection((host, 80), timeout=FRESH_TIMEOUT_S)
+        detail.update(localPort=sock.getsockname()[1], connectedSeconds=time.monotonic()-started, phase='send')
         sock.settimeout(FRESH_TIMEOUT_S)
         sock.sendall(f'GET /api/rh/info HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode())
-        while sock.recv(4096):
-            pass
+        detail['phase'] = 'receive'
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            detail['receivedBytes'] += len(data)
+            if 'firstByteSeconds' not in detail:
+                detail['firstByteSeconds'] = time.monotonic()-started
+            if not detail['headerComplete']:
+                header.extend(data)
+                boundary = header.find(b'\r\n\r\n')
+                if boundary >= 0:
+                    detail.update(headerComplete=True, headerBytes=boundary+4)
+                    lines = bytes(header[:boundary]).split(b'\r\n')
+                    parts = lines[0].split()
+                    if len(parts)>1 and parts[1].isdigit():detail['httpStatus']=int(parts[1])
+                    for line in lines[1:]:
+                        key, _, value = line.partition(b':')
+                        if key.lower()==b'content-length' and value.strip().isdigit():detail['contentLength']=int(value.strip())
+                    header.clear()
+                elif len(header)>16384:
+                    header.clear()  # Never retain response bodies or unbounded headers.
+    except Exception as error:
+        detail['elapsedSeconds'] = time.monotonic()-started
+        if detail['headerComplete']:
+            detail['bodyBytes'] = detail['receivedBytes']-detail['headerBytes']
+            detail['declaredBodyComplete'] = ('contentLength' in detail and detail['bodyBytes']>=detail['contentLength'])
+        error.probeDiagnostics = detail
+        raise
     finally:
-        sock.close()
+        if sock is not None:sock.close()
 
 
 def fresh_loop(host, series, stop, interval):
@@ -87,7 +119,7 @@ def fresh_loop(host, series, stop, interval):
             fresh_once(host)
             series.add(True, time.monotonic() - started)
         except Exception as exc:
-            series.add(False, time.monotonic() - started, type(exc).__name__)
+            series.add(False, time.monotonic() - started, type(exc).__name__, getattr(exc, "probeDiagnostics", None))
         stop.wait(interval)
 
 
@@ -101,7 +133,7 @@ def held_loop(host, series, stop, path='/api/rh/clock'):
             response.read()
             series.add(response.status == 200, time.monotonic() - started, f'http{response.status}')
         except Exception as exc:
-            series.add(False, time.monotonic() - started, type(exc).__name__)
+            series.add(False, time.monotonic() - started, type(exc).__name__, getattr(exc, "probeDiagnostics", None))
             conn.close()
         stop.wait(1.0)
 
