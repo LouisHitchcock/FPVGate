@@ -5,6 +5,7 @@
 #include <freertos/semphr.h>
 
 #include "debug.h"
+#include "history_snapshot.h"
 
 static SemaphoreHandle_t configWriteMutex = nullptr;
 
@@ -490,9 +491,7 @@ bool Config::write(void) {
     return committed;
 }
 
-void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor) {
-    // Use https://arduinojson.org/v6/assistant to estimate memory
-    JsonDocument config;
+void Config::writeConfigDocument(JsonDocument& config, BatteryMonitor* batteryMonitor) {
     config["freq"] = conf.frequency;
     
     // Use stored band/channel indices if valid, otherwise compute from frequency
@@ -620,11 +619,35 @@ void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMon
         config["batteryVoltage"] = voltage;
     }
     
+}
+
+void Config::toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor) {
+    static HistorySnapshotAllocator allocator;
+    JsonDocument config(&allocator);
+    writeConfigDocument(config, batteryMonitor);
     serializeJson(config, destination);
 }
 
+bool Config::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, BatteryMonitor* batteryMonitor) {
+    output.reset();
+    length = 0;
+    static HistorySnapshotAllocator allocator;
+    JsonDocument config(&allocator);
+    writeConfigDocument(config, batteryMonitor);
+    if (config.overflowed()) return false;
+    const size_t bytes = measureJson(config);
+    char* raw = static_cast<char*>(allocator.allocate(bytes + 1));
+    if (!raw) return false;
+    std::shared_ptr<char> snapshot(raw, std::free);
+    if (serializeJson(config, raw, bytes + 1) != bytes) return false;
+    length = bytes;
+    output = std::move(snapshot);
+    return true;
+}
+
 void Config::toJsonString(AsyncResponseStream& destination) {
-    JsonDocument config;
+    static HistorySnapshotAllocator configJsonAllocator;
+    JsonDocument config(&configJsonAllocator);
     config["freq"] = conf.frequency;
     config["minLap"] = conf.minLap;
     config["alarm"] = conf.alarm;

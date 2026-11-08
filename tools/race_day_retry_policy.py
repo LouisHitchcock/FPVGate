@@ -47,3 +47,16 @@ def write_json_atomic(path, data, attempts=50, retry_delay=.1):
             if attempt == attempts - 1:
                 raise
             time.sleep(retry_delay)
+
+
+def read_json_retry(path, attempts=50, retry_delay=.1):
+    """Retry a Windows sharing violation while reading completed evidence."""
+    import json
+    import time
+    for attempt in range(attempts):
+        try:
+            return json.loads(path.read_text(encoding='utf-8-sig'))
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(retry_delay)

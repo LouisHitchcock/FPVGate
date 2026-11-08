@@ -55,3 +55,22 @@ class AtomicStatusTests(unittest.TestCase):
    with patch('os.replace',side_effect=PermissionError('locked')):
     with self.assertRaises(PermissionError):write_json_atomic(path,{'attempt':2},attempts=3,retry_delay=0)
    self.assertEqual(json.loads(path.read_text()),{'attempt':1})
+
+
+class EvidenceReadTests(unittest.TestCase):
+    def test_transient_sharing_violation_does_not_fail_completed_attempt(self):
+        from unittest.mock import Mock, patch
+        from race_day_retry_policy import read_json_retry
+        path = Mock()
+        path.read_text.side_effect = [PermissionError('scanner'), '{"counts":{"PASS":4}}']
+        with patch('time.sleep'):
+            self.assertEqual(read_json_retry(path), {'counts': {'PASS': 4}})
+        self.assertEqual(path.read_text.call_count, 2)
+
+    def test_persistent_read_failure_is_reported(self):
+        from unittest.mock import Mock, patch
+        from race_day_retry_policy import read_json_retry
+        path = Mock()
+        path.read_text.side_effect = PermissionError('locked')
+        with patch('time.sleep'), self.assertRaises(PermissionError):
+            read_json_retry(path, attempts=2)

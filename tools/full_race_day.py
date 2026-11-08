@@ -16,6 +16,7 @@ import time
 import requests
 from race_day_acceptance import atomic, REPO, CODE
 from race_day_contracts import validate_candidate_identity
+from race_day_retry_policy import read_json_retry
 from race_day_health import gate_failure, phase_failure, phase_schedule
 
 BOARDS = {'aio': 'http://192.168.7.1', 'eth': 'http://192.168.0.65'}
@@ -277,7 +278,7 @@ def main():
                 for label, process in lane_processes.items():
                     summary = root / (phase + '-' + label) / 'summary.json'
                     if summary.exists():
-                        counts = json.loads(summary.read_text())['counts']
+                        counts = read_json_retry(summary)['counts']
                         if phase_failure(counts, process.poll()):
                             signal(label + ': lane failed; see summary and console')
                     elif process.poll() is not None:

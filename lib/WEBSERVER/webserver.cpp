@@ -15,6 +15,7 @@
 #endif
 #include "version.h"
 #include "race_rssi_recorder.h"
+#include "history_snapshot.h"
 #include <ElegantOTA.h>
 
 #include <DNSServer.h>
@@ -47,6 +48,9 @@ extern AudioAnnouncer* g_audioAnnouncer;
 // Global storage pointer for static functions
 static Storage* g_storage = nullptr;
 static Config* g_config = nullptr;
+// JSON is task-owned CPU data; use external RAM where present so live status
+// serialization does not compete with lwIP's internal-only packet buffers.
+static HistorySnapshotAllocator webJsonAllocator;
 
 static const uint8_t DNS_PORT = 53;
 static IPAddress netMsk(255, 255, 255, 0);
@@ -259,7 +263,7 @@ void Webserver::sendSlaveLapEvent(uint32_t lapTimeMs, const char* pilotName, con
     if (!servicesStarted) return;
     
     // Build JSON payload for SSE event
-    JsonDocument doc;
+    JsonDocument doc(&webJsonAllocator);
     doc["lapTimeMs"] = lapTimeMs;
     doc["pilotName"] = pilotName;
     doc["pilotPhonetic"] = pilotPhonetic;
@@ -300,7 +304,7 @@ void Webserver::sendLapToMaster(uint32_t lapTimeMs) {
         http.addHeader("Content-Type", "application/json");
         
         // Build JSON payload with pilot info
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["lapTimeMs"] = lapTimeMs;
         doc["pilotName"] = conf->getPilotCallsign();
         doc["pilotPhonetic"] = conf->getPilotPhonetic();
@@ -614,7 +618,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         // detector uses, who is in the gate, and the link's state. Skipped
         // while the stream is backed up; the laps below still go out.
         if (!streamBusy(events)) {
-        JsonDocument rssiDoc;
+        JsonDocument rssiDoc(&webJsonAllocator);
         JsonArray values = rssiDoc["rssi"].to<JsonArray>();
         JsonArray freqs = rssiDoc["freq"].to<JsonArray>();
         JsonArray inside = rssiDoc["in"].to<JsonArray>();
@@ -664,7 +668,7 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
         C5LapEvent lap;
         bool lapTaken = false;
         while (c5MultiPilot->takeLap(lap)) {
-            JsonDocument lapDoc;
+            JsonDocument lapDoc(&webJsonAllocator);
             lapDoc["pilot"] = lap.pilot;
             lapDoc["lap"] = lap.lap;   // 0 = Gate 1
             lapDoc["lapTimeMs"] = lap.lapTimeMs;
@@ -945,7 +949,15 @@ static void handleRoot(AsyncWebServerRequest *request) {
         return;
     }
 
-    request->send(LittleFS, "/index.html", "text/html");
+    // This route opens its file after the middleware has run, so it must
+    // apply the same bounded stdio buffer as serveStatic before the first read.
+    File index = LittleFS.open("/index.html", FILE_READ);
+    if (!index) index = LittleFS.open("/index.html.gz", FILE_READ);
+    if (!index || !index.setBufferSize(WEB_FILE_BUFFER)) {
+        request->send(500, "text/plain", "Could not open Web UI");
+        return;
+    }
+    request->send(index, String("/index.html"), "text/html");
 }
 
 static void handleNotFound(AsyncWebServerRequest *request) {
@@ -1357,7 +1369,7 @@ EEPROM:\n";
 
     // Race sync endpoints
     server.on("/timer/syncStatus", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["timerNumber"] = conf->getTimerNumber();
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["hostname"] = wifi_hostname;
@@ -1369,7 +1381,7 @@ EEPROM:\n";
 
     server.on("/timer/ping", HTTP_GET, [this](AsyncWebServerRequest *request) {
         // Simple ping endpoint for master to verify slave connectivity
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["status"] = "OK";
         doc["hostname"] = wifi_hostname;
         doc["raceSyncMode"] = conf->getRaceSyncMode();
@@ -1392,7 +1404,7 @@ EEPROM:\n";
         uint32_t testLapTime = 12345; // Test lap time in ms
         sendLapToMaster(testLapTime);
         
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["status"] = "OK";
         doc["raceSyncMode"] = conf->getRaceSyncMode();
         doc["masterHostname"] = conf->getMasterHostname();
@@ -1455,9 +1467,19 @@ EEPROM:\n";
     });
 
     server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        AsyncResponseStream *response = request->beginResponseStream("application/json");
-        conf->toJson(*response, monitor);
-        request->send(response);
+        std::shared_ptr<char> json;
+        size_t length = 0;
+        if (!conf->tryToJsonSnapshot(json, length, monitor)) {
+            request->send(503, "application/json", "{\"error\":\"Configuration snapshot unavailable\"}");
+            return;
+        }
+        request->send(request->beginResponse("application/json", length,
+            [json, length](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+                if (index >= length) return 0;
+                const size_t count = std::min(maxLen, length - index);
+                memcpy(buffer, json.get() + index, count);
+                return count;
+            }));
         led->on(200);
     });
 
@@ -1482,7 +1504,7 @@ EEPROM:\n";
             request->send(404, "application/json", "{\"error\":\"no C5 receiver\"}");
             return;
         }
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["running"] = c5MultiPilot->running();
         doc["racers"] = c5MultiPilot->racerMask();
         doc["multi"] = c5MultiPilot->multiRace();
@@ -1542,7 +1564,7 @@ EEPROM:\n";
     server.on("/api/c5/trace", HTTP_GET, [this](AsyncWebServerRequest *request) {
         if (!c5MultiPilot) { request->send(404); return; }
         const auto info = c5MultiPilot->traceInfo();
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["active"] = info.active; doc["full"] = info.full;
         doc["count"] = info.count; doc["firstUs"] = info.firstUs; doc["pilot"] = info.pilot;
         doc["recordBytes"] = sizeof(C5MultiPilot::TraceSample);
@@ -1581,7 +1603,7 @@ EEPROM:\n";
     // POST /api/c5/update sends it to the C5 over the link.
     server.on("/api/c5/firmware", HTTP_POST,
         [this](AsyncWebServerRequest *request) {
-            JsonDocument doc;
+            JsonDocument doc(&webJsonAllocator);
             if (!c5Image_.ok) {
                 doc["error"] = c5Image_.error[0] ? c5Image_.error : "No file received";
             } else {
@@ -1608,7 +1630,7 @@ EEPROM:\n";
         else if (!c5Link->requestUpdate(C5_IMAGE_PATH, c5Image_.size, c5Image_.sha256, c5Image_.version))
             why = "An update is already running";
         if (why) {
-            JsonDocument doc;
+            JsonDocument doc(&webJsonAllocator);
             doc["error"] = why;
             String out;
             serializeJson(doc, out);
@@ -1621,7 +1643,7 @@ EEPROM:\n";
     // The C5's firmware, the image waiting to be sent, and update progress.
     server.on("/api/c5/update", HTTP_GET, [this](AsyncWebServerRequest *request) {
         static const char *const states[] = {"idle", "starting", "sending", "finishing", "restarting", "done", "failed"};
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         if (c5Link) {
             JsonObject link = doc["link"].to<JsonObject>();
             link["commandsSent"] = c5Link->commandsSent();
@@ -1657,7 +1679,7 @@ EEPROM:\n";
     });
 
     server.on("/api/system/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["version"] = FPVGATE_VERSION_STRING();
         doc["board"] = FPVGATE_BOARD_ID;
         doc["chip"] = ESP.getChipModel();
@@ -1667,6 +1689,8 @@ EEPROM:\n";
         doc["heapFree"] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         doc["heapLow"] = heapLow;
         doc["heapLargest"] = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        doc["psramSize"] = ESP.getPsramSize();
+        doc["psramFree"] = ESP.getFreePsram();
         doc["busyRefusals"] = busyRefusals;
         doc["requestsNow"] = activeRequests;
         JsonObject rhPasses = doc["rhPasses"].to<JsonObject>();
@@ -1767,7 +1791,7 @@ EEPROM:\n";
     // response rather than a dropped connection.
 #ifdef C5_UART_TRACE
     server.on("/api/c5/diagState", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         if (eventDirector) {
             doc["eventError"] = eventDirector->error();
             doc["eventLocked"] = eventDirector->debugLocked();
@@ -1910,7 +1934,7 @@ EEPROM:\n";
     // slots through /api/rh/node and listens for "rhPass" and "rhRssi" on
     // /events. Times are esp_timer microseconds since boot.
     server.on("/api/rh/info", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         const bool c5 = conf->getReceiverRadio() == 2;
         doc["api"] = 2;   // 2: passes and RSSI on /api/rh/events
         doc["version"] = FPVGATE_VERSION_STRING();
@@ -1945,9 +1969,11 @@ EEPROM:\n";
         usbnet_counters(&c);
         usbnet_txfe_status_t t = {};
         usbnet_txfe_status(&t);
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["uptimeS"] = millis() / 1000;
         doc["resetReason"] = (int)esp_reset_reason();
+        doc["poolBytes"] = c.pool_bytes;
+        doc["poolExternal"] = c.pool_external;
         doc["heap"] = ESP.getFreeHeap();
         doc["heapMin"] = ESP.getMinFreeHeap();
         doc["rx"] = c.rx;
@@ -1977,7 +2003,7 @@ EEPROM:\n";
     server.on("/api/usbnet/regs", HTTP_GET, [](AsyncWebServerRequest *request) {
         usbnet_usb_snapshot_t s = {};
         usbnet_usb_snapshot(&s);
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         char hex[12];
         auto put = [&](JsonVariant v, uint32_t value) {
             snprintf(hex, sizeof(hex), "%08lx", (unsigned long)value);
@@ -2056,7 +2082,7 @@ EEPROM:\n";
     // Decode backtrace addresses with addr2line against the ELF of the
     // build that crashed (app_elf_sha256 says which).
     server.on("/api/coredump/summary", HTTP_GET, [](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         size_t addr = 0, size = 0;
         esp_err_t found = esp_core_dump_image_get(&addr, &size);
         doc["present"] = found == ESP_OK;
@@ -2193,7 +2219,7 @@ EEPROM:\n";
 
     // WiFi status endpoint (register before serveStatic to prevent VFS errors)
     server.on("/api/wifi", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         
         // Get WiFi mode
         wifi_mode_t mode = WiFi.getMode();
@@ -2600,7 +2626,7 @@ EEPROM:\n";
             RaceSession race;
             if (history->getRaceByTimestamp(timestamp, race)) {
                     // Create JSON for single race
-                    JsonDocument doc;  // Increased for multi-pilot
+                    JsonDocument doc(&webJsonAllocator);  // Increased for multi-pilot
                     JsonArray racesArray = doc["races"].to<JsonArray>();
                     JsonObject raceObj = racesArray.add<JsonObject>();
                     raceObj["timestamp"] = race.timestamp;
@@ -2766,7 +2792,7 @@ EEPROM:\n";
     });
 
     server.on("/timer/distance", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         doc["totalDistance"] = timer->getTotalDistance();
         doc["distanceRemaining"] = timer->getDistanceRemaining();
         
@@ -2804,7 +2830,7 @@ EEPROM:\n";
             return;
         }
         const uint32_t seq = DebugLogger::getInstance().copyRecent(text.get(), DebugLogger::RECENT_BYTES + 1);
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         JsonArray logs = doc["logs"].to<JsonArray>();
         char *line = text.get();
         while (*line) {
@@ -2861,7 +2887,7 @@ EEPROM:\n";
     // The log on the SD card (off by default): state, switch and download.
     server.on("/api/log/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
         const DebugLogger::Status s = DebugLogger::getInstance().status();
-        JsonDocument doc;
+        JsonDocument doc(&webJsonAllocator);
         const bool sd = storage && storage->isSDAvailable();
         doc["sdAvailable"] = sd;
         doc["sdEnabled"] = s.sdEnabled;

@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <stdint.h>
+#include <memory>
 
 /*
 ## Pinout ##
@@ -497,6 +498,7 @@ class Config {
     bool write();
     void setWriteHooks(bool (*before)(), void (*after)()) { beforeWrite_ = before; afterWrite_ = after; }
     void toJson(AsyncResponseStream& destination, BatteryMonitor* batteryMonitor = nullptr);
+    bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, BatteryMonitor* batteryMonitor = nullptr);
     void toJsonString(AsyncResponseStream& destination);
     void fromJson(JsonObject source);
     void handleEeprom(uint32_t currentTimeMs);
@@ -654,6 +656,7 @@ class Config {
     uint8_t getNovaStepMax();
 
    private:
+    void writeConfigDocument(JsonDocument& config, BatteryMonitor* batteryMonitor);
     laptimer_config_t conf;
     bool modified;
     volatile uint32_t checkTimeMs = 0;

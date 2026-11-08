@@ -53,6 +53,8 @@ void usbnet_usb_snapshot(usbnet_usb_snapshot_t *snapshot);
 // Traffic counters, safe to read from any task (no lwIP or USB calls).
 typedef struct {
     uint32_t rx, queued, sent, dropped, defer_lost, pool_low, pool_free;
+    uint32_t pool_bytes;
+    bool pool_external;
 } usbnet_counters_t;
 void usbnet_counters(usbnet_counters_t *counters);
 #ifdef __cplusplus

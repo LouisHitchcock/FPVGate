@@ -43,3 +43,25 @@ test('translated attributes preserve nested live readouts and RC controls', () =
   expect(document.getElementById('raceAlwaysFastest')).not.toBeNull();
   expect(document.getElementById('rhConfigPanel')).toBeNull();
 });
+
+
+test('a stalled catalogue aborts and falls back instead of holding initialisation forever', async () => {
+  jest.useFakeTimers();
+  try {
+    document.body.innerHTML = '<span data-i18n="common.loading"></span>';
+    const fetch = jest.fn((url, { signal }) => url.endsWith('/en.json')
+      ? Promise.resolve({ ok: true, json: async () => en })
+      : new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted')))));
+    const sandbox = { document, navigator: {language: 'zh-CN'}, localStorage: {getItem: () => 'zh-CN'},
+      console: {log() {}, error() {}}, fetch, AbortController, setTimeout, clearTimeout };
+    vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../data/i18n.js'), 'utf8') + '\nglobalThis.instance = i18n;', sandbox);
+    const loading = sandbox.instance.init();
+    await jest.advanceTimersByTimeAsync(5000);
+    await loading;
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/locales/zh-CN.json', '/locales/en.json']);
+    expect(document.querySelector('span').textContent).toBe(en.common.loading);
+  } finally {
+    jest.useRealTimers();
+  }
+});

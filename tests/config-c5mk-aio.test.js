@@ -38,7 +38,7 @@ test.each([
 using std::min; using std::max;
 #define ${board} 1
 #define DEBUG(...) ((void)0)
-class JsonObject {}; class AsyncResponseStream {};
+class JsonObject {}; class JsonDocument {}; class AsyncResponseStream {};
 using SemaphoreHandle_t = void*;
 ${header}
 static size_t strlcpy(char* dst, const char* src, size_t n) {
