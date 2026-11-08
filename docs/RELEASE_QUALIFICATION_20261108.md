@@ -73,3 +73,12 @@ The original eight-hour window was interrupted for this user-requested compariso
 ## Verification after resuming (8 November, 22:37 UTC)
 
 Both normal firmware targets rebuilt successfully with two parallel jobs. The isolated Python rerun passed all 78 tests in 50.397 seconds, including the previously contention-sensitive watchdog case; the original failed run remains in python-tests.log. Native Event checks also passed. Both gates are online/idle and config/history/tracks/Event content still match the original watched-window baselines, allowing only the expected monotonic Event revision advance. No new application flash was needed during this build/verification continuation. Resume the diagnostic window using the exact installed archived staging images and the original 03:55 UTC deadline; do not count the interruption as test time or call it an uninterrupted eight-hour pass.
+
+
+## Continuation confirmed active: 8 November 22:38 UTC
+
+Source and controlled-comparison corrections pushed on V1.9.0-alpha as 4629e92, with no co-author trailers. Normal AIO/Ethernet builds succeeded at the two-job limit. The Python suite passed all 78 tests when rerun without compilation contention; native Event checks passed. Both gates matched the original config/history/tracks/Event baselines before resuming. No flash accompanied this continuation.
+
+The independent watchdog is RUNNING, PID 55328, at `.dev/headroom-20261108/watched-eight-hour-after-memory-comparison/watchdog.json`. First controller reached soak at 22:38:02 UTC with no firstFailure at this checkpoint. Original deadline remains **9 November 03:55:03 UTC/London**. Original failed attempts and the comparison/PC-use interruption remain preserved; this is a diagnostic continuation, not an uninterrupted eight-hour pass. Exact installed applications are pinned in supervisor installedImageProvenance. Faults stop each attempt, retain diagnostics and restore/retry within that fixed deadline.
+
+Core correction remains: the original ordinary allocator already placed the 8 KB C5 queue in PSRAM on both boards. Do not claim another 8 KB internal-memory recovery. AIO Event-busy responses and network/heap failures are still open; no stable release has been published.
