@@ -24,7 +24,7 @@ public:
     void* allocate(size_t bytes) override {
         if (bytes > 48u * 1024u - used_) return nullptr;
         size_t* p = nullptr;
-#ifdef ESP32
+#if defined(ESP32) && !defined(FPVGATE_BENCH_INTERNAL_STAGING)
         p = static_cast<size_t*>(heap_caps_malloc(bytes + sizeof(size_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #endif
         if (!p) p = static_cast<size_t*>(std::malloc(bytes + sizeof(size_t)));
@@ -42,7 +42,7 @@ public:
         const size_t old = *p;
         if (bytes > 48u * 1024u - (used_ - old)) return nullptr;
         size_t* q = nullptr;
-#ifdef ESP32
+#if defined(ESP32) && !defined(FPVGATE_BENCH_INTERNAL_STAGING)
         q = static_cast<size_t*>(heap_caps_realloc(p, bytes + sizeof(size_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 #endif
         if (!q) q = static_cast<size_t*>(std::realloc(p, bytes + sizeof(size_t)));

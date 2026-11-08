@@ -21,12 +21,15 @@ namespace ArduinoJson { struct Allocator { virtual void* allocate(size_t)=0;virt
 #define DEBUG(...) ((void)0)
 bool external=true, fail=false;
 int extCalls=0;
+void* queueExternalPtr=nullptr;
+bool fallbackExternal=false;
+bool esp_ptr_external_ram(void* p){return p && p==queueExternalPtr;}
 void* fallbackMalloc(size_t n){return fail?nullptr:std::malloc(n);}
 void* fallbackRealloc(void* p,size_t n){return fail?nullptr:std::realloc(p,n);}
 void* heap_caps_malloc(size_t n,int caps){assert(caps==3);++extCalls;return external&&!fail?std::malloc(n):nullptr;}
 void* heap_caps_realloc(void* p,size_t n,int caps){assert(caps==3);++extCalls;return external&&!fail?std::realloc(p,n):nullptr;}
-void* heap_caps_calloc(size_t n,size_t bytes,int caps){assert(caps==3);++extCalls;return external&&!fail?std::calloc(n,bytes):nullptr;}
-void* fallbackCalloc(size_t n,size_t bytes){return fail?nullptr:std::calloc(n,bytes);}
+void* heap_caps_calloc(size_t n,size_t bytes,int caps){assert(caps==3);++extCalls;queueExternalPtr=external&&!fail?std::calloc(n,bytes):nullptr;return queueExternalPtr;}
+void* fallbackCalloc(size_t n,size_t bytes){auto p=fail?nullptr:std::calloc(n,bytes);if(fallbackExternal)queueExternalPtr=p;return p;}
 namespace std { using ::fallbackMalloc; using ::fallbackRealloc; }
 #define malloc fallbackMalloc
 #define realloc fallbackRealloc
@@ -45,6 +48,11 @@ struct Queue {
 };
 #undef calloc
 int main(){
+#ifdef FPVGATE_BENCH_INTERNAL_STAGING
+ constexpr bool benchInternal=true;
+#else
+ constexpr bool benchInternal=false;
+#endif
  for(bool mode:{true,false}){
   external=mode;Budget budget;
   auto p=static_cast<unsigned char*>(budget.allocate(1024));assert(p);memset(p,42,1024);
@@ -54,18 +62,20 @@ int main(){
   fail=true;assert(!budget.reallocate(p,8192));assert(p[0]==42);fail=false;
   budget.deallocate(p);p=static_cast<unsigned char*>(budget.allocate(48*1024));assert(p);
   assert(!budget.allocate(1));budget.deallocate(p);
-  Queue q;q.begin();assert(q.sampleQueue_&&q.sampleQueueExternal_==mode);
+  queueExternalPtr=nullptr;Queue q;q.begin();assert(q.sampleQueue_&&q.sampleQueueExternal_==(mode&&!benchInternal));
   assert(sizeof(*q.sampleQueue_)*8==8192);
   auto bytes=reinterpret_cast<unsigned char*>(q.sampleQueue_);
   for(size_t i=0;i<8192;++i)assert(bytes[i]==0);
   auto old=q.sampleQueue_;int calls=extCalls;q.begin();assert(old==q.sampleQueue_&&calls==extCalls);
   std::free(q.sampleQueue_);
  }
+ external=false;fallbackExternal=true;Queue autoExternal;autoExternal.begin();assert(autoExternal.sampleQueueExternal_);std::free(autoExternal.sampleQueue_);fallbackExternal=false;
  external=false;fail=true;Queue q;q.begin();assert(!q.sampleQueue_&&!q.sampleQueueExternal_);
  Budget budget;assert(!budget.allocate(1));
 }
 """
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp);(p/'test.cpp').write_text(harness)
-   subprocess.run([shutil.which('g++'),'-std=c++17',str(p/'test.cpp'),'-o',str(p/'test.exe')],check=True)
-   subprocess.run([str(p/'test.exe')],check=True)
+   for flags in [[], ['-DFPVGATE_BENCH_INTERNAL_STAGING=1']]:
+    subprocess.run([shutil.which('g++'),'-std=c++17',*flags,str(p/'test.cpp'),'-o',str(p/'test.exe')],check=True)
+    subprocess.run([str(p/'test.exe')],check=True)

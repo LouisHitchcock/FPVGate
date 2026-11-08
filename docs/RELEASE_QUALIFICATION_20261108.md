@@ -57,3 +57,19 @@ Next diagnostic window: eight hours under the independent retry watchdog, using 
 ## Active watched window (confirmed running)
 
 Started 2026-11-08T19:55:03.857207+00:00; fixed deadline **9 November 2026 03:55:03 UTC / London**. Watchdog PID 63036; state `.dev/headroom-20261108/watched-eight-hour/watchdog.json`; first generation `generation-001/supervisor.json`, first attempt `generation-001/attempt-001/controller.json`. First attempt reached phase soak with no firstFailure as of 19:55:21 UTC; both board readiness/baseline checks passed. Exact installed images are in supervisor installedImageProvenance. Test tooling source is pushed as 2fc9499. Watchdog/supervisors continue independently of this chat. Retries cannot extend the deadline. Final restoration can finish after it. A failure-containing window remains diagnostic evidence, not a continuous qualification pass.
+
+
+## Controlled memory comparison correction (2026-11-08T21:01:18.312630+00:00)
+
+The ordinary allocator already placed the 8192-byte C5 queue in PSRAM on BOTH boards. Corrected address-based diagnostics in the ordinary-allocator control applications confirmed this. The explicit allocation does not recover another 8 KB of internal RAM; earlier claims implying that saving were wrong. The existing SDK enables PSRAM for ordinary malloc with a 4096-byte threshold. The former status flag identified the explicit allocation path, not the location of fallback memory; this is now corrected in source using esp_ptr_external_ram().
+
+Matched idle medians, normal-before / ordinary-control / normal-after: AIO 88,388 / 88,902 / 90,160 bytes; Ethernet 90,128 / 91,996 / 92,646. Differences of this size are not an established saving; these runs show no repeatable 8 KB step. The final Ethernet repeat used heap/receiver-only reads after an Event GET busy response; see method limits in docs/MEMORY_COMPARISON_20261108.md. Event transient-allocation savings remain unqualified.
+
+The broader comparison remained FAILED on AIO Event POST HTTP 409; Ethernet's control Event/assets phases completed. Subsequent normal application installs passed and independent snapshots confirmed config/history/Event content preserved on both, even though AIO's immediate Event restore POST had also refused. C5 firmware and UI filesystem are unchanged. Raw evidence is .dev/memory-ab-final-20261108.
+
+The original eight-hour window was interrupted for this user-requested comparison, with prior failures retained (eight completed failed attempts in generation 1 before interruption; later cleanup attempts must not be counted as independent hardware findings). It is not running at this checkpoint. Any resumed window keeps the original 9 November 03:55 UTC deadline and is not an uninterrupted eight-hour qualification pass. Normal build artifacts are being regenerated; a contention-sensitive watchdog unit test will be rerun without compilation before verification is finalized. PR #22 remains draft; no stable publication.
+
+
+## Verification after resuming (8 November, 22:37 UTC)
+
+Both normal firmware targets rebuilt successfully with two parallel jobs. The isolated Python rerun passed all 78 tests in 50.397 seconds, including the previously contention-sensitive watchdog case; the original failed run remains in python-tests.log. Native Event checks also passed. Both gates are online/idle and config/history/tracks/Event content still match the original watched-window baselines, allowing only the expected monotonic Event revision advance. No new application flash was needed during this build/verification continuation. Resume the diagnostic window using the exact installed archived staging images and the original 03:55 UTC deadline; do not count the interruption as test time or call it an uninterrupted eight-hour pass.

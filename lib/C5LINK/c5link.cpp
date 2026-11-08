@@ -2,6 +2,7 @@
 #include <LittleFS.h>
 #include "debug.h"
 #include <esp_heap_caps.h>
+#include <soc/soc_memory_types.h>
 
 #ifdef C5_UART_TRACE
 static void traceC5Tasks(const char* reason, uint32_t detail) {
@@ -41,10 +42,13 @@ void C5Link::begin(Config *config, HardwareSerial *port, int8_t rxPin, int8_t tx
     if (!sampleQueue_) {
         // This queue is read/written by c5Task, never by the UART ISR or DMA.
         // The driver's interrupt-facing 16 KB ring stays in internal RAM.
+#ifndef FPVGATE_BENCH_INTERNAL_STAGING // Bench legacy name: uses ordinary calloc, NOT forced internal RAM.
         sampleQueue_ = static_cast<Sample (*)[SAMPLE_QUEUE_DEPTH]>(heap_caps_calloc(
             C5_MAX_PILOTS, sizeof(*sampleQueue_), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         sampleQueueExternal_ = sampleQueue_ != nullptr;
+#endif
         if (!sampleQueue_) sampleQueue_ = static_cast<Sample (*)[SAMPLE_QUEUE_DEPTH]>(calloc(C5_MAX_PILOTS, sizeof(*sampleQueue_)));
+        sampleQueueExternal_ = sampleQueue_ && esp_ptr_external_ram(sampleQueue_);
         if (!sampleQueue_) {
             DEBUG("C5 link: no memory for the sample queues\n");
             return;
