@@ -16,7 +16,7 @@ def matching_test_processes(generation, processes):
     return matches
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--initial-run',required=True,type=Path);parser.add_argument('--out',required=True,type=Path);parser.add_argument('--seconds',type=int,default=10800);parser.add_argument('--config-template',required=True,type=Path);parser.add_argument('--start-now',action='store_true',help='Explicitly create a fresh window; never used for automatic recovery');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--initial-run',required=True,type=Path);parser.add_argument('--out',required=True,type=Path);parser.add_argument('--seconds',type=int,default=10800);parser.add_argument('--config-template',required=True,type=Path);parser.add_argument('--start-now',action='store_true',help='Explicitly create a fresh window; never used for automatic recovery');parser.add_argument('--aio-image',type=Path);parser.add_argument('--eth-image',type=Path);args=parser.parse_args()
     initial=args.initial_run.resolve();original=json.loads((initial/'controller.json').read_text());start=datetime.datetime.fromisoformat(original['startedUTC']);budget=RetryBudget.create(start,args.seconds,datetime.datetime.now(datetime.timezone.utc),time.monotonic())
     if args.start_now:
         anchor=Path(str(args.out.resolve())+'-anchor');anchor.mkdir(parents=True,exist_ok=False)
@@ -24,7 +24,12 @@ def main():
         original={'status':'ANCHOR','startedUTC':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sourceBaseline':str(initial),'firstFailure':None}
         write_json_atomic(anchor/'controller.json',original);initial=anchor
         budget=RetryBudget.create(datetime.datetime.fromisoformat(original['startedUTC']),args.seconds,datetime.datetime.now(datetime.timezone.utc),time.monotonic())
-    def command(generation):return [sys.executable,'-u','tools/retry_race_day.py','--initial-run',str(initial),'--out',str(generation),'--seconds',str(args.seconds),'--config-template',str(args.config_template.resolve())]
+    def command(generation):
+        result = [sys.executable,'-u','tools/retry_race_day.py','--initial-run',str(initial),'--out',str(generation),'--seconds',str(args.seconds),'--config-template',str(args.config_template.resolve())]
+        for label in ['aio','eth']:
+            image = getattr(args,label+'_image')
+            if image is not None: result += ['--'+label+'-image',str(image.resolve())]
+        return result
     quiet_since={}
     def cleanup(generation,reason):
         if not generation.exists():return True

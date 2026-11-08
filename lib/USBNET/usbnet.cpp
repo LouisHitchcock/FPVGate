@@ -175,16 +175,20 @@ static void sendOnUsbTask(void *arg) {
 // txPoolLow records how close the pool actually comes to empty, reported on
 // the [USB TX] status line.
 static constexpr size_t TX_POOL_FRAMES = 9;
+static constexpr size_t TX_EXTERNAL_POOL_FRAMES = 24;
+static size_t txPoolFrames = TX_POOL_FRAMES;
 // Packet data is copied by tud_network_xmit_cb into TinyUSB's own endpoint
-// buffer; it is CPU-owned staging, not a USB DMA buffer. Keep all nine slots
-// but prefer PSRAM, leaving internal RAM for lwIP during concurrent page loads.
+// buffer; it is CPU-owned staging, not a USB DMA buffer. PSRAM boards can
+// absorb opening bursts in 24 slots without taking packet RAM from lwIP.
+// The internal-memory fallback retains the measured nine-slot budget.
 static Packet* txPackets = nullptr;
 static bool txPoolExternal = false;
 static bool allocateTxPackets() {
     if (txPackets) return true;
-    txPackets = static_cast<Packet*>(heap_caps_malloc(sizeof(Packet) * TX_POOL_FRAMES,
+    txPackets = static_cast<Packet*>(heap_caps_malloc(sizeof(Packet) * TX_EXTERNAL_POOL_FRAMES,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     txPoolExternal = txPackets != nullptr;
+    txPoolFrames = txPoolExternal ? TX_EXTERNAL_POOL_FRAMES : TX_POOL_FRAMES;
     if (!txPackets) txPackets = static_cast<Packet*>(malloc(sizeof(Packet) * TX_POOL_FRAMES));
     return txPackets != nullptr;
 }
@@ -310,7 +314,7 @@ void usbnet_print_status(void) {
     Serial.printf("[USB TX] in_fail=%u in_done=%u defer_lost=%u pool=%u/%u low=%u\n",
         inXferFail.load(), inXferDone.load(), txDeferLost.load(),
         static_cast<unsigned>(uxQueueMessagesWaiting(txFreePackets)),
-        static_cast<unsigned>(TX_POOL_FRAMES), txPoolLow.load());
+        static_cast<unsigned>(txPoolFrames), txPoolLow.load());
     Serial.printf("[USB IN] busy=%u stalled=%u submit=%u complete=%u ctl=%08x int=%08x size=%08x fifo=%u config=%08x\n",
         inBusy.load(), inStalled.load(), inSubmitLen.load(), inCompleteLen.load(),
         inCtl.load(), inInt.load(), inSize.load(), inFifo.load(), inFifoConfig.load());
@@ -334,7 +338,7 @@ void usbnet_counters(usbnet_counters_t *counters) {
     counters->dropped = txDropped.load();
     counters->defer_lost = txDeferLost.load();
     counters->pool_low = txPoolLow.load();
-    counters->pool_bytes = txPackets ? sizeof(Packet) * TX_POOL_FRAMES : 0;
+    counters->pool_bytes = txPackets ? sizeof(Packet) * txPoolFrames : 0;
     counters->pool_external = txPoolExternal;
     counters->pool_free = txFreePackets ? static_cast<uint32_t>(uxQueueMessagesWaiting(txFreePackets)) : 0;
 }
@@ -352,9 +356,9 @@ esp_err_t usbnet_begin(void) {
     // One frame short of the pool: txTask holds a packet while it sends, so a
     // full queue plus the in-flight frame is exactly the pool.
     if (!allocateTxPackets()) return ESP_ERR_NO_MEM;
-    txQueue = xQueueCreate(TX_POOL_FRAMES - 1, sizeof(Packet *));
-    txFreePackets = xQueueCreate(TX_POOL_FRAMES, sizeof(Packet *));
-    txPoolLow = TX_POOL_FRAMES;
+    txQueue = xQueueCreate(txPoolFrames - 1, sizeof(Packet *));
+    txFreePackets = xQueueCreate(txPoolFrames, sizeof(Packet *));
+    txPoolLow = txPoolFrames;
     txDone = xSemaphoreCreateBinary();
     if (!txQueue || !txFreePackets || !txDone) {
         if (txQueue) vQueueDelete(txQueue);
@@ -366,7 +370,7 @@ esp_err_t usbnet_begin(void) {
         free(txPackets); txPackets = nullptr; txPoolExternal = false;
         return ESP_ERR_NO_MEM;
     }
-    for (size_t i = 0; i < TX_POOL_FRAMES; ++i) {
+    for (size_t i = 0; i < txPoolFrames; ++i) {
         Packet *entry = &txPackets[i];
         xQueueSend(txFreePackets, &entry, 0);
     }

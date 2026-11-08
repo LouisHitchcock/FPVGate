@@ -396,6 +396,9 @@ bool EventDirector::prepare(RaceSession& race) {
 }
 
 bool EventDirector::complete(const RaceSession& race) {
+    // Ordinary races have no Event session to mutate. A concurrent browser
+    // read must not turn their successful history save into an Event failure.
+    if (!active_.load()) return true;
     auto lock = lease();
     return lock && finish(race);
 }
@@ -468,6 +471,7 @@ bool EventDirector::finish(const RaceSession& race) {
 }
 
 bool EventDirector::cancel() {
+    if (!active_.load()) return true;
     auto lock = lease();
     if (!lock) return false;
     if (!snapshot_.empty() && !storage_->deleteFile(SESSION)) return fail("Cannot clear empty event session");

@@ -60,3 +60,17 @@ def read_json_retry(path, attempts=50, retry_delay=.1):
             if attempt == attempts - 1:
                 raise
             time.sleep(retry_delay)
+
+
+def event_baseline_matches(actual, expected):
+    """Restoring an identical Event advances its optimistic-concurrency revision."""
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    current_revision = actual.get('gateRevision', 0)
+    prior_revision = expected.get('gateRevision', 0)
+    if type(current_revision) is not int or type(prior_revision) is not int:
+        return False
+    if prior_revision < 0 or current_revision < prior_revision:
+        return False
+    return ({k: v for k, v in actual.items() if k != 'gateRevision'} ==
+            {k: v for k, v in expected.items() if k != 'gateRevision'})

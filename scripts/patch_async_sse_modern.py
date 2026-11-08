@@ -122,6 +122,56 @@ def patch_response_memory(build_env):
     print('patch_async_sse_modern: verified external response buffers')
 
 
+def patch_json_request_memory(build_env):
+    from pathlib import Path
+    source = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src' / 'AsyncJson.cpp'
+    support = (Path(build_env.subst('$PROJECT_DIR')) / 'lib/RACEHISTORY/history_snapshot.h').as_posix()
+    text = source.read_text(encoding='utf-8')
+    before = '#else\n    JsonDocument doc;\n#endif'
+    after = '#else\n    static HistorySnapshotAllocator requestAllocator;\n    JsonDocument doc(&requestAllocator); // FPVGate external request JSON\n#endif'
+    if text.count(before) == 1:
+        text = text.replace(before, after, 1)
+        marker = '#include "AsyncJson.h"'
+        if text.count(marker) != 1:
+            raise RuntimeError('AsyncJson include layout changed; review request allocator')
+        text = text.replace(marker, marker + '\n#include "' + support + '" // FPVGate request allocator', 1)
+    elif text.count(after) != 1 or '// FPVGate request allocator' not in text:
+        raise RuntimeError('AsyncJson parser layout changed; review request allocator')
+    body_before = 'request->_tempObject = calloc(total + 1, sizeof(uint8_t));  // null-terminated string'
+    body_after = '''static HistorySnapshotAllocator bodyAllocator;
+        request->_tempObject = bodyAllocator.allocate(total + 1); // FPVGate external request body
+        if (request->_tempObject) memset(request->_tempObject, 0, total + 1);'''
+    if text.count(body_before) == 1:
+        text = text.replace(body_before, body_after, 1)
+    elif text.count(body_after) != 1:
+        raise RuntimeError('AsyncJson body allocation changed; review request allocator')
+    if text != source.read_text(encoding='utf-8'):
+        source.write_text(text, encoding='utf-8')
+    print('patch_async_sse_modern: verified external request JSON')
+
+
+def patch_event_memory(build_env):
+    from pathlib import Path
+    src = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src'
+    header, source = src / 'AsyncEventSource.h', src / 'AsyncEventSource.cpp'
+    support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/event_data.h').as_posix()
+    text = header.read_text(encoding='utf-8')
+    before = 'using AsyncEvent_SharedData_t = std::shared_ptr<String>;'
+    after = 'using AsyncEvent_SharedData_t = std::shared_ptr<FpvEventData>;'
+    if text.count(before) == 1:
+        text = text.replace(before, '#include "' + support + '" // FPVGate external event bytes\n' + after, 1)
+        text = text.replace('std::make_shared<String>', 'std::make_shared<FpvEventData>')
+    elif text.count(after) != 1 or '// FPVGate external event bytes' not in text:
+        raise RuntimeError('SSE shared-data layout changed; review external event bytes')
+    if text != header.read_text(encoding='utf-8'): header.write_text(text, encoding='utf-8')
+    text = source.read_text(encoding='utf-8')
+    before, after = 'std::make_shared<String>(generateEventMessage(', 'std::make_shared<FpvEventData>(generateEventMessage('
+    if text.count(before) == 2: text = text.replace(before, after)
+    elif text.count(after) != 2: raise RuntimeError('SSE message construction changed; review external event bytes')
+    if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
+    print('patch_async_sse_modern: verified external event bytes')
+
+
 try:
     Import('env')  # noqa: F821
 except NameError:
@@ -134,6 +184,8 @@ if env is not None:
         builder = _configure_before_sse_patch()
         patch_dependency(build_env)
         patch_response_memory(build_env)
+        patch_json_request_memory(build_env)
+        patch_event_memory(build_env)
         return builder
 
     env.AddMethod(configure_with_sse_patch, 'ConfigureProjectLibBuilder')

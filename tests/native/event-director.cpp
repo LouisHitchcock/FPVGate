@@ -56,6 +56,26 @@ struct Fixture {
 
 int main() {
     {
+        Fixture f; f.config.eventMode = 0; f.config.maxLaps = 1;
+        f.start(); assert(!f.storage.exists("/event-session.json"));
+        auto browser = f.event.readLease(); assert(browser);
+        f.finish();
+        assert(!f.control.status().running && !f.control.status().saveFailed);
+        assert(!f.control.status().eventFailed && historyWrites == 1);
+        assert(f.event.cancel()); // no Event session, even while a reader holds the lease
+    }
+    {
+        Fixture f; f.start();
+        auto browser = f.event.readLease(); assert(browser);
+        f.finish();
+        assert(f.control.status().eventFailed && f.control.status().saveFailed);
+        assert(historyWrites == 1 && f.storage.exists("/event-session.json"));
+        browser.reset();
+        assert(f.control.requestStop()); f.control.update();
+        assert(!f.control.status().saveFailed && historyWrites == 1);
+        assert(!f.storage.exists("/event-session.json"));
+    }
+    {
         Fixture f; f.start();
         assert(f.storage.exists("/event-session.json"));
         assert(!f.event.editLease()); assert(f.event.errorStatus() == 409);

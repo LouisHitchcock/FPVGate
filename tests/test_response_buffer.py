@@ -58,3 +58,22 @@ int main() {
             compiler=shutil.which('g++') or 'C:/Strawberry/c/bin/g++.exe'
             subprocess.run([compiler,'-std=c++17',f'-I{p}',f'-I{ROOT/"scripts/support"}',str(p/'test.cpp'),'-o',str(p/'test.exe')],check=True,capture_output=True)
             subprocess.run([str(p/'test.exe')],check=True,capture_output=True)
+
+
+class JsonRequestAllocatorPatchTests(unittest.TestCase):
+    def test_request_parser_patch_is_idempotent_and_refuses_unknown_layout(self):
+        spec=importlib.util.spec_from_file_location('request_patch',ROOT/'scripts/patch_async_sse_modern.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='fpvgate-json-request-') as tmp:
+            root=Path(tmp);source=root/'deps/board/ESPAsyncWebServer/src/AsyncJson.cpp';source.parent.mkdir(parents=True)
+            source.write_text('#include "AsyncJson.h"\n#if VERSION_6\nold();\n#else\n    JsonDocument doc;\n#endif\nrequest->_tempObject = calloc(total + 1, sizeof(uint8_t));  // null-terminated string\n')
+            class Env:
+                def subst(self,value):return {'$PROJECT_LIBDEPS_DIR':str(root/'deps'),'$PIOENV':'board','$PROJECT_DIR':str(ROOT)}[value]
+            module.patch_json_request_memory(Env());changed=source.read_text()
+            self.assertIn('JsonDocument doc(&requestAllocator)',changed)
+            self.assertIn('history_snapshot.h',changed)
+            self.assertIn('bodyAllocator.allocate(total + 1)',changed)
+            self.assertIn('memset(request->_tempObject, 0, total + 1)',changed)
+            module.patch_json_request_memory(Env());self.assertEqual(source.read_text(),changed)
+            source.write_text('unknown parser layout')
+            with self.assertRaises(RuntimeError):module.patch_json_request_memory(Env())

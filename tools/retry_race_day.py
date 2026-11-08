@@ -1,19 +1,21 @@
 ﻿"""Retry two-gate acceptance inside one fixed wall-time window; retain every failure."""
-import argparse,ctypes,datetime,json,os,subprocess,sys,time,threading
+import argparse,ctypes,datetime,json,os,subprocess,sys,time,threading,hashlib
 from pathlib import Path
 import requests
-from race_day_retry_policy import RetryBudget,classify_attempt,write_json_atomic as atomic
+from race_day_retry_policy import RetryBudget,classify_attempt,event_baseline_matches,write_json_atomic as atomic
 ROOT=Path(__file__).resolve().parents[1]
 BOARDS={'eth':'http://192.168.0.65','aio':'http://192.168.7.1'}
 def now():return datetime.datetime.now(datetime.timezone.utc)
 def stamp():return now().isoformat()
 def read(path):return json.loads(path.read_text(encoding='utf-8-sig'))
 def main():
- p=argparse.ArgumentParser();p.add_argument('--initial-run',required=True,type=Path);p.add_argument('--out',required=True,type=Path);p.add_argument('--seconds',type=int,default=10800);p.add_argument('--config-template',required=True,type=Path);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--initial-run',required=True,type=Path);p.add_argument('--out',required=True,type=Path);p.add_argument('--seconds',type=int,default=10800);p.add_argument('--config-template',required=True,type=Path);p.add_argument('--aio-image',type=Path);p.add_argument('--eth-image',type=Path);a=p.parse_args()
  initial=a.initial_run.resolve();previous=read(initial/'controller.json');out=a.out.resolve();out.mkdir(parents=True,exist_ok=False)
  budget=RetryBudget.create(datetime.datetime.fromisoformat(previous['startedUTC']),a.seconds,now(),time.monotonic())
  baseline={b:{k:read(initial/'baseline'/b/(k+'.json')) for k in ['config','history','event','tracks']} for b in BOARDS}
+ images={b:{'path':str(getattr(a,b+'_image').resolve()),'bytes':getattr(a,b+'_image').stat().st_size,'sha256':hashlib.sha256(getattr(a,b+'_image').read_bytes()).hexdigest()} for b in BOARDS if getattr(a,b+'_image') is not None}
  state={'status':'STARTING','startedUTC':previous['startedUTC'],'supervisorStartedUTC':stamp(),'deadlineUTC':budget.deadline_utc.isoformat(),'totalWindowSeconds':a.seconds,'pid':os.getpid(),'scope':'Ethernet + AIO mixed races; retries restart test processes, not board power or firmware','attempts':([{'directory':str(initial),'classification':'FAILED','firstFailure':previous.get('firstFailure'),'baselineRestored':True}] if previous.get('firstFailure') else []),'currentAttempt':None,'remainingSeconds':budget.attempt_seconds(time.monotonic()),'failureLimitsUnchanged':True}
+ state['installedImageProvenance']=images
  progress=[time.monotonic()];heartbeat_stop=threading.Event()
  def heartbeat():
   while not heartbeat_stop.wait(2):
@@ -38,13 +40,15 @@ def main():
   for b,base in BOARDS.items():
    sysinfo=get(base,'/api/system/info');rx=get(base,'/api/c5/update');race=get(base,'/api/c5/race');storage=get(base,'/api/log/status')
    assert sysinfo['board']==('WaveshareS3ETH' if b=='eth' else 'FPVGateC5MKAIO'),b+' board mismatch'
+   if b in images:assert sysinfo['app']['used']==images[b]['bytes'],b+' installed application differs from expected image'
    assert rx['c5']['online'] and rx['c5']['version']==('1.2.5' if b=='eth' else '1.2.6-d6d7'),b+' receiver not ready'
    assert not race['running'] and not race['busy'],b+' race still active'
    assert storage['sdAvailable'],b+' SD unavailable'
    values={k:get(base,path) for k,path in [('config','/config'),('history','/races'),('event','/api/event'),('tracks','/tracks')]}
    assert all(values['config'].get(k)==v for k,v in baseline[b]['config'].items() if k!='batteryVoltage'),b+' configuration not restored'
-   for k in ['history','event','tracks']:assert values[k]==baseline[b][k],b+' baseline '+k+' differs'
-   result[b]={'system':sysinfo,'receiver':rx,'storage':storage,'baselineMatched':True}
+   for k in ['history','tracks']:assert values[k]==baseline[b][k],b+' baseline '+k+' differs'
+   assert event_baseline_matches(values['event'],baseline[b]['event']),b+' baseline Event content/revision differs'
+   result[b]={'system':sysinfo,'receiver':rx,'storage':storage,'baselineMatched':True,'eventRevision':values['event'].get('gateRevision',0)}
   return result
  ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)
  active=None;attempt=None;scheduled=False
@@ -61,6 +65,7 @@ def main():
    index+=1;attempt=out/('attempt-%03d'%index);scheduled=False;deadline_signalled=False
    atomic(out/('attempt-%03d-before.json'%index),{'utc':stamp(),'remainingSeconds':remaining,'boards':health})
    command=[sys.executable,'-u','tools/full_race_day.py','--out',str(attempt),'--boards','eth','aio','--seconds',str(remaining),'--rehearsal','0','--skip-native-usb','--aio-version','1.2.6-d6d7','--eth-version','1.2.5','--config-template',str(a.config_template.resolve())]
+   for b,image in images.items():command += ['--'+b+'-image',image['path']]
    with (out/('attempt-%03d-console.log'%index)).open('ab') as stdout,(out/('attempt-%03d-error.log'%index)).open('ab') as stderr:
     active=subprocess.Popen(command,cwd=ROOT,stdout=stdout,stderr=stderr,stdin=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW)
    state.update(status='RUNNING',currentAttempt={'index':index,'directory':str(attempt),'pid':active.pid,'startedUTC':stamp()});save();event('attempt-started',index=index,directory=str(attempt),secondsBudget=remaining,pid=active.pid)

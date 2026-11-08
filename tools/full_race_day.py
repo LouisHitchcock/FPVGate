@@ -180,10 +180,17 @@ def main():
             return subprocess.Popen(command, cwd=REPO, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=err, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
 
+    def capture_usb(label, phase):
+        try:
+            atomic(root / (phase + '-' + label + '-usbnet.json'), get(BOARDS[label], '/api/usbnet/status'))
+        except Exception as error:
+            atomic(root / (phase + '-' + label + '-usbnet-capture-error.json'), {'error': repr(error)})
+
     def evidence_snapshot(phase):
         with concurrent.futures.ThreadPoolExecutor(2) as pool:
             for label, value in zip(BOARDS, pool.map(sample, BOARDS)):
                 atomic(root / (phase + '-' + label + '-snapshot.json'), value)
+                capture_usb(label, phase)
                 for name, path in [('recent-log', '/api/log/recent')]:
                     try:
                         response = requests.get(BOARDS[label] + path, timeout=5)
@@ -245,6 +252,7 @@ def main():
             save()
             for label, base in BOARDS.items():
                 atomic(root / (phase + '-' + label + '-before-heap-reset.json'), get(base, '/api/system/info?resetHeapLow'))
+                capture_usb(label, phase + '-before')
             common = ['--seconds', str(seconds), '--config-template', str(args.config_template.resolve())]
             provenance = [part for label in BOARDS if getattr(args, label + '_image') for part in ['--' + label + '-image', str(getattr(args, label + '_image').resolve())]]
             gates = launch([sys.executable, '-u', 'tools/race_day_acceptance.py', *common, *provenance,

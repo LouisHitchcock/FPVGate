@@ -34,12 +34,12 @@ int main() {
   assert(allocateTxPackets() && txPoolExternal==mode);
   auto* original=txPackets; int calls=externalCalls;
   assert(allocateTxPackets() && txPackets==original && externalCalls==calls);
-  assert(TX_POOL_FRAMES==9);
-  for(size_t i=0;i<TX_POOL_FRAMES;++i) {
+  assert(TX_POOL_FRAMES==9 && txPoolFrames==(mode ? 24u : 9u));
+  for(size_t i=0;i<txPoolFrames;++i) {
    txPackets[i].length=CFG_TUD_NET_MTU;
    memset(txPackets[i].bytes,(int)i,CFG_TUD_NET_MTU);
   }
-  for(size_t i=0;i<TX_POOL_FRAMES;++i) {
+  for(size_t i=0;i<txPoolFrames;++i) {
    uint8_t endpoint[CFG_TUD_NET_MTU];
    assert(tud_network_xmit_cb(endpoint,&txPackets[i],CFG_TUD_NET_MTU)==CFG_TUD_NET_MTU);
    for(auto byte:endpoint) assert(byte==i);

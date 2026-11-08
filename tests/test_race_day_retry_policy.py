@@ -74,3 +74,21 @@ class EvidenceReadTests(unittest.TestCase):
         path.read_text.side_effect = PermissionError('locked')
         with patch('time.sleep'), self.assertRaises(PermissionError):
             read_json_retry(path, attempts=2)
+
+
+class EventBaselineTests(unittest.TestCase):
+    def test_identical_event_with_advanced_revision_is_restored(self):
+        from race_day_retry_policy import event_baseline_matches
+        prior={'gateRevision':3,'pilots':[{'id':1,'name':'Ann'}],'active':{'seats':[1]}}
+        current=dict(prior,gateRevision=7)
+        self.assertTrue(event_baseline_matches(current,prior))
+        self.assertEqual(prior['gateRevision'],3)
+        self.assertTrue(event_baseline_matches(prior,prior))
+
+    def test_real_changes_and_revision_rollback_are_not_adopted(self):
+        from race_day_retry_policy import event_baseline_matches
+        prior={'gateRevision':3,'pilots':[{'id':1}],'active':{'seats':[1]}}
+        for changed in [dict(prior,gateRevision=2),dict(prior,gateRevision=True),
+                        dict(prior,gateRevision=4,pilots=[]),dict(prior,gateRevision=4,active={'seats':[2]}),
+                        {'gateRevision':4,'pilots':[{'id':1}]}]:
+            self.assertFalse(event_baseline_matches(changed,prior))

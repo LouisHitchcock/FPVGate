@@ -131,7 +131,7 @@ bool RaceHistory::writeRaceFile(const RaceSession& race) {
     if (!storage) {
         return false;
     }
-    JsonDocument doc;
+    JsonDocument doc(&snapshotAllocator);
     JsonObject raceObj = doc.to<JsonObject>();
     writeRaceObject(raceObj, race);
     String json;
@@ -224,7 +224,7 @@ bool RaceHistory::loadRaces() {
             continue;
         }
 
-        JsonDocument doc;
+        JsonDocument doc(&snapshotAllocator);
         DeserializationError error = deserializeJson(doc, json);
         if (error) {
             DEBUG("Failed to parse %s: %s\n", filepath.c_str(), error.c_str());
@@ -554,7 +554,7 @@ bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& lengt
 
 bool RaceHistory::fromJsonString(const String& json) {
     HistoryLock lock;
-    JsonDocument doc;
+    JsonDocument doc(&snapshotAllocator);
     DeserializationError error = deserializeJson(doc, json);
 
     if (error) {
