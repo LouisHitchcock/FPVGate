@@ -45,10 +45,15 @@ The new dual-gate trial is `.dev/headroom-20261108/staging-race-load` (started 1
 Still pending: this candidate's short trial, restart checks, uninterrupted watched long soak, matching localized filesystem validation, C5 image-staging UART-loss fix, and the physical checks listed above. No stable release is authorized by these intermediate results.
 
 
-## Latest short-trial failure and diagnostic continuation (19:56 UTC)
+## Latest short-trial failure and diagnostic continuation (19:54 UTC)
 
 `staging-race-load` finished FAILED: 40 PASS, 3 FAIL (one external-stop and two terminal consequences), 0 ERROR, 6 BLOCKED. First fault was AIO fresh HTTP TimeoutError at 19:52:54 UTC after 2.516 seconds. Both gates restored their configuration/settings/history baselines. AIO minimum internal heap was 40,356 bytes; Ethernet 52,316. Both USB dropped/deferred deltas were zero. Controller connection traces had zero errors; the failing probe is a separate process, so this does not explain its timeout. Do not declare the new candidate qualified.
 
 The fresh probe previously recorded only TimeoutError and waited for EOF, even after receiving a response body. It now records connect/send/receive phase, source port, first-byte timing, response byte counts, status and declared Content-Length/body completeness on failure. No response bodies, headers or credentials are logged. The same 2.5-second socket timeout and EOF success condition remain unchanged. Two targeted tests verify connection failure propagation and complete-body-without-close still being a failure with useful diagnostics. This permits distinguishing a connect stall, a response stall, and a delayed close rather than assuming every timeout means failure to accept.
 
 Next diagnostic window: eight hours under the independent retry watchdog, using the exact installed staging images and richer connection/probe evidence. Each attempt stops on first fault, restores baselines, and retries within the original window. A window with failures is not a release qualification pass. S3 restart checks are deferred until this network failure is dispositioned; they have not run on this candidate. The long window does not flash or power-cycle devices.
+
+
+## Active watched window (confirmed running)
+
+Started 2026-11-08T19:55:03.857207+00:00; fixed deadline **9 November 2026 03:55:03 UTC / London**. Watchdog PID 63036; state `.dev/headroom-20261108/watched-eight-hour/watchdog.json`; first generation `generation-001/supervisor.json`, first attempt `generation-001/attempt-001/controller.json`. First attempt reached phase soak with no firstFailure as of 19:55:21 UTC; both board readiness/baseline checks passed. Exact installed images are in supervisor installedImageProvenance. Test tooling source is pushed as 2fc9499. Watchdog/supervisors continue independently of this chat. Retries cannot extend the deadline. Final restoration can finish after it. A failure-containing window remains diagnostic evidence, not a continuous qualification pass.
