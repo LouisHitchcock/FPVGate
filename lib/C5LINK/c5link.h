@@ -62,6 +62,8 @@ public:
     uint8_t currentPilot() const { return activePilot_; }
     uint16_t rssi(uint8_t pilot) const { return pilot < C5_MAX_PILOTS ? rssi_[pilot] : 0; }
     bool takeSample(uint8_t pilot, uint16_t &value, uint32_t &timestampUs);
+    bool sampleQueueExternal() const { return sampleQueueExternal_; }
+    size_t sampleQueueBytes() const { return sampleQueue_ ? C5_MAX_PILOTS * sizeof(*sampleQueue_) : 0; }
     uint32_t sampleSequenceGaps() const { return sampleSequenceGaps_; }
     uint32_t sampleQueueDrops() const { return sampleQueueDrops_; }
     uint32_t acceptedSamples() const { return acceptedSamples_; }
@@ -144,6 +146,7 @@ private:
     // 8 KB, allocated by begin(): a board without PSRAM that never uses a
     // C5 needs that heap to serve the web UI.
     Sample (*sampleQueue_)[SAMPLE_QUEUE_DEPTH] = nullptr;
+    bool sampleQueueExternal_ = false;
     uint8_t sampleHead_[C5_MAX_PILOTS] = {};
     uint8_t sampleTail_[C5_MAX_PILOTS] = {};
     uint16_t rssi_[C5_MAX_PILOTS] = {};

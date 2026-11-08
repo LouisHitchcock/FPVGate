@@ -8,7 +8,7 @@ C5=ROOT.parent/'FPVGateC5MK-release-1.2.6'
 VERSION='1.2.6-d6d7'
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--out',required=True,type=Path);ap.add_argument('--cycles',type=int,default=5);ap.add_argument('--use-staged-image',action='store_true');ap.add_argument('--s3-only',action='store_true');a=ap.parse_args()
+ ap=argparse.ArgumentParser();ap.add_argument('--out',required=True,type=Path);ap.add_argument('--cycles',type=int,default=5);ap.add_argument('--use-staged-image',action='store_true');ap.add_argument('--s3-only',action='store_true');ap.add_argument('--no-scope',action='store_true',help='Exclude scope capture for software-only restart checks');a=ap.parse_args()
  out=a.out.resolve();out.mkdir(parents=True,exist_ok=False);(out/'source.py').write_text(Path(__file__).read_text())
  stop=threading.Event();finished=threading.Event();lock=threading.RLock();latest={};ports={};threads=[]
  state={'status':'PREFLIGHT','utc':now(),'phase':'preflight','cycle':0,'completed':[],'firstFailure':None,'usbCommandsSent':0}
@@ -22,7 +22,8 @@ def main():
    if not state['firstFailure']:state.update(firstFailure={'utc':now(),'phase':state['phase'],'cycle':state['cycle'],'reason':reason});save()
   stop.set()
   try:
-   with socket.create_connection(('192.168.0.20',5555),timeout=1) as scope:scope.sendall(b':STOP\n')
+   if not a.no_scope:
+    with socket.create_connection(('192.168.0.20',5555),timeout=1) as scope:scope.sendall(b':STOP\n')
   except OSError:pass
  def check():
   if stop.is_set():raise RuntimeError(state['firstFailure']['reason'])
@@ -31,15 +32,20 @@ def main():
  def get(path):return request(path).json()
  def dump(name,value):(out/name).write_text(json.dumps(value,indent=2))
  def passive(label,port):
-  try:
-   p=serial.Serial(port=None,baudrate=115200,timeout=.2);p.dtr=False;p.rts=False;p.port=port;p.open();ports[label]=p
-   with (out/(label+'-serial.bin')).open('ab') as f:
-    while not finished.is_set() and p.is_open:
-     try:b=p.read(4096)
-     except serial.SerialException:break
-     if b:f.write(b);f.flush()
-  except Exception as e:
-   with (out/'serial-notes.jsonl').open('a') as f:f.write(json.dumps({'utc':now(),'label':label,'error':repr(e)})+'\n')
+  while not finished.is_set():
+   p=None
+   try:
+    p=serial.Serial(port=None,baudrate=115200,timeout=.2);p.dtr=False;p.rts=False;p.port=port;p.open();ports[label]=p
+    with (out/'serial-notes.jsonl').open('a') as notes:notes.write(json.dumps({'utc':now(),'label':label,'event':'connected','cycle':state['cycle']})+'\n')
+    with (out/(label+'-serial.bin')).open('ab') as f:
+     while not finished.is_set() and p.is_open:
+      b=p.read(4096)
+      if b:f.write(b);f.flush()
+   except Exception as e:
+    with (out/'serial-notes.jsonl').open('a') as notes:notes.write(json.dumps({'utc':now(),'label':label,'error':repr(e),'cycle':state['cycle']})+'\n')
+   finally:
+    if p:p.close()
+   finished.wait(1)
  def events():
   counters=None
   while not finished.is_set() and not stop.is_set():
@@ -76,6 +82,7 @@ def main():
   v=get('/api/c5/update');assert v['c5']['board']=='xiaoc5' and v['c5']['version']==VERSION and v['c5']['online'],v
   assert v['link']['writeFailures']==0,v;challenge(original_gain)
  def capture_fault():
+  if a.no_scope:return
   try:
    with socket.create_connection(('192.168.0.20',5555),timeout=3) as s:
     s.settimeout(5);s.sendall(b':STOP\n:DISP:DATA? ON,OFF,PNG\n')
@@ -97,20 +104,22 @@ def main():
     s.sendall(b':WAV:MODE NORM\n')
   except Exception as e:state['scopeCaptureError']=repr(e)
  try:
-  assert {p.device:p.serial_number for p in serial.tools.list_ports.comports()}.get('COM24')=='10:BD:A3:CA:38:3C','COM24 identity changed'
+  if not a.s3_only:assert {p.device:p.serial_number for p in serial.tools.list_ports.comports()}.get('COM24')=='10:BD:A3:CA:38:3C','COM24 identity changed'
   info=get('/api/system/info');assert info['board']=='FPVGateC5MKAIO',info
   baseline={name:get(path) for name,path in [('config','/config'),('history','/races'),('event','/api/event'),('tracks','/tracks')]};dump('baseline.json',baseline);dump('system-before.json',info)
   race=get('/api/c5/race');assert not race['running'] and not race['busy'],race
   original_gain=baseline['config']['c5Gain'];image=C5/'.dev/builds/C5MK-1.2.6-d6d7-xiaoc5/xiaoc5-d6d7-firmware.bin';raw=image.read_bytes();assert hashlib.sha256(raw).hexdigest()=='3d58c4f27f06593f5cc94bf3a4b4cef66b6d3b33ad90cabf1661a940ae443589'
   state.update(status='RUNNING',c5AppSHA256=hashlib.sha256(raw).hexdigest(),baselineGain=original_gain);save()
-  with socket.create_connection(('192.168.0.20',5555),timeout=3) as s:s.sendall(b':STOP\n:TIM:SCAL 0.001\n:TIM:OFFS 0\n:TRIG:MODE EDGE\n:TRIG:EDG:SOUR CHAN1\n:TRIG:EDG:SLOP NEG\n:TRIG:EDG:LEV 1.65\n:TRIG:SWE NORM\n:RUN\n')
-  for label,port in [('s3','COM23'),('c5','COM24')]:
+  if not a.no_scope:
+   with socket.create_connection(('192.168.0.20',5555),timeout=3) as s:s.sendall(b':STOP\n:TIM:SCAL 0.001\n:TIM:OFFS 0\n:TRIG:MODE EDGE\n:TRIG:EDG:SOUR CHAN1\n:TRIG:EDG:SLOP NEG\n:TRIG:EDG:LEV 1.65\n:TRIG:SWE NORM\n:RUN\n')
+  serial_targets=[('s3','COM23')] + ([] if a.s3_only else [('c5','COM24')])
+  for label,port in serial_targets:
    t=threading.Thread(target=passive,args=(label,port),daemon=True);t.start();threads.append(t)
   t=threading.Thread(target=events,daemon=True);t.start();threads.append(t)
   wait_for(lambda:latest.get('on') and latest.get('ready'),8,'No baseline C5 stream');verify();dump('baseline-receiver.json',latest.copy())
   # Stage the exact same C5 application; no alternate image or filesystem.
   if a.s3_only:
-   state['scope']='S3 software restart isolation; C5 OTA cycles already passed in run-03';save()
+   state['scope']='S3 software restart and C5 UART recovery only; C5 OTA/staging/native USB excluded';save()
   elif a.use_staged_image:
    staged=get('/api/c5/update')['image'];assert staged=={'version':VERSION,'board':'xiaoc5','size':len(raw)},staged
    state['scope']='Startup-only isolation using exact image staged in run-02; staging UART loss remains an open failure';save()

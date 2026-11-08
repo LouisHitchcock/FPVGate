@@ -56,6 +56,7 @@ def main():
     parser.add_argument('--skip-native-usb', action='store_true', help='Run only selected gate lanes')
     parser.add_argument('--boards', nargs='+', choices=['aio', 'eth'], default=['aio', 'eth'])
     parser.add_argument('--aio-version', default='1.2.6')
+    parser.add_argument('--trace-connections', action='store_true', help='Record connection ports/timing and Windows TCP states without payloads')
     parser.add_argument('--aio-image', type=Path, help='Record an explicitly installed diagnostic AIO application')
     parser.add_argument('--eth-version', default='1.2.5')
     parser.add_argument('--eth-image', type=Path)
@@ -74,6 +75,7 @@ def main():
              'receiverVersions': {'aio': args.aio_version, 'eth': args.eth_version, 'usb': args.native_version},
              'stimulus': 'Injected gate crossings through real RH plugin; physical RF accuracy excluded' + ('; standalone USB lane excluded' if args.skip_native_usb else '; RH manual USB-lane laps')}
     state_path = root / 'controller.json'
+    state['connectionTraceEnabled'] = args.trace_connections
     state_lock = threading.RLock()
 
     def save():
@@ -81,6 +83,10 @@ def main():
             atomic(state_path, state)
 
     save()
+    close_connection_trace = None
+    if args.trace_connections:
+        from connection_diagnostics import start_connection_trace
+        close_connection_trace = start_connection_trace(root / 'connection-trace')
     baseline = {}
     awake = False
     active = []
@@ -346,6 +352,8 @@ def main():
         health_stop.set()
         if awake:
             ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+        if close_connection_trace:
+            close_connection_trace()
     return 0 if state['status'] == 'COMPLETED' else 1
 
 

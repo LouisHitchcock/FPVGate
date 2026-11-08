@@ -49,3 +49,6 @@ processes. An expired window starts no worker. Persistent recovery proof is
 recovered, earlier results retained, and the fixed deadline preserved. This is a
 harness recovery drill, not a gate pass. The earlier hardware run remains
 incomplete. No new hardware window was started as part of this repair.
+
+
+Optional `--trace-connections` is forwarded by watchdog and retry worker to every full-race controller. It records local TCP connection outcomes/source ports and request paths without query strings, headers or request bodies. Windows TCP states are sampled without admin privileges; TIME_WAIT counts are aggregated. This adds diagnostics, not retries to individual requests or relaxed health checks. Pass `--aio-image` and `--eth-image` with the immutable archived application files actually installed; both options are forwarded across watchdog generations.

@@ -6,6 +6,9 @@
 #include <cstring>
 #include <vector>
 #include <new>
+#ifdef ESP32
+#include <esp_heap_caps.h>
+#endif
 
 namespace {
 constexpr const char* TMP = "/event-commit.tmp";
@@ -20,7 +23,11 @@ class Budget : public ArduinoJson::Allocator {
 public:
     void* allocate(size_t bytes) override {
         if (bytes > 48u * 1024u - used_) return nullptr;
-        auto p = static_cast<size_t*>(std::malloc(bytes + sizeof(size_t)));
+        size_t* p = nullptr;
+#ifdef ESP32
+        p = static_cast<size_t*>(heap_caps_malloc(bytes + sizeof(size_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#endif
+        if (!p) p = static_cast<size_t*>(std::malloc(bytes + sizeof(size_t)));
         if (!p) return nullptr;
         *p = bytes; used_ += bytes; return p + 1;
     }
@@ -34,7 +41,11 @@ public:
         auto p = static_cast<size_t*>(ptr) - 1;
         const size_t old = *p;
         if (bytes > 48u * 1024u - (used_ - old)) return nullptr;
-        auto q = static_cast<size_t*>(std::realloc(p, bytes + sizeof(size_t)));
+        size_t* q = nullptr;
+#ifdef ESP32
+        q = static_cast<size_t*>(heap_caps_realloc(p, bytes + sizeof(size_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#endif
+        if (!q) q = static_cast<size_t*>(std::realloc(p, bytes + sizeof(size_t)));
         if (!q) return nullptr;
         used_ = used_ - old + bytes; *q = bytes; return q + 1;
     }

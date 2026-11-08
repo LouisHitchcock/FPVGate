@@ -9,7 +9,7 @@ def now():return datetime.datetime.now(datetime.timezone.utc)
 def stamp():return now().isoformat()
 def read(path):return json.loads(path.read_text(encoding='utf-8-sig'))
 def main():
- p=argparse.ArgumentParser();p.add_argument('--initial-run',required=True,type=Path);p.add_argument('--out',required=True,type=Path);p.add_argument('--seconds',type=int,default=10800);p.add_argument('--config-template',required=True,type=Path);p.add_argument('--aio-image',type=Path);p.add_argument('--eth-image',type=Path);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--initial-run',required=True,type=Path);p.add_argument('--out',required=True,type=Path);p.add_argument('--seconds',type=int,default=10800);p.add_argument('--config-template',required=True,type=Path);p.add_argument('--aio-image',type=Path);p.add_argument('--eth-image',type=Path);p.add_argument('--trace-connections',action='store_true');a=p.parse_args()
  initial=a.initial_run.resolve();previous=read(initial/'controller.json');out=a.out.resolve();out.mkdir(parents=True,exist_ok=False)
  budget=RetryBudget.create(datetime.datetime.fromisoformat(previous['startedUTC']),a.seconds,now(),time.monotonic())
  baseline={b:{k:read(initial/'baseline'/b/(k+'.json')) for k in ['config','history','event','tracks']} for b in BOARDS}
@@ -66,6 +66,7 @@ def main():
    atomic(out/('attempt-%03d-before.json'%index),{'utc':stamp(),'remainingSeconds':remaining,'boards':health})
    command=[sys.executable,'-u','tools/full_race_day.py','--out',str(attempt),'--boards','eth','aio','--seconds',str(remaining),'--rehearsal','0','--skip-native-usb','--aio-version','1.2.6-d6d7','--eth-version','1.2.5','--config-template',str(a.config_template.resolve())]
    for b,image in images.items():command += ['--'+b+'-image',image['path']]
+   if a.trace_connections:command += ['--trace-connections']
    with (out/('attempt-%03d-console.log'%index)).open('ab') as stdout,(out/('attempt-%03d-error.log'%index)).open('ab') as stderr:
     active=subprocess.Popen(command,cwd=ROOT,stdout=stdout,stderr=stderr,stdin=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW)
    state.update(status='RUNNING',currentAttempt={'index':index,'directory':str(attempt),'pid':active.pid,'startedUTC':stamp()});save();event('attempt-started',index=index,directory=str(attempt),secondsBudget=remaining,pid=active.pid)
@@ -82,10 +83,10 @@ def main():
      scheduled=not bool(controller.get('firstFailure'))
      if controller.get('processes'):
       stop_path=attempt/'soak-gates.stop.json'
-      if not stop_path.exists():atomic(stop_path,{'kind':'WINDOW_DEADLINE','utc':stamp(),'reason':'Original three-hour test window ended; stop new work and restore baselines'})
+      if not stop_path.exists():atomic(stop_path,{'kind':'WINDOW_DEADLINE','utc':stamp(),'reason':'Original fixed test window ended; stop new work and restore baselines'})
      else:
       # Controller is still in read-only preflight; retain a stop file for its lane.
-      atomic(attempt/'soak-gates.stop.json',{'kind':'WINDOW_DEADLINE','utc':stamp(),'reason':'Original three-hour test window ended during preflight'})
+      atomic(attempt/'soak-gates.stop.json',{'kind':'WINDOW_DEADLINE','utc':stamp(),'reason':'Original fixed test window ended during preflight'})
      state['status']='DEADLINE_CLEANUP';save();event('window-deadline-stop',index=index,priorFault=controller.get('firstFailure'))
     if time.monotonic()-last_tick>=5:save();last_tick=time.monotonic()
     time.sleep(.5)

@@ -27,3 +27,19 @@ Early post-OTA Event 404 or partial-history readback was seen on Ethernet. Separ
 Next: install the new exact images only after successful builds; verify all data. Run a short dual-gate mixed race/load/Event replay with USB counter deltas. If clear, run software restart checks on both boards, then start a fresh eight-hour window under the independent watchdog with exact archived image paths. Keep the 40000-byte floor and network checks unchanged. Every retry remains inside the initial deadline; prior failures remain failures.
 
 Only S3 COM23 (AIO) and COM42 (Ethernet) are connected. Native C5 USB, RF/VTX rig, ELRS and direct physical light/audio/power-cut observations remain unqualified; do not replace them with injected-lap evidence. C5 image staging UART-loss investigation also remains open; S3-only restart passes will not qualify that path. The localized UI filesystem was built earlier but is not yet installed on the bench devices. Companion repositories are not changed by this checkpoint.
+
+
+## Continuation after 99eb4eb (19:49 UTC)
+
+The 24-slot PSRAM USB pool candidate was installed on both boards. `dual-tx-race-load` stopped on an Ethernet `/api/system/info` connect timeout; independent fresh HTTP (55), held HTTP (60) and ping (61) probes all succeeded. This is an unresolved fresh-connection failure, not evidence of a complete Ethernet outage. Both USB dropped/deferred deltas were zero. The subsequent `traced-race-load` completed 46 PASS, 0 FAIL/ERROR, 6 BLOCKED at 19:37:49 UTC. Both gates' network probes had zero failures, USB drop deltas were zero, and 1,344 traced controller connections had zero errors. Minimum internal heap was AIO 40,992 and Ethernet 42,764 bytes: still narrow. Prior failed attempts remain failed.
+
+A further candidate moves the CPU-owned 8 KB C5 sample staging queue to PSRAM with a zeroed internal-memory fallback; its capacity is unchanged and the interrupt-facing 16 KB UART ring stays internal. Event's bounded parsing allocator also prefers PSRAM while retaining its 48 KB logical limit. Production-block native checks exercise PSRAM, fallback, OOM, zeroed queue contents, preserved realloc contents and budget refusal. All 76 Python tests and the native Event fixture pass; both firmware targets build successfully. Previous 169 Jest tests are unchanged by these C++/Python-only changes.
+
+Application-only diagnostic installs passed config/history/Event parity on both boards:
+- AIO: 1,493,536 bytes, SHA256 `019e17bdb298afb00624ebfa182da1215396c42750edffe7eadfa2aa99f0dc1c`.
+- Ethernet: 1,531,968 bytes, SHA256 `70bd8d804d91135049f98438497c9e2b40a41d08a1321395a7fc3b4e8751e5f1`.
+- Immutable images and before/after/install reports: `.dev/headroom-20261108/install-<environment>-staging/`.
+
+The new dual-gate trial is `.dev/headroom-20261108/staging-race-load` (started 19:48:48 UTC). Result pending at this checkpoint. Opt-in connection tracing logs local TCP source ports, timestamps, outcomes and request paths (query/header/body excluded); a Windows TCP-table sampler requires no administrator privileges. TIME_WAIT rows are aggregated to bound log volume. Tests confirm original exceptions propagate and monkeypatches restore even if thread start fails. Retry supervisors forward the tracing option. S3-only restart tooling no longer requires native C5 USB or the scope, and passive serial capture reconnects after each USB disconnect.
+
+Still pending: this candidate's short trial, restart checks, uninterrupted watched long soak, matching localized filesystem validation, C5 image-staging UART-loss fix, and the physical checks listed above. No stable release is authorized by these intermediate results.

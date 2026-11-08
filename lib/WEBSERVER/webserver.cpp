@@ -1655,6 +1655,8 @@ EEPROM:\n";
             link["expectedTxSignal"] = U1TXD_OUT_IDX;
             if (TaskHandle_t task = xTaskGetHandle("c5Task"))
                 link["taskPriority"] = (unsigned)uxTaskPriorityGet(task);
+            link["sampleQueueBytes"] = c5Link->sampleQueueBytes();
+            link["sampleQueueExternal"] = c5Link->sampleQueueExternal();
         }
         JsonObject c5 = doc["c5"].to<JsonObject>();
         c5["online"] = c5Link && c5Link->online(millis());
