@@ -649,7 +649,7 @@ function handleRaceStateEvent(state) {
     console.log("[Sync] Race started via SSE");
     if (c5ReceiverSelected()) c5RaceResync().then((d) => { if (d && d.timestamp) c5ObservedTimestamp = d.timestamp; });
   } else if (state === "stopped") {
-    // Race stopped (e.g. from LCD) – stop timer and reset displays like stopRace()
+    // Race stopped (e.g. from LCD) â€“ stop timer and reset displays like stopRace()
     raceRunning = false;
     stopRaceTimer();
     timer.innerHTML = i18n.t("race.timer_default");
@@ -1284,7 +1284,7 @@ function renderMultiPilotRaceView() {
   let headerHtml = '<tr><th class="lap-header">' + (i18n.t("race.table.lap_no") || "Lap") + '</th>';
   for (const pilot of pilots) {
     const colorHex = '#' + (pilot.color).toString(16).padStart(6, '0');
-    const localBadge = pilot.isLocal ? ' ★' : '';
+    const localBadge = pilot.isLocal ? ' â˜…' : '';
     headerHtml += `<th class="pilot-header" style="border-top: 4px solid ${colorHex};">${escapeHtml(pilot.name)}${localBadge}</th>`;
   }
   headerHtml += '</tr>';
@@ -5180,7 +5180,7 @@ function renderAlwaysOnRaceStats(stats, pilots, leaderName) {
       }
     }
   }
-  const who = (name, detail) => (name ? `${name} · ${detail}` : detail);
+  const who = (name, detail) => (name ? `${name} Â· ${detail}` : detail);
   setRaceStatBox("raceAlwaysFastest", fastest && fastest.s.fastest, fastest && who(fastest.name, `Lap ${fastest.s.fastestIndex}`));
   setRaceStatBox("raceAlwaysFastest3Consec", consec && consec.s.fastest3ConsecValue, consec && who(consec.name, consec.s.fastest3ConsecLaps));
   setRaceStatBox("raceAlwaysBest3", stats && stats.best3Value, stats && who(leaderName, stats.best3Laps));
@@ -5704,7 +5704,7 @@ function saveCurrentRace(options = {}) {
   const channelValue = parseInt(channelSelect.options[channelSelect.selectedIndex].value);
   const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
 
-  // Calculate total race distance: track length per lap × number of laps
+  // Calculate total race distance: track length per lap Ã— number of laps
   let totalRaceDistance = 0;
   console.log(`DEBUG: trackLapLength=${trackLapLength}, currentTrackId=${currentTrackId}, currentTrackName='${currentTrackName}'`);
   if (trackLapLength > 0 && baseLaps.length > 0) {
@@ -6870,38 +6870,49 @@ function downloadSingleRace(timestamp) {
 
 function importRaces(input) {
   const file = input.files[0];
-  if (!file) return;
-
+  if (!file || input.disabled) return;
+  input.disabled = true;
   const reader = new FileReader();
-  reader.onload = function (e) {
+  reader.onload = async function (e) {
+    let validFile = false;
+    let imported = 0;
     try {
       const json = JSON.parse(e.target.result);
-
-      fetch("/races/upload", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(json),
-      })
-        .then((response) => response.json())
-        .then((data) => {
-          console.log("Races imported:", data);
-          loadRaceHistory();
-          alert(i18n.t("messages.race_import_success"));
-        })
-        .catch((error) => {
-          console.error("Error importing races:", error);
-          alert(i18n.t("messages.race_import_error"));
+      if (!json || !Array.isArray(json.races) || json.races.some(race =>
+        !race || !Number.isInteger(race.timestamp) || race.timestamp <= 0 || race.timestamp > 0xffffffff)) {
+        throw new Error("Expected a race backup containing timestamped races");
+      }
+      validFile = true;
+      // Keep a large backup from becoming one oversized request. Preserve each
+      // complete race (including every pilot) and stop at the first failure.
+      for (const race of json.races) {
+        const response = await fetch("/races/upload", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ races: [race] }),
         });
+        if (!response.ok) throw new Error(`Race import rejected: HTTP ${response.status}`);
+        const result = await response.json();
+        if (result.status !== "OK") throw new Error("The gate could not import the race");
+        imported++;
+      }
+      alert(i18n.t("messages.race_import_success"));
     } catch (error) {
-      console.error("Error parsing JSON:", error);
-      alert(i18n.t("messages.race_invalid_json"));
+      console.error("Error importing races:", error);
+      alert(i18n.t(validFile ? "messages.race_import_error" : "messages.race_invalid_json"));
+    } finally {
+      // A partial import is visible even when a later race was refused.
+      if (imported) loadRaceHistory();
+      input.disabled = false;
+      input.value = "";
     }
   };
+  reader.onerror = function () {
+    alert(i18n.t("messages.race_import_error"));
+    input.disabled = false;
+    input.value = "";
+  };
   reader.readAsText(file);
-  input.value = ""; // Reset file input
 }
 
 function deleteRace(timestamp) {
@@ -6989,7 +7000,7 @@ function renderMarshalPilotList() {
       <button type="button" class="c5p-eye" onclick="event.stopPropagation(); marshalToggleTrace(${p.slot})" title="Show or hide this trace"></button>
       <b class="marshal-pilot-ch">${channel}</b>
       <span class="marshal-pilot-name">${escapeHtml(p.name || `Pilot ${i + 1}`)}</span>
-      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} · ${best}</span>
+      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} Â· ${best}</span>
     </div>`;
   }).join("");
 }
@@ -7227,13 +7238,13 @@ function mergeLapInEditor(index) {
   renderLapEditList();
 }
 
-// One line on the collapsed Race Details bar: name · tag · distance.
+// One line on the collapsed Race Details bar: name Â· tag Â· distance.
 function updateMarshalDetailsSummary() {
   const name = document.getElementById("raceName").value.trim();
   const tag = document.getElementById("raceTag").value.trim();
   const distance = parseFloat(document.getElementById("raceDistance").value);
   document.getElementById("marshalDetailsSummary").textContent =
-    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" · ");
+    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" Â· ");
 }
 
 function openRaceEditor(index) {
@@ -9851,19 +9862,19 @@ function runSelfTest() {
         const status = statusOf(test);
         const durationMs = test.duration != null ? test.duration : (test.duration_ms || 0);
 
-        let statusIcon = "✓";
+        let statusIcon = "âœ“";
         let statusColor = "#4ade80";
         let bgColor = "rgba(74, 222, 128, 0.1)";
 
         if (status === "skip") {
           skippedCount++;
-          statusIcon = "–";
+          statusIcon = "â€“";
           statusColor = "#9ca3af";
           bgColor = "rgba(156, 163, 175, 0.1)";
         } else if (status === "fail") {
           failedCount++;
           anyFailed = true;
-          statusIcon = "✗";
+          statusIcon = "âœ—";
           statusColor = "#ff5555";
           bgColor = "rgba(255, 85, 85, 0.1)";
         } else {
@@ -10305,7 +10316,7 @@ function displayTracks() {
           <div style="flex: 1;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 4px;">${track.name}</div>
             <div style="font-size: 14px; color: var(--secondary-color);">
-              ${i18n.t("modals.track.unit_meters", { n: track.distance })}${track.tags ? " • " + track.tags : ""}
+              ${i18n.t("modals.track.unit_meters", { n: track.distance })}${track.tags ? " â€¢ " + track.tags : ""}
             </div>
           </div>
           <div style="display: flex; gap: 8px;">
@@ -11173,10 +11184,10 @@ function evaluateC5Checks(frames, update, pilots, seconds) {
 
 function renderCheckResults(list, results, labelOf) {
   const style = {
-    pass: ["✓", "#4ade80", "rgba(74, 222, 128, 0.1)"],
+    pass: ["âœ“", "#4ade80", "rgba(74, 222, 128, 0.1)"],
     warn: ["!", "#fbbf24", "rgba(251, 191, 36, 0.1)"],
-    fail: ["✗", "#ff5555", "rgba(255, 85, 85, 0.1)"],
-    skip: ["–", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
+    fail: ["âœ—", "#ff5555", "rgba(255, 85, 85, 0.1)"],
+    skip: ["â€“", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
   };
   list.innerHTML = results.map((r) => {
     const [icon, color, bg] = style[r.status] || style.skip;

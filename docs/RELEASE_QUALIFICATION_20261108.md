@@ -82,3 +82,8 @@ Source and controlled-comparison corrections pushed on V1.9.0-alpha as 4629e92, 
 The independent watchdog is RUNNING, PID 55328, at `.dev/headroom-20261108/watched-eight-hour-after-memory-comparison/watchdog.json`. First controller reached soak at 22:38:02 UTC with no firstFailure at this checkpoint. Original deadline remains **9 November 03:55:03 UTC/London**. Original failed attempts and the comparison/PC-use interruption remain preserved; this is a diagnostic continuation, not an uninterrupted eight-hour pass. Exact installed applications are pinned in supervisor installedImageProvenance. Faults stop each attempt, retain diagnostics and restore/retry within that fixed deadline.
 
 Core correction remains: the original ordinary allocator already placed the 8 KB C5 queue in PSRAM on both boards. Do not claim another 8 KB internal-memory recovery. AIO Event-busy responses and network/heap failures are still open; no stable release has been published.
+
+
+## Race import fix prepared (9 November)
+
+Source fix and offline regressions are documented in docs/RACE_IMPORT_20261109.md. Whole-backup uploads hit the library's 16 KB default and the UI ignored error status. Imports now send complete races sequentially; the PSRAM route allows bounded larger individual races, avoids redundant parsing, validates collection shapes and accepts duplicate no-ops. All 179 Jest tests, the native production import regression, three history checks and the two-job AIO build pass. The user's specific backup was not supplied. Nothing was flashed during the running soak. Matching UI/app deployment and real-device import roundtrip remain pending after the current window.

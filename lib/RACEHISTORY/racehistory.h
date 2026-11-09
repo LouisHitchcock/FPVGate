@@ -69,6 +69,7 @@ class RaceHistory {
     bool tryToJsonString(String& output);
     bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length);
     bool fromJsonString(const String& json);
+    bool fromJson(JsonVariant json);
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
     bool getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const;

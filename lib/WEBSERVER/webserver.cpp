@@ -2537,9 +2537,9 @@ EEPROM:\n";
     });
 
     AsyncCallbackJsonWebHandler *raceUploadHandler = new AsyncCallbackJsonWebHandler("/races/upload", [this](AsyncWebServerRequest *request, JsonVariant &json) {
-        String jsonString;
-        serializeJson(json, jsonString);
-        bool success = history->fromJsonString(jsonString);
+        // The handler already parsed this document; do not duplicate the full
+        // upload into a String and a second JSON tree.
+        bool success = history->fromJson(json);
         request->send(200, "application/json", success ? "{\"status\": \"OK\"}" : "{\"status\": \"ERROR\"}");
         led->on(200);
     });
@@ -2690,6 +2690,11 @@ EEPROM:\n";
     });
 
     server.addHandler(raceSaveHandler);
+    // Browser imports send one complete race per request. Long multi-pilot
+    // races may exceed the library's 16 KB default; retain that bound on boards
+    // without PSRAM rather than admitting a large internal-memory allocation.
+    raceUploadHandler->setMaxContentLength(
+        heap_caps_get_total_size(MALLOC_CAP_SPIRAM) ? 256 * 1024 : 16 * 1024);
     server.addHandler(raceUploadHandler);
     server.addHandler(updateLapsHandler);
 

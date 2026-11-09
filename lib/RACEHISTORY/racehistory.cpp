@@ -553,7 +553,6 @@ bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& lengt
 }
 
 bool RaceHistory::fromJsonString(const String& json) {
-    HistoryLock lock;
     JsonDocument doc(&snapshotAllocator);
     DeserializationError error = deserializeJson(doc, json);
 
@@ -562,8 +561,27 @@ bool RaceHistory::fromJsonString(const String& json) {
         return false;
     }
 
-    JsonArray racesArray = doc["races"];
+    return fromJson(doc.as<JsonVariant>());
+}
+
+bool RaceHistory::fromJson(JsonVariant json) {
+    HistoryLock lock;
+    if (!json.is<JsonObject>() || !json["races"].is<JsonArray>()) return false;
+    JsonArray racesArray = json["races"];
+    // Validate the collection before writing anything. A malformed backup must
+    // not be reported as an empty successful import or create a timestamp-0 file.
+    for (JsonVariant item : racesArray) {
+        if (!item.is<JsonObject>() || !item["timestamp"].is<uint32_t>() || item["timestamp"].as<uint32_t>() == 0) return false;
+        if (!item["lapTimes"].isNull() && !item["lapTimes"].is<JsonArray>()) return false;
+        if (!item["pilots"].isNull()) {
+            if (!item["pilots"].is<JsonArray>()) return false;
+            for (JsonVariant pilot : item["pilots"].as<JsonArray>()) {
+                if (!pilot.is<JsonObject>() || (!pilot["lapTimes"].isNull() && !pilot["lapTimes"].is<JsonArray>())) return false;
+            }
+        }
+    }
     int importedCount = 0;
+    bool success = true;
 
     for (JsonObject raceObj : racesArray) {
         RaceSession race;
@@ -625,13 +643,17 @@ bool RaceHistory::fromJsonString(const String& json) {
         if (!exists) {
             RaceRssiRecorder* saved = rssiRecorder;
             rssiRecorder = nullptr;
-            if (saveRace(race)) {
-                importedCount++;
-            }
+            bool written = saveRace(race);
             rssiRecorder = saved;
+            if (!written) { success = false; break; }
+            importedCount++;
         }
     }
 
     DEBUG("Imported %d races\n", importedCount);
-    return importedCount > 0 || racesArray.size() == 0;
+    // Upload order must not hide recent records behind the 50-race list cap.
+    std::sort(races.begin(), races.end(),
+              [](const RaceSession& a, const RaceSession& b) { return a.timestamp > b.timestamp; });
+    // Re-importing records already present is an idempotent success.
+    return success;
 }
