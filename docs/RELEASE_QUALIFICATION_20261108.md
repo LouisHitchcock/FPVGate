@@ -100,3 +100,8 @@ ROM USB enumerated as COM22, normal application as COM23. The stock reset left t
 On-device test executed the served Import Races function through a Node/FileReader stand-in against the real API: a **22,922-byte, eight-pilot** saved race imported successfully, retaining every pilot's identity/slot/frequency/thresholds/lap array. A repeat import produced no duplicate. The temporary record was deleted and original history matched. Config, history, Event and tracks also match the pre-flash baseline. C5 remains 1.2.6-d6d7, online and streaming fresh records. This is functional import evidence, not physical browser-click, RF timing or endurance qualification. Refresh the browser page to load the new UI.
 
 Final evidence: install.json, completion.json, import-smoke.json and post-smoke.json in the local installation directory. Wider release blockers remain open. Ethernet import deployment/verification is pending.
+
+
+## History filtering and older-history visibility (9 November)
+
+Implemented/deployed source 2953af2 on AIO: pilot/date/lap/import/search filters, sorting, persisted import times, bounded cursor pages exposing all 87 stored races, and full browser-side backup export. All 191 Jest tests, native history/import checks and native Event fixture pass; app/filesystem builds pass. Real-device served-function harness verified an older imported race, combined filters, full 88-record export, duplicate handling and removal restoring all 87 originals. Details and limits: docs/HISTORY_FILTERS_20261109.md. No Ethernet deployment, manual browser-click or new endurance qualification is claimed. Prior soak remains ended by the user.
