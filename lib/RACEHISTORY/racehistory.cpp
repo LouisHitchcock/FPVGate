@@ -48,6 +48,7 @@ static String raceFilePathForTimestamp(uint32_t timestamp) {
 
 void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) const {
     raceObj["timestamp"] = race.timestamp;
+    raceObj["importedAt"] = race.importedAt;
     raceObj["fastestLap"] = race.fastestLap;
     raceObj["medianLap"] = race.medianLap;
     raceObj["best3LapsTotal"] = race.best3LapsTotal;
@@ -233,6 +234,7 @@ bool RaceHistory::loadRaces() {
 
         RaceSession race;
         race.timestamp = doc["timestamp"];
+        race.importedAt = doc["importedAt"] | 0u;
         race.fastestLap = doc["fastestLap"];
         race.medianLap = doc["medianLap"];
         race.best3LapsTotal = doc["best3LapsTotal"];
@@ -534,13 +536,28 @@ void RaceHistory::writeHistoryDocument(JsonDocument& doc) const {
 
 }
 
-bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length) {
+bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, uint32_t before, bool paged) {
     output.reset();
     length = 0;
     HistoryLock lock(0);
     if (!lock.acquired) return false;
     JsonDocument doc(&snapshotAllocator);
-    writeHistoryDocument(doc);
+    if (!paged) {
+        writeHistoryDocument(doc); // Preserve the existing API/export contract.
+    } else {
+        JsonArray page = doc["races"].to<JsonArray>();
+        bool more = false;
+        uint32_t next = 0;
+        for (const auto& race : races) {
+            if (before && race.timestamp >= before) continue;
+            if (page.size() == MAX_RACES) { more = true; break; }
+            writeRaceObject(page.add<JsonObject>(), race);
+            next = race.timestamp;
+        }
+        doc["hasMore"] = more;
+        doc["nextBefore"] = more ? next : 0;
+        doc["total"] = races.size();
+    }
     if (doc.overflowed()) return false;
     const size_t bytes = measureJson(doc);
     char* raw = static_cast<char*>(snapshotAllocator.allocate(bytes + 1));
@@ -582,10 +599,15 @@ bool RaceHistory::fromJson(JsonVariant json) {
     }
     int importedCount = 0;
     bool success = true;
+    const time_t clock = time(nullptr);
+    const uint32_t clientImportTime = json["importedAt"] | 0u;
+    const uint32_t importedAt = clientImportTime >= 1577836800 ? clientImportTime
+        : (clock >= 1577836800 && static_cast<uint64_t>(clock) <= UINT32_MAX ? static_cast<uint32_t>(clock) : 0u);
 
     for (JsonObject raceObj : racesArray) {
         RaceSession race;
         race.timestamp = raceObj["timestamp"];
+        race.importedAt = importedAt;
         race.fastestLap = raceObj["fastestLap"];
         race.medianLap = raceObj["medianLap"];
         race.best3LapsTotal = raceObj["best3LapsTotal"];
@@ -632,12 +654,21 @@ bool RaceHistory::fromJson(JsonVariant json) {
         readRssiMeta(raceObj, race);
 
         bool exists = false;
-        for (const auto& existingRace : races) {
+        for (auto& existingRace : races) {
             if (existingRace.timestamp == race.timestamp) {
                 exists = true;
+                // A repeat import updates only local import metadata, never
+                // the already saved pilot/lap data.
+                if (importedAt && existingRace.importedAt != importedAt) {
+                    RaceSession marked = existingRace;
+                    marked.importedAt = importedAt;
+                    if (!writeRaceFile(marked)) success = false;
+                    else existingRace.importedAt = importedAt;
+                }
                 break;
             }
         }
+        if (!success) break;
 
         // Import without re-attaching pending recorder capture
         if (!exists) {

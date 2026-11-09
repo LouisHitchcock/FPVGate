@@ -321,11 +321,32 @@
       <div id="history" class="tabcontent" style="display: none;">
         <h2 data-i18n="history.title">Race History</h2>
         <div class="history-controls">
-          <button onclick="downloadRaces()" data-i18n="history.download">Download Races</button>
+          <button onclick="downloadRaces()" data-i18n="history.download_all">Download All Races</button>
           <button onclick="document.getElementById('importFile').click()" data-i18n="history.import">Import Races</button>
           <input type="file" id="importFile" accept=".json" style="display: none" onchange="importRaces(this)" />
           <button onclick="clearAllRaces()" class="danger-button" data-i18n="history.clear_all">Clear All</button>
         </div>
+        <details class="history-filter-panel" open>
+          <summary data-i18n="history.filters">Filter and sort</summary>
+          <div class="history-filters">
+            <label><span data-i18n="history.pilot_filter">Pilot / callsign</span><input id="historyPilot" type="search" oninput="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.search">Race, track or notes</span><input id="historySearch" type="search" oninput="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.date_from">Raced from</span><input id="historyFrom" type="date" onchange="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.date_to">Raced through</span><input id="historyTo" type="date" onchange="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.min_laps">Minimum total laps</span><input id="historyMinLaps" type="number" min="0" step="1" oninput="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.max_laps">Maximum total laps</span><input id="historyMaxLaps" type="number" min="0" step="1" oninput="applyHistoryFilters()" /></label>
+            <label><span data-i18n="history.imports">Imported</span><select id="historyImported" onchange="applyHistoryFilters()">
+              <option value="all" data-i18n="history.all_races">All races</option><option value="imported" data-i18n="history.imported_only">Imported races</option>
+              <option value="24h" data-i18n="history.import_last_24h">Last 24 hours</option><option value="7d" data-i18n="history.import_last_7d">Last 7 days</option><option value="30d" data-i18n="history.import_last_30d">Last 30 days</option>
+            </select></label>
+            <label><span data-i18n="history.sort">Sort by</span><select id="historySort" onchange="applyHistoryFilters()">
+              <option value="race-desc" data-i18n="history.race_newest">Race date: newest</option><option value="race-asc" data-i18n="history.race_oldest">Race date: oldest</option>
+              <option value="import-desc" data-i18n="history.import_newest">Latest import</option><option value="laps-desc" data-i18n="history.laps_most">Most laps</option><option value="laps-asc" data-i18n="history.laps_fewest">Fewest laps</option>
+            </select></label>
+          </div>
+          <div class="history-filter-footer"><small data-i18n="history.lap_filter_hint">Multi-pilot totals combine all pilots; Gate 1 is excluded.</small><button onclick="clearHistoryFilters()" data-i18n="history.clear_filters">Clear filters</button></div>
+        </details>
+        <p id="historyFilterStatus" role="status" aria-live="polite"></p>
         <div id="raceHistoryList" class="history-list">
           <p class="no-data" data-i18n="history.no_data">No races saved yet</p>
         </div>
@@ -1972,6 +1993,7 @@
       </div>
     </div>
 
+    <script src="history-filters.js" defer></script>
     <script src="script.js" defer></script>
     <script src="race-trace.js" defer></script>
     <script src="c5-multipilot.js" defer></script>

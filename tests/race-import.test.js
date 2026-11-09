@@ -25,7 +25,7 @@ test('large multi-pilot backup uses sequential complete-race uploads without los
   const t = importer(); const input = await t.run({races});
   expect(t.ctx.fetch).toHaveBeenCalledTimes(races.length);
   t.ctx.fetch.mock.calls.forEach(([url, options], i) => {
-    expect(url).toBe('/races/upload'); expect(JSON.parse(options.body)).toEqual({races: [races[i]]});
+    expect(url).toBe('/races/upload'); expect(JSON.parse(options.body).races).toEqual([races[i]]);expect(JSON.parse(options.body).importedAt).toBeGreaterThan(1577836800);
     expect(options.body.length).toBeLessThan(16384);
   });
   expect(t.ctx.alert).toHaveBeenCalledWith('messages.race_import_success');
@@ -34,7 +34,7 @@ test('large multi-pilot backup uses sequential complete-race uploads without los
 });
 test('legacy single-pilot backups preserve lap times and metadata', async () => {
  const t=importer(); const race={timestamp:123,lapTimes:[0,12000,13000],pilotName:'Ann',notes:'legacy'};
- await t.run({races:[race]}); expect(JSON.parse(t.ctx.fetch.mock.calls[0][1].body)).toEqual({races:[race]});
+ await t.run({races:[race]}); expect(JSON.parse(t.ctx.fetch.mock.calls[0][1].body).races).toEqual([race]);
 });
 test.each([413, 500])('HTTP %s never produces a success message', async status => {
  const json=jest.fn();const t=importer(jest.fn(async()=>({ok:false,status,json})));

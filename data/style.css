@@ -2698,3 +2698,12 @@ footer {
   .ota-line label { min-width: 0; width: 100%; }
   .ota-actions .ota-hint { flex-basis: 100%; }
 }
+
+/* Race history filters */
+.history-filter-panel { margin: 16px 0 8px; padding: 12px; border: 1px solid var(--secondary-color); border-radius: 8px; }
+.history-filter-panel summary { cursor: pointer; font-weight: 600; }
+.history-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 14px; }
+.history-filters label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.history-filters input, .history-filters select { box-sizing: border-box; width: 100%; min-width: 0; }
+.history-filter-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.race-import-date, #historyFilterStatus { font-size: 13px; color: var(--secondary-color); }

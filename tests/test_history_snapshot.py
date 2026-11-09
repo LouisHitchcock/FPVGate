@@ -15,6 +15,7 @@ class HistorySnapshotTests(unittest.TestCase):
         harness = r'''
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,7 +29,7 @@ struct RaceSession { unsigned timestamp;std::string name; };
 struct RaceHistory {
  std::vector<RaceSession>races;
  bool tryToJsonString(String&);
- bool tryToJsonSnapshot(std::shared_ptr<char>&,size_t&);
+ bool tryToJsonSnapshot(std::shared_ptr<char>&,size_t&,uint32_t=0,bool=false);
  void writeHistoryDocument(JsonDocument&)const;
  void writeRaceObject(JsonObject out,const RaceSession&r)const {
   out["timestamp"]=r.timestamp;out["name"]=r.name;
@@ -44,6 +45,14 @@ int main() {
  assert(length==original.size() && std::string(snapshot.get(),length)==original);
  JsonDocument parsed;assert(!deserializeJson(parsed,snapshot.get(),length));
  assert(parsed["races"].size()==50 && history.races.size()==51);
+ // Cursor pages include older records while keeping the legacy response capped.
+ RaceHistory pages;for(unsigned i=100;i>0;--i)pages.races.push_back({i,"pilot"});
+ std::shared_ptr<char> page;size_t count=0;assert(pages.tryToJsonSnapshot(page,count,0,true));
+ JsonDocument first;assert(!deserializeJson(first,page.get(),count));assert(first["races"].size()==50&&first["hasMore"].as<bool>()&&first["nextBefore"].as<unsigned>()==51);
+ pages.races.insert(pages.races.begin(),{101,"new during pagination"}); // cursor cannot shift or duplicate old records
+ assert(pages.tryToJsonSnapshot(page,count,51,true));JsonDocument second;assert(!deserializeJson(second,page.get(),count));
+ assert(second["races"].size()==50&&!second["hasMore"].as<bool>()&&second["races"][0]["timestamp"].as<unsigned>()==50&&second["races"][49]["timestamp"].as<unsigned>()==1);
+ assert(pages.tryToJsonSnapshot(page,count,1,true));JsonDocument empty;assert(!deserializeJson(empty,page.get(),count));assert(empty["races"].size()==0&&!empty["hasMore"].as<bool>());
  history.races.clear(); // immutable in-flight response must remain complete
  assert(std::string(snapshot.get(),length)==original);
  busy=true;assert(!history.tryToJsonSnapshot(snapshot,length));

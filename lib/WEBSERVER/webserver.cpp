@@ -2361,7 +2361,19 @@ EEPROM:\n";
     server.on("/races", HTTP_GET, [this](AsyncWebServerRequest *request) {
         std::shared_ptr<char> json;
         size_t length = 0;
-        if (!history->tryToJsonSnapshot(json, length)) {
+        const bool paged = request->hasParam("page") || request->hasParam("before");
+        uint32_t before = 0;
+        if (request->hasParam("before")) {
+            String value = request->getParam("before")->value();
+            char* end = nullptr;
+            unsigned long long cursor = strtoull(value.c_str(), &end, 10);
+            if (!value.length() || value[0] == '-' || !end || *end || cursor > UINT32_MAX) {
+                request->send(400, "application/json", "{\"error\":\"Invalid history cursor\"}");
+                return;
+            }
+            before = static_cast<uint32_t>(cursor);
+        }
+        if (!history->tryToJsonSnapshot(json, length, before, paged)) {
             auto* response = request->beginResponse(503, "application/json", "{\"error\":\"Race history is busy; retry shortly\"}");
             response->addHeader("Retry-After", "1");
             request->send(response);
@@ -2632,6 +2644,7 @@ EEPROM:\n";
                     JsonArray racesArray = doc["races"].to<JsonArray>();
                     JsonObject raceObj = racesArray.add<JsonObject>();
                     raceObj["timestamp"] = race.timestamp;
+                    raceObj["importedAt"] = race.importedAt;
                     raceObj["fastestLap"] = race.fastestLap;
                     raceObj["medianLap"] = race.medianLap;
                     raceObj["best3LapsTotal"] = race.best3LapsTotal;

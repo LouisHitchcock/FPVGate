@@ -5657,6 +5657,7 @@ function updateAnalysisSectionVisibility() {
 
 // Race History Functions
 let raceHistoryData = [];
+let historyLoadGeneration = 0;
 let currentDetailRace = null;
 
 function escapeHtml(input) {
@@ -5830,36 +5831,49 @@ function saveCurrentRace(options = {}) {
   return pendingRaceSavePromise;
 }
 
-function loadRaceHistory(onLoaded) {
-  return fetch("/races")
-    .then((response) => response.json())
-    .then((data) => {
-      raceHistoryData = data.races || [];
-      renderRaceHistory();
-      if (typeof onLoaded === "function") onLoaded(raceHistoryData);
-      return raceHistoryData;
-    })
-    .catch((error) => {
-      console.error("Error loading races:", error);
-      return null;
-    });
+async function loadRaceHistory(onLoaded) {
+  const generation = ++historyLoadGeneration;
+  const status = document.getElementById("historyFilterStatus");
+  if (status) status.textContent = i18n.t("history.loading");
+  try {
+    const races = [], seen = new Set();
+    let before = 0;
+    while (true) {
+      const response = await fetch("/races?page=1" + (before ? "&before=" + before : ""));
+      if (!response.ok) throw new Error(`History request failed: HTTP ${response.status}`);
+      const page = await response.json();
+      if (generation !== historyLoadGeneration) return null;
+      if (!Array.isArray(page.races)) throw new Error("Invalid history response");
+      for (const race of page.races) if (!seen.has(race.timestamp)) { seen.add(race.timestamp); races.push(race); }
+      if (!page.hasMore) break;
+      const next = Number(page.nextBefore);
+      if (!Number.isInteger(next) || next <= 0 || before && next >= before) throw new Error("Invalid history cursor");
+      before = next;
+    }
+    raceHistoryData = races;
+    renderRaceHistory();
+    if (typeof onLoaded === "function") onLoaded(raceHistoryData);
+    return raceHistoryData;
+  } catch (error) {
+    console.error("Error loading races:", error);
+    if (status && generation === historyLoadGeneration) status.textContent = i18n.t("history.load_error");
+    return null;
+  }
 }
 
 function renderRaceHistory() {
   const listContainer = document.getElementById("raceHistoryList");
 
-  if (raceHistoryData.length === 0) {
-    listContainer.innerHTML = `<p class="no-data">${i18n.t("history.no_data")}</p>`;
-    return;
-  }
-
-  let html = "";
-  raceHistoryData.forEach((race, index) => {
+  const visible = filterHistoryRows(raceHistoryData, readHistoryFilters());
+  const status = document.getElementById("historyFilterStatus");
+  if (status) status.textContent = i18n.t("history.matching", { n: visible.length, total: raceHistoryData.length });
+  let html = visible.length ? "" : `<p class="no-data">${i18n.t(raceHistoryData.length ? "history.no_matches" : "history.no_data")}</p>`;
+  visible.forEach(({race, index}) => {
     const date = new Date(race.timestamp * 1000);
     const dateStr = date.toLocaleDateString() + " " + date.toLocaleTimeString();
     const fastestLap = (race.fastestLap / 1000).toFixed(2);
     // Lap count should exclude Gate 1 (first entry)
-    const actualLapCount = race.lapTimes.length > 0 ? race.lapTimes.length - 1 : 0;
+    const actualLapCount = historyRaceLaps(race);
     // Calculate total race time (sum of all times)
     const totalTime = race.lapTimes.reduce((sum, t) => sum + t, 0) / 1000;
     const name = race.name || "";
@@ -5898,6 +5912,7 @@ function renderRaceHistory() {
             ${syncModeLabel ? '<span class="race-tag" style="background-color: var(--primary-color); margin-left: 4px;">' + syncModeLabel + "</span>" : ""}
             ${isMultiPilot ? '<span class="race-tag" style="background-color: var(--accent-color); margin-left: 4px;">' + i18n.t("history.pilot_count_badge", { n: pilotCount }) + '</span>' : ""}
             <div class="race-date">${dateStr}</div>
+            ${race.importedAt ? `<div class="race-import-date">${i18n.t("history.imported_on", { date: new Date(race.importedAt * 1000).toLocaleString() })}</div>` : ""}
             ${name ? '<div class="race-name">' + name + "</div>" : ""}
             ${pilotsDisplay}
             ${freqDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_channel", { n: freqDisplay }) + "</div>" : ""}
@@ -5944,7 +5959,7 @@ function renderRaceHistory() {
       // Its race is gone, or nothing was open. Park it at the end, hidden.
       existingRaceDetails.style.display = "none";
       listContainer.appendChild(existingRaceDetails);
-      if (wasOpen) currentDetailRace = null;
+      if (wasOpen) closeRaceDetails();
     }
   }
   
@@ -6860,8 +6875,18 @@ function renderDetailFastestRound() {
   document.getElementById("detailContent").innerHTML = html;
 }
 
-function downloadRaces() {
-  window.open("/races/download", "_blank");
+async function downloadRaces() {
+  const races = await loadRaceHistory();
+  if (!races) return;
+  // Assemble the full backup in the browser, keeping every gate response bounded.
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ races })], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "races.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function downloadSingleRace(timestamp) {
@@ -6885,11 +6910,12 @@ function importRaces(input) {
       validFile = true;
       // Keep a large backup from becoming one oversized request. Preserve each
       // complete race (including every pilot) and stop at the first failure.
+      const importedAt = Math.floor(Date.now() / 1000);
       for (const race of json.races) {
         const response = await fetch("/races/upload", {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ races: [race] }),
+          body: JSON.stringify({ races: [race], importedAt }),
         });
         if (!response.ok) throw new Error(`Race import rejected: HTTP ${response.status}`);
         const result = await response.json();

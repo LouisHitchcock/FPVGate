@@ -29,6 +29,7 @@ struct PilotData {
 struct RaceSession {
     uint32_t minLapMs = 2000;
     uint32_t timestamp;
+    uint32_t importedAt = 0; // Local import time; race timestamp remains unchanged.
     std::vector<uint32_t> lapTimes;  // Legacy: single pilot lap times
     uint32_t fastestLap;
     uint32_t medianLap;
@@ -67,7 +68,7 @@ class RaceHistory {
     bool clearAll();
     String toJsonString();
     bool tryToJsonString(String& output);
-    bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length);
+    bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, uint32_t before = 0, bool paged = false);
     bool fromJsonString(const String& json);
     bool fromJson(JsonVariant json);
     const std::vector<RaceSession>& getRaces();
