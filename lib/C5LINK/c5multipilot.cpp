@@ -1,4 +1,7 @@
 #include "c5multipilot.h"
+#ifdef ARDUINO_ARCH_ESP32
+#include <esp_timer.h>
+#endif
 #ifdef C5_TIMING_TRACE
 #include <esp_heap_caps.h>
 #endif
@@ -87,6 +90,25 @@ void C5MultiPilot::update(uint32_t nowMs) {
             if ((manual >> i) & 1) crossing(i, nowUs, true);
     }
 
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+    bool filterRosterChanged = false;
+    for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i)
+        filterRosterChanged |= filterFrequency_[i] != config_->getC5Frequency(i);
+    if (filterRosterChanged) {
+        filterSettleUntilMs_ = nowMs + 100u; // native USB topology-settle interval
+        for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
+            levelFilter_[i].reset();
+            const uint8_t nadir=filterFrequency_[i] == config_->getC5Frequency(i) ? admission_[i].nadir : 254;
+            admission_[i]=Admission{};
+            admission_[i].nadir=nadir;
+            filterFrequency_[i] = config_->getC5Frequency(i);
+            filtered_[i] = 0;
+            inside_[i] = false;
+            belowUs_[i] = 0;
+        }
+        filterSampledMask_ = 0;
+    }
+#endif
     for (uint8_t i = 0; i < C5Link::C5_MAX_PILOTS; ++i) {
         if (!config_->getC5Frequency(i)) {   // slot switched off
             filtered_[i] = 0;
@@ -99,31 +121,110 @@ void C5MultiPilot::update(uint32_t nowMs) {
         uint16_t value = 0;
         uint32_t sampleUs = 0;
         while (link_->takeSample(i, value, sampleUs)) {
-#ifdef C5_TIMING_DIAGNOSTIC_NO_S3_EMA
+            bool showSample=true;
+            bool captureSample=true;
+            uint16_t detectionValue=0;
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+            // The link already mapped the C5 capture clock to the S3 clock.
+            // Filter after that mapping; do not change UART packet timing.
+            const uint64_t now = (uint64_t)esp_timer_get_time();
+            const uint32_t ageUs = (uint32_t)now - sampleUs;
+            const uint32_t inputMs = (uint32_t)((now - ageUs) / 1000u);
+            if ((filterSampledMask_ & (1u << i)) && inputMs - filterInputMs_[i] > 100) {
+                if (inside_[i] && belowUs_[i]) endPass(i);
+                inside_[i] = false;
+                belowUs_[i] = 0;
+                levelFilter_[i].reset();
+                const uint8_t nadir=admission_[i].nadir;
+                admission_[i]=Admission{};
+                admission_[i].nadir=nadir;
+            }
+            filterSampledMask_ |= (uint8_t)(1u << i);
+            filterInputMs_[i] = inputMs;
+            uint32_t filteredMs = inputMs;
+            if (!levelFilter_[i].push(value, filteredMs, C5_SHARED_MEDIAN_MS)) continue;
+            // Keep the sample's fractional millisecond, with no window delay
+            // added to pass timestamps. Unsigned subtraction handles wrap.
+            sampleUs -= (inputMs - filteredMs) * 1000u;
+            detectionValue=value;
+            Admission& a=admission_[i];
+            const uint8_t level=(uint8_t)(value/4u);
+            const bool settling=(int32_t)(filteredMs-filterSettleUntilMs_)<0;
+            if (settling) {
+                a.held=false;a.jumping=false;inside_[i]=false;belowUs_[i]=0;
+                captureSample=false;
+                filtered_[i]=value;
+            } else {
+                if (level<a.nadir) a.nadir=level;
+                const bool validGate=enterHi>exitHi;
+                const bool wasJumping=a.jumping;
+                const bool confirmed=rhusb::advanceJump(a,level,filteredMs,(uint8_t)(enterHi/4u),jumpConfig_);
+                if (!wasJumping && a.jumping) a.jumpFull.start(value,sampleUs);
+                else if (wasJumping) a.jumpFull.add(value,sampleUs);
+                auto publishHeld=[&](const C5Peak& held) {
+                    if (held.value>peakHold_[i]) peakHold_[i]=held.value;
+                    portENTER_CRITICAL(&lapMux_);
+                    rhPeak_[i].merge(held);
+                    if (held.value>capturePeak_[i]) capturePeak_[i]=held.value;
+                    portEXIT_CRITICAL(&lapMux_);
+                };
+                if (confirmed) publishHeld(a.jumpFull);
+                if (!validGate) { a.held=false;a.jumping=false;inside_[i]=false;belowUs_[i]=0; }
+                if (validGate && !inside_[i] && !a.held && a.jumping && value>=enterHi) {
+                    a.held=true;
+                    a.keptPeak=peak_[i];
+                    peak_[i].start(value,sampleUs);
+                }
+                if (a.held) {
+                    peak_[i].add(value,sampleUs);
+                    if (value<exitHi) {
+                        a.held=false;
+                        a.jumpDropped=true;
+                        peak_[i]=a.keptPeak;
+                    } else if (!a.jumping) {
+                        a.held=false;
+                        inside_[i]=true;
+                        belowUs_[i]=0;
+                        if (a.jumpDropped) publishHeld(peak_[i]);
+                    }
+                }
+                if (a.held || (a.jumping && !inside_[i])) continue;
+                showSample=!a.jumping;
+                if (showSample) filtered_[i]=value;
+            } // settled admission
+#elif defined(C5_TIMING_DIAGNOSTIC_NO_S3_EMA)
             // Bench-only isolation of the S3's additional smoothing stage.
             // Never enabled by a shipping target.
             filtered_[i] = value;
 #else
             filtered_[i] = (uint16_t)(((uint32_t)filtered_[i] * 3 + value) / 4);
 #endif
-            if (filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
-            portENTER_CRITICAL(&lapMux_);
-#ifdef C5_TIMING_TRACE
-            if (traceActive_ && i == tracePilot_) {
-                if (!traceCount_) traceFirstUs_ = sampleUs;
-                const uint32_t elapsed = sampleUs - traceFirstUs_;
-                if (elapsed >= traceDurationUs_) traceActive_ = false;
-                else if (traceCount_ < TRACE_CAPACITY)
-                    trace_[traceCount_++] = {elapsed, filtered_[i], value};
-                else { traceFull_ = true; traceActive_ = false; }
-            }
+#if !defined(C5_SHARED_MEDIAN_MS) || C5_SHARED_MEDIAN_MS <= 0
+            detectionValue=filtered_[i];
 #endif
-            rhPeak_[i].add(filtered_[i], sampleUs);
-            if (filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
-            portEXIT_CRITICAL(&lapMux_);
-            lastSampleUs_[i] = sampleUs;
+            if (showSample) {
+                if (captureSample && filtered_[i] > peakHold_[i]) peakHold_[i] = filtered_[i];
+                portENTER_CRITICAL(&lapMux_);
+#ifdef C5_TIMING_TRACE
+                if (traceActive_ && i == tracePilot_) {
+                    if (!traceCount_) traceFirstUs_ = sampleUs;
+                    const uint32_t elapsed = sampleUs - traceFirstUs_;
+                    if (elapsed >= traceDurationUs_) traceActive_ = false;
+                    else if (traceCount_ < TRACE_CAPACITY)
+                        trace_[traceCount_++] = {elapsed, filtered_[i], value};
+                    else { traceFull_ = true; traceActive_ = false; }
+                }
+#endif
+                rhPeak_[i].add(filtered_[i], sampleUs);
+                if (captureSample && filtered_[i] > capturePeak_[i]) capturePeak_[i] = filtered_[i];
+                portEXIT_CRITICAL(&lapMux_);
+                lastSampleUs_[i] = sampleUs;
+            }
             if (!running_ && !passStream_) continue;
-            const uint16_t f = filtered_[i];
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+            if (settling || enterHi<=exitHi) continue;
+#endif
+            const uint16_t f = detectionValue;
             if (!inside_[i]) {
                 if (f >= enterHi) {
                     inside_[i] = true;
@@ -138,7 +239,11 @@ void C5MultiPilot::update(uint32_t nowMs) {
                 else if (sampleUs - belowUs_[i] >= PASS_MERGE_MS * 1000u) endPass(i);
                 continue;
             }
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+            if (f < exitHi) belowUs_[i] = sampleUs | 1u;    // same strict Exit comparison as native USB
+#else
             if (f <= exitHi) belowUs_[i] = sampleUs | 1u;   // never 0, which means "above Exit"
+#endif
         }
         // Samples stopped (slot retuned, link dropped): finish a pass that was waiting to end.
         if (inside_[i] && belowUs_[i] && micros() - belowUs_[i] >= PASS_MERGE_MS * 1000u) endPass(i);

@@ -1943,7 +1943,13 @@ EEPROM:\n";
         doc["board"] = FPVGATE_BOARD_ID;
         doc["radio"] = conf->getReceiverRadio();
         doc["rssiMax"] = 255;
-        if (c5) doc["rawMax"] = 1023;   // rhRssi "raw" and rhPass "rawPeak"; levels are raw / 4
+        if (c5) doc["rawMax"] = 1023;
+        if (c5) {
+            JsonObject filter = doc["filter"].to<JsonObject>();
+            filter["kind"] = C5MultiPilot::medianWindowMs() ? "shared-median" : "legacy-ema";
+            filter["medianMs"] = C5MultiPilot::medianWindowMs();
+            filter["extraHostEma"] = C5MultiPilot::medianWindowMs() == 0;
+        }   // rhRssi "raw" and rhPass "rawPeak"; levels are raw / 4
         doc["minMhz"] = c5 ? C5_MIN_MHZ : 5645;
         doc["maxMhz"] = c5 ? C5_MAX_MHZ : 5945;
         JsonArray nodes = doc["nodes"].to<JsonArray>();
