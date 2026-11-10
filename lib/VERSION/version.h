@@ -4,7 +4,7 @@
 // FPVGate Firmware Version
 #define FPVGATE_VERSION "1.9.0"
 #if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
-#define FPVGATE_VERSION_STAGE "rc.5-c5mk130-parity-8d99548"
+#define FPVGATE_VERSION_STAGE "rc.5-c5mk130-parity-8d99548-agefix"
 #elif defined(C5_TIMING_DIAGNOSTIC_NO_S3_EMA)
 #define FPVGATE_VERSION_STAGE "rc.5-ema-probe"
 #else

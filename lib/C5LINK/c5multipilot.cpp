@@ -128,7 +128,11 @@ void C5MultiPilot::update(uint32_t nowMs) {
             // The link already mapped the C5 capture clock to the S3 clock.
             // Filter after that mapping; do not change UART packet timing.
             const uint64_t now = (uint64_t)esp_timer_get_time();
-            const uint32_t ageUs = (uint32_t)now - sampleUs;
+            // Scan records map the cycle start to the receipt time, so later
+            // slots can be stamped up to a cycle ahead of now. Treat those as
+            // age 0; an unsigned wrap here reset the filter on every sample.
+            const int32_t signedAgeUs = (int32_t)((uint32_t)now - sampleUs);
+            const uint32_t ageUs = signedAgeUs > 0 ? (uint32_t)signedAgeUs : 0u;
             const uint32_t inputMs = (uint32_t)((now - ageUs) / 1000u);
             if ((filterSampledMask_ & (1u << i)) && inputMs - filterInputMs_[i] > 100) {
                 if (inside_[i] && belowUs_[i]) endPass(i);
