@@ -4,9 +4,9 @@
 
 ## Wi-Fi web loading
 
-File downloads now use a bounded two-segment TCP send window, with at most two file responses admitted at once. Waiting file responses defer both headers and body, then resume without blocking API or live RSSI streams. Cancellation releases admission, and empty deferred polls no longer consume send credit. The existing low-memory guard remains.
+File downloads now use a bounded two-segment TCP send window, with one file response admitted at a time. Control/API requests retain the original one-segment budget. Waiting file responses defer both headers and body, then resume without blocking API or live RSSI streams. Cancellation releases admission, and empty deferred polls no longer consume send credit. Root/captive-portal file staging is also reduced to 512 bytes, matching static assets. The existing low-memory guard remains.
 
-On the tested standard C5MK AIO, the compressed script's sequential median improved from about 8.2 s to 1.45 s. All 12 home-page CSS/JS dependencies downloaded in about 3.1 s. Six parallel downloads with live C5 RSSI, client cancellations and six subsequent retries passed without new link/UART errors. These are short bench results on one board/client, not a universal performance guarantee, browser-render test or soak pass. The separate operator's exact Alpha-5 outage is not conclusively diagnosed.
+Validation results will be recorded against the final built images before publication. Hardware coverage is limited to short bench tests on one standard C5MK AIO and one Windows Wi-Fi client. The separate operator's exact Alpha-5 outage is not conclusively diagnosed.
 
 ## Included RC work since Alpha-5
 
@@ -22,12 +22,12 @@ On the tested standard C5MK AIO, the compressed script's sequential median impro
 
 The package contains firmware, matching LittleFS, bootloader, partitions and OTA-selection initialization for:
 
-- FPVGate C5MK AIO ? 8 MB
-- FPVGate AIO ? 8 MB
-- FPVGate Solo ? 8 MB
-- Seeed XIAO ESP32S3 ? 8 MB
-- ESP32-S3 DevKitC-1 ? 8 MB
-- Waveshare ESP32-S3-ETH ? 16 MB
+- FPVGate C5MK AIO - 8 MB
+- FPVGate AIO - 8 MB
+- FPVGate Solo - 8 MB
+- Seeed XIAO ESP32S3 - 8 MB
+- ESP32-S3 DevKitC-1 - 8 MB
+- Waveshare ESP32-S3-ETH - 16 MB
 
 Only the standard XIAO C5MK AIO has the Wi-Fi-fix hardware checks described above. Other board images are build/packaging checked; do not infer equivalent hardware qualification.
 

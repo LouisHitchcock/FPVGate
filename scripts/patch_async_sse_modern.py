@@ -223,6 +223,15 @@ def patch_file_admission(build_env):
     if before in text: text = text.replace(before, after, 1)
     elif after not in text: raise RuntimeError('Response credit layout changed; review deferred polls')
     if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
+    # Root/captive-portal responses open their own files after middleware.
+    # Bound those stdio buffers too, before the gzip ETag read allocates 4 KB.
+    for statement in ['_content = fs.open(path, fs::FileOpenMode::read);',
+                      '_content = fs.open(gzPath, fs::FileOpenMode::read);']:
+        replacement = statement + '\n  _content.setBufferSize(512); // FPVGate bounded file staging'
+        if replacement not in text:
+            if text.count(statement) != 1: raise RuntimeError('File open layout changed; review staging buffer')
+            text = text.replace(statement, replacement, 1)
+    if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
     print('patch_async_sse_modern: verified deferred whole-file responses and poll credit accounting')
 
 

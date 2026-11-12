@@ -9,14 +9,13 @@
 int main() {
     {
         std::unique_ptr<FpvFileTransferSlot> first(new FpvFileTransferSlot);
-        FpvFileTransferSlot second, waiting;
+        FpvFileTransferSlot waiting;
         assert(first->acquire());
         assert(first->acquire());
-        assert(second.acquire());
         assert(!waiting.acquire());
         { FpvFileTransferSlot cancelled; assert(!cancelled.acquire()); }
         assert(!waiting.acquire());
-        first.reset();  // Cancelling an active response admits a waiting one.
+        first.reset();
         assert(waiting.acquire());
     }
     std::atomic<unsigned> simultaneous{0};
@@ -25,13 +24,13 @@ int main() {
         for (unsigned j = 0; j < 10000; ++j) {
             FpvFileTransferSlot slot;
             while (!slot.acquire()) std::this_thread::yield();
-            assert(++simultaneous <= 2);
+            assert(++simultaneous <= FpvFileTransferSlot::capacity);
             std::this_thread::yield();
             --simultaneous;
         }
     });
     for (auto& worker : workers) worker.join();
     FpvFileTransferSlot first, second, third;
-    assert(first.acquire() && second.acquire() && !third.acquire());
+    assert(first.acquire() && !second.acquire() && !third.acquire());
     std::puts("PASS: queued/active cancellation, idempotent admission, 80000 concurrent transfers, no leaked slots");
 }

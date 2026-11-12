@@ -5,6 +5,7 @@
 // Ownership follows the response, so cancellation releases an admitted slot.
 class FpvFileTransferSlot {
 public:
+    static constexpr unsigned capacity = 1;
     FpvFileTransferSlot() = default;
     FpvFileTransferSlot(const FpvFileTransferSlot&) = delete;
     FpvFileTransferSlot& operator=(const FpvFileTransferSlot&) = delete;
@@ -16,7 +17,7 @@ public:
     bool acquire() {
         if (held_) return true;
         unsigned current = active().load();
-        while (current < 2) {
+        while (current < capacity) {
             if (active().compare_exchange_weak(current, current + 1)) {
                 held_ = true;
                 return true;

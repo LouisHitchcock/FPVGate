@@ -128,28 +128,30 @@ static volatile uint32_t busyRefusals = 0;
 // is held three times over until acknowledged: the web server's buffer,
 // lwIP's copy, and over Wi-Fi the driver's frames. ~22 KB per file in
 // flight, so a browser's six parallel requests ran the XIAO out of heap.
-// Two segments keeps it to about half without slowing anything: a receiver
-// acknowledges every second segment at once, but waits (up to 200 ms on
-// Windows) to acknowledge a single one. Only sending is limited; uploads
-// (OTA, C5 firmware, events) are unaffected.
+// Only admitted web assets use two segments, avoiding the delayed-ACK pause
+// on each single-segment send. Control/API requests retain their original
+// one-segment budget: a burst of startup polling must not inflate all TCP
+// buffers at once. Uploads (OTA, C5 firmware, events) are unaffected.
 struct SendBufferCap {
     struct tcpip_api_call_data call;
     AsyncClient *client;
+    uint16_t limit;
 };
 
 static err_t applySendBufferCap(struct tcpip_api_call_data *data) {
     // On lwIP's thread, where the connection can't change under us.
     auto *cap = reinterpret_cast<SendBufferCap *>(data);
     tcp_pcb *pcb = cap->client->pcb();
-    if (pcb && pcb->snd_buf > WEB_TCP_SEND_BUFFER) pcb->snd_buf = WEB_TCP_SEND_BUFFER;
+    if (pcb && pcb->snd_buf > cap->limit) pcb->snd_buf = cap->limit;
     return ERR_OK;
 }
 
-static void capSendBuffer(AsyncWebServerRequest *request) {
+static void capSendBuffer(AsyncWebServerRequest *request, uint16_t limit) {
     AsyncClient *client = request->client();
     if (!client || !client->pcb()) return;
     SendBufferCap cap = {};
     cap.client = client;
+    cap.limit = limit;
     tcpip_api_call(applySendBufferCap, &cap.call);
 }
 
@@ -1088,7 +1090,10 @@ void Webserver::startServices() {
         // they back up in AsyncEventSource's queue (up to 32 copies each),
         // which costs more heap than the cap saves.
         const bool stream = request->url().endsWith("/events");
-        if (!stream) capSendBuffer(request);
+        const String& url = request->url();
+        const bool webAsset = request->method() == HTTP_GET && !url.startsWith("/api/") &&
+            (url == "/" || url.lastIndexOf('.') > url.lastIndexOf('/'));
+        if (!stream) capSendBuffer(request, webAsset ? WEB_TCP_FILE_SEND_BUFFER : WEB_TCP_SEND_BUFFER);
         // serveStatic has opened the file but not read it yet. Arduino gives
         // every file a 4 KB stdio buffer; with the send cap above, each read
         // is at most two segments, so 512 bytes (the LittleFS cache) loses
