@@ -4,7 +4,7 @@
 
 ## Wi-Fi web loading
 
-File downloads now use a bounded two-segment TCP send window, with at most two file-response bodies admitted at once. Remaining file responses wait and resume without blocking API or live RSSI streams. Cancellation releases admission, and empty deferred polls no longer consume send credit. The existing low-memory guard remains.
+File downloads now use a bounded two-segment TCP send window, with at most two file responses admitted at once. Waiting file responses defer both headers and body, then resume without blocking API or live RSSI streams. Cancellation releases admission, and empty deferred polls no longer consume send credit. The existing low-memory guard remains.
 
 On the tested standard C5MK AIO, the compressed script's sequential median improved from about 8.2 s to 1.45 s. All 12 home-page CSS/JS dependencies downloaded in about 3.1 s. Six parallel downloads with live C5 RSSI, client cancellations and six subsequent retries passed without new link/UART errors. These are short bench results on one board/client, not a universal performance guarantee, browser-render test or soak pass. The separate operator's exact Alpha-5 outage is not conclusively diagnosed.
 

@@ -176,19 +176,44 @@ def patch_event_memory(build_env):
 
 def patch_file_admission(build_env):
     from pathlib import Path
+    import re
     src = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src'
-    header = src / 'WebResponseImpl.h'
-    source = src / 'WebResponses.cpp'
+    header, source = src / 'WebResponseImpl.h', src / 'WebResponses.cpp'
     support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/file_transfer_slots.h').as_posix()
     text = header.read_text(encoding='utf-8')
+    text = re.sub(r'#include "[^"]*/scripts/support/file_transfer_slots\.h"', '#include "' + support + '"', text)
     before = 'class AsyncFileResponse : public AsyncAbstractResponse {'
     if 'FpvFileTransferSlot _fpvTransferSlot;' not in text:
         if text.count(before) != 1 or '  File _content;' not in text:
             raise RuntimeError('File response layout changed; review admission ownership')
         text = text.replace(before, '#include "' + support + '"\n' + before, 1)
         text = text.replace('  File _content;', '  FpvFileTransferSlot _fpvTransferSlot;\n  File _content;', 1)
+    before = '  virtual bool _sourceValid() const {\n    return false;'
+    after = '  virtual bool _fpvReadyToSend() { return true; }\n' + before
+    if '_fpvReadyToSend() { return true; }' not in text:
+        if text.count(before) != 1: raise RuntimeError('Abstract response readiness layout changed')
+        text = text.replace(before, after, 1)
+    before = '  bool _sourceValid() const final {\n    return !!(_content);'
+    after = '  bool _fpvReadyToSend() final { return _fpvTransferSlot.acquire(); }\n' + before
+    file_begin = text.index('class AsyncFileResponse : public AsyncAbstractResponse {')
+    file_end = text.index('class AsyncStreamResponse :', file_begin)
+    file_block = text[file_begin:file_end]
+    if '_fpvReadyToSend() final' not in file_block:
+        if file_block.count(before) != 1: raise RuntimeError('File response readiness layout changed')
+        file_block = file_block.replace(before, after, 1)
+        text = text[:file_begin] + file_block + text[file_end:]
     if text != header.read_text(encoding='utf-8'): header.write_text(text, encoding='utf-8')
     text = source.read_text(encoding='utf-8')
+    before = 'void AsyncAbstractResponse::_respond(AsyncWebServerRequest *request) {\n'
+    after = before + '  if (!_fpvReadyToSend()) return; // Defer headers as well as body while queued.\n'
+    if after not in text:
+        if text.count(before) != 1: raise RuntimeError('Response start layout changed')
+        text = text.replace(before, after, 1)
+    before = 'size_t AsyncAbstractResponse::write_send_buffs(AsyncWebServerRequest *request, size_t len, uint32_t time) {\n  (void)time;'
+    after = before + '\n  if (!_fpvReadyToSend()) return 0;\n  if (_state == RESPONSE_SETUP) { _respond(request); return 0; }'
+    if after not in text:
+        if text.count(before) != 1: raise RuntimeError('Deferred response poll layout changed')
+        text = text.replace(before, after, 1)
     before = 'size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len) {\n  return _content.read(data, len);'
     after = 'size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len) {\n  if (!_fpvTransferSlot.acquire()) return RESPONSE_TRY_AGAIN;\n  return _content.read(data, len);'
     if before in text: text = text.replace(before, after, 1)
@@ -198,7 +223,7 @@ def patch_file_admission(build_env):
     if before in text: text = text.replace(before, after, 1)
     elif after not in text: raise RuntimeError('Response credit layout changed; review deferred polls')
     if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
-    print('patch_async_sse_modern: verified two active file transfers and deferred-poll credit accounting')
+    print('patch_async_sse_modern: verified deferred whole-file responses and poll credit accounting')
 
 
 try:
