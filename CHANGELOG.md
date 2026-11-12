@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0-alpha-6
+
+Repackages the current RC firmware as a testing alpha with bounded, queued Wi-Fi file transfers, cancellation-safe admission and deferred-poll credit accounting. Includes the RC race-history/import, diagnostics, localization, ELRS race-control and C5MK shared-median fixes. See release/v1.9.0-alpha-6/RELEASE_NOTES.md for board scope and validation limits.
+
+
 All notable changes to FPVGate will be documented in this file.
 ## [1.9.0-alpha-5] - 2026-10-24
 

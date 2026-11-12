@@ -101,6 +101,8 @@ def patch_response_memory(build_env):
     source = src / 'WebResponses.cpp'
     support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/response_buffer.h').as_posix()
     text = header.read_text(encoding='utf-8')
+    import re
+    text = re.sub(r'#include "[^"]*/scripts/support/response_buffer\.h"', '#include "' + support + '"', text)
     old_size = '#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS * 2'
     new_size = '#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS // FPVGate one-segment response window'
     if old_size in text: text = text.replace(old_size, new_size, 1)
@@ -172,6 +174,33 @@ def patch_event_memory(build_env):
     print('patch_async_sse_modern: verified external event bytes')
 
 
+def patch_file_admission(build_env):
+    from pathlib import Path
+    src = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src'
+    header = src / 'WebResponseImpl.h'
+    source = src / 'WebResponses.cpp'
+    support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/file_transfer_slots.h').as_posix()
+    text = header.read_text(encoding='utf-8')
+    before = 'class AsyncFileResponse : public AsyncAbstractResponse {'
+    if 'FpvFileTransferSlot _fpvTransferSlot;' not in text:
+        if text.count(before) != 1 or '  File _content;' not in text:
+            raise RuntimeError('File response layout changed; review admission ownership')
+        text = text.replace(before, '#include "' + support + '"\n' + before, 1)
+        text = text.replace('  File _content;', '  FpvFileTransferSlot _fpvTransferSlot;\n  File _content;', 1)
+    if text != header.read_text(encoding='utf-8'): header.write_text(text, encoding='utf-8')
+    text = source.read_text(encoding='utf-8')
+    before = 'size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len) {\n  return _content.read(data, len);'
+    after = 'size_t AsyncFileResponse::_fillBuffer(uint8_t *data, size_t len) {\n  if (!_fpvTransferSlot.acquire()) return RESPONSE_TRY_AGAIN;\n  return _content.read(data, len);'
+    if before in text: text = text.replace(before, after, 1)
+    elif after not in text: raise RuntimeError('File fill callback changed; review deferred reads')
+    before = '    _in_flight += payloadlen;\n    --_in_flight_credit;  // take a credit'
+    after = '    if (payloadlen) { // A deferred read sends no bytes and consumes no credit.\n      _in_flight += payloadlen;\n      --_in_flight_credit;\n    }'
+    if before in text: text = text.replace(before, after, 1)
+    elif after not in text: raise RuntimeError('Response credit layout changed; review deferred polls')
+    if text != source.read_text(encoding='utf-8'): source.write_text(text, encoding='utf-8')
+    print('patch_async_sse_modern: verified two active file transfers and deferred-poll credit accounting')
+
+
 try:
     Import('env')  # noqa: F821
 except NameError:
@@ -184,6 +213,7 @@ if env is not None:
         builder = _configure_before_sse_patch()
         patch_dependency(build_env)
         patch_response_memory(build_env)
+        patch_file_admission(build_env)
         patch_json_request_memory(build_env)
         patch_event_memory(build_env)
         return builder
