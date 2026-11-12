@@ -144,7 +144,7 @@ test('switching from C5 to another receiver preserves browser stopping and savin
     hasRaceLaps: () => true, saveCurrentRace: jest.fn(async () => 123),
     updateDistanceDisplay: () => {}, fetch: jest.fn(async () => ({ json: async () => ({ status: 'OK' }) })),
   });
-  vm.runInContext(extract('stopRace'), p);
+  vm.runInContext('var raceStopAnnouncementQueued = false;\n' + extract('announceRaceStoppedOnce') + '\n' + extract('stopRace'), p);
   await p.stopRace();
   expect(p.saveCurrentRace).toHaveBeenCalledTimes(1);
   expect(p.currentRaceSessionTimestamp).toBeNull();

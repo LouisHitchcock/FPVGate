@@ -611,10 +611,21 @@ function setupWiFiEvents() {
   }
 }
 
+// A local stop is echoed by the gate's stopped event. Announce the transition
+// once, without clearing speech queued after the first announcement.
+var raceStopAnnouncementQueued = false;
+function announceRaceStoppedOnce() {
+  if (raceStopAnnouncementQueued) return;
+  raceStopAnnouncementQueued = true;
+  if (audioAnnouncer) audioAnnouncer.clearQueue();
+  queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
+}
+
 // Handle race state changes from SSE (for slave mode sync)
 function handleRaceStateEvent(state) {
   console.log("[Sync] Handling race state:", state);
   if (state === "starting") {
+    raceStopAnnouncementQueued = false;
     // ELRS starts the device-side countdown.  Mirror only its speech here;
     // do not call startRace() or send a second /timer/start command.
     window.elrsRemoteStarting = true;
@@ -628,6 +639,7 @@ function handleRaceStateEvent(state) {
   }
   
   if (state === "started") {
+    raceStopAnnouncementQueued = false;
     if (window.elrsRemoteStarting) {
       window.elrsRemoteStarting = false;
       beep(1, 1, "square");
@@ -660,8 +672,7 @@ function handleRaceStateEvent(state) {
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race stopped via SSE");
-    if (audioAnnouncer) audioAnnouncer.clearQueue();
-    queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
+    announceRaceStoppedOnce();
     if (c5ReceiverSelected()) {
       completeC5RaceInBrowser().catch((err) => { console.error("[C5] Save status:", err); alert(err.message); });
     }
@@ -3854,6 +3865,8 @@ async function startRace() {
     return;
   }
 
+  raceStopAnnouncementQueued = false;
+
   // Always read the current dropdown value at start, so a just-changed mode
   // applies immediately even before autoSaveConfig() has synced to the device.
   var _rcEl = document.getElementById("raceCountdownMode");
@@ -3991,11 +4004,7 @@ function stopRace() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  // Clear any queued audio to prevent race start sounds
-  if (audioAnnouncer) {
-    audioAnnouncer.clearQueue();
-  }
-  queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
+  announceRaceStoppedOnce();
   clearInterval(timerInterval);
   timer.innerHTML = i18n.t("race.timer_default");
   
