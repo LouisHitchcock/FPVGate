@@ -6,7 +6,7 @@
 
 File downloads now use a bounded two-segment TCP send window, with one file response admitted at a time. Control/API requests retain the original one-segment budget. Waiting file responses defer both headers and body, then resume without blocking API or live RSSI streams. Cancellation releases admission, and empty deferred polls no longer consume send credit. Root/captive-portal file staging is also reduced to 512 bytes, matching static assets. The existing low-memory guard remains.
 
-Validation results will be recorded against the final built images before publication. Hardware coverage is limited to short bench tests on one standard C5MK AIO and one Windows Wi-Fi client. The separate operator's exact Alpha-5 outage is not conclusively diagnosed.
+The exact CI-built C5MK AIO application and matching filesystem booted, retained settings and the separate C5 firmware, and downloaded all 12 home-page CSS/JS dependencies in 8.7 s (minimum free internal heap 39,504 bytes). An equivalent development build completed that asset check in 3.7 s. These short tests use one standard C5MK AIO and one Windows Wi-Fi client; timings vary. Full browser rendering, repeated cancellation/reconnection recovery and long-duration Wi-Fi soak are not qualified. Earlier fix candidates failed load/retry tests and are not the delivered images. The separate operator's exact Alpha-5 outage is not conclusively diagnosed.
 
 ## Included RC work since Alpha-5
 
