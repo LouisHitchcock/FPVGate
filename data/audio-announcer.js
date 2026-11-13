@@ -55,6 +55,20 @@ class AudioAnnouncer {
         this.maxDecodedBytes = 16 * 1024 * 1024;
         this.lapPreload = null;
         this.decodeContext = null;
+        this.lapPackReady = false;
+        this.racePackMode = null;
+        this.preloadTimer = null;
+        this.userActivated = false;
+        if (typeof document !== 'undefined') {
+            const activate = () => {
+                if (this.userActivated) return;
+                this.userActivated = true;
+                if (this.audioEnabled) this.unlockAudioContextMobile();
+                this.requestAudioPreload();
+            };
+            document.addEventListener('pointerdown', activate, {once:true, passive:true});
+            document.addEventListener('keydown', activate, {once:true});
+        }
         
         // Single reusable Audio element for mobile compatibility
         // Mobile browsers restrict creating new Audio() without user gesture
@@ -204,6 +218,40 @@ class AudioAnnouncer {
         }
     }
 
+    requestAudioPreload() {
+        // Never add SD traffic to a cold page load or start browser audio without
+        // a gesture. Give the UI requests time to settle after interaction.
+        if (!this.audioEnabled || !this.userActivated || this.preloadTimer) return;
+        this.preloadTimer = setTimeout(async () => {
+            this.preloadTimer = null;
+            if (!this.audioEnabled || !this.userActivated) return;
+            if (window.fpvGateLoading) { this.requestAudioPreload(); return; }
+            await this.preloadRaceAudio();
+        }, 10000);
+    }
+
+    async waitForAudioBudget(generation) {
+        while (this.audioEnabled && generation === this.audioSourceGeneration) {
+            let available = false;
+            if (!(typeof raceRunning !== 'undefined' && raceRunning)) {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+                try {
+                    const response = await fetch('/api/system/info', {signal:controller.signal});
+                    if (response.ok) {
+                        const state = await response.json();
+                        available = state.heapFree >= 55000 && state.heapLargest >= 16000 && state.requestsNow <= 4;
+                    } else if (response.body) await response.body.cancel();
+                } catch (_) {}
+                finally { clearTimeout(timeout); }
+            }
+            if (available) return true;
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_paused') : 'Recorded voice preparation paused while the gate is busy. Browser voice remains available.');
+            await this.sleep(5000);
+        }
+        return false;
+    }
+
     async preloadRaceAudio() {
         const primary = this.getPrimaryVoiceDirectory();
         if (!primary) return;
@@ -211,6 +259,7 @@ class AudioAnnouncer {
         // Sequential downloads avoid flooding the gate during page startup.
         for (const file of ['gate_1.mp3', 'race_complete.mp3', 'race_stopped.mp3']) {
             if (generation !== this.audioSourceGeneration) return;
+            if (typeof document !== 'undefined' && !await this.waitForAudioBudget(generation)) return;
             await this.resolveAudioPath(`${primary}/${file}`);
         }
         if (!this.lapPreload && (window.OfflineAudioContext || window.webkitOfflineAudioContext)) {
@@ -230,13 +279,19 @@ class AudioAnnouncer {
         this.decodedClips.clear();
         this.decodedLoads.clear();
         this.decodedBytes = 0;
+        this.lapPackReady = false;
         this.lapPreload = null;
+        if (this.preloadTimer) clearTimeout(this.preloadTimer);
+        this.preloadTimer = null;
         this.updatePackStatus('');
     }
 
     updatePackStatus(text) {
         const element = typeof document !== 'undefined' && document.getElementById('voicePackStatus');
         if (element) element.textContent = text;
+        const raceStatus = typeof document !== 'undefined' && document.getElementById('raceVoiceStatus');
+        if (raceStatus) raceStatus.textContent = this.racePackMode === false && this.getPrimaryVoiceDirectory()
+            ? (typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_race_fallback') : 'This race uses the browser voice because the recorded pack was not ready at the start.') : text;
     }
 
     // Convert to mono at a common rate, trimming only external silence. A small
@@ -289,11 +344,14 @@ class AudioAnnouncer {
         const files = ['point.mp3', ...Array.from({length: 21}, (_, n) => `num_${n}.mp3`), ...Array.from({length: 10}, (_, n) => `lap_${n + 1}.mp3`), ...Array.from({length: 79}, (_, n) => `num_${n + 21}.mp3`), ...Array.from({length: 40}, (_, n) => `lap_${n + 11}.mp3`)];
         for (let i = 0; i < files.length; ++i) {
             if (generation !== this.audioSourceGeneration || !this.audioEnabled) return;
+            if (!await this.waitForAudioBudget(generation)) return;
             await this.decodeVoiceClip(files[i]);
             if (generation !== this.audioSourceGeneration) return;
             this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_preparing', { n: Math.round((i + 1) * 100 / files.length) }) : `Preparing recorded lap audio: ${Math.round((i + 1) * 100 / files.length)}%. Browser voice is used until each phrase is ready.`);
         }
-        this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_ready') : 'Recorded lap audio prepared. Missing clips use the browser voice.');
+        const primary = this.getPrimaryVoiceDirectory();
+        this.lapPackReady = files.every(file => this.decodedClips.has(`${primary}/${file}`));
+        this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t(this.lapPackReady ? 'settings.tts.pack_ready' : 'settings.tts.pack_incomplete') : 'Recorded lap audio prepared. Missing clips use the browser voice.');
     }
 
     numberFiles(value) {
@@ -329,8 +387,18 @@ class AudioAnnouncer {
         return new Blob([bytes], {type: 'audio/wav'});
     }
 
+    beginRacePlayback() {
+        if (this.racePackMode !== null) return;
+        this.racePackMode = this.lapPackReady;
+        if (!this.racePackMode && this.getPrimaryVoiceDirectory()) {
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_race_fallback') : 'This race uses the browser voice because the recorded pack was not ready at the start.');
+        }
+    }
+
+    endRacePlayback() { this.racePackMode = null; }
+
     async playVoiceSequence(files) {
-        if (!files || !this.audioEnabled) return false;
+        if (!files || !this.audioEnabled || this.racePackMode === false) return false;
         const primary = this.getPrimaryVoiceDirectory();
         if (!primary) return false;
         let clips = files.map(file => this.decodedClips.get(`${primary}/${file}`));
@@ -855,6 +923,10 @@ class AudioAnnouncer {
      */
     setVoice(voice) {
         const normalizedVoice = this.normalizeVoiceSelection(voice);
+        if (normalizedVoice === this.selectedVoice) {
+            localStorage.setItem('selectedVoice', normalizedVoice);
+            return; // Config polling must not throw away a warming/ready pack.
+        }
         console.log('[AudioAnnouncer] Changing voice to:', normalizedVoice);
         this.selectedVoice = normalizedVoice;
         localStorage.setItem('selectedVoice', normalizedVoice);
@@ -862,7 +934,7 @@ class AudioAnnouncer {
         // Clear audio cache so new voice files are loaded
         this.audioCache.clear();
         this.clearAudioSources();
-        if (this.audioEnabled) this.preloadRaceAudio();
+        if (this.audioEnabled) this.requestAudioPreload();
         
         console.log('[AudioAnnouncer] Voice changed, cache cleared');
     }
@@ -873,10 +945,14 @@ class AudioAnnouncer {
     async enable() {
         this.audioEnabled = true;
         console.log('[AudioAnnouncer] Audio enabled');
-        this.preloadRaceAudio();
+        this.requestAudioPreload();
         
         // Mobile browsers require audio to be "unlocked" with user interaction
-        await this.unlockAudioContextMobile();
+        if (this.userActivated || (typeof navigator !== 'undefined' && navigator.userActivation?.isActive)) {
+            this.userActivated = true;
+            await this.unlockAudioContextMobile();
+            this.requestAudioPreload();
+        }
         
         // Start keepalive for desktop browsers to prevent cold-start delays
         this.startSpeechKeepalive();
@@ -1005,6 +1081,8 @@ class AudioAnnouncer {
     disable() {
         this.audioEnabled = false;
         this.audioQueue = [];
+        if (this.preloadTimer) clearTimeout(this.preloadTimer);
+        this.preloadTimer = null;
         
         // Stop keepalive
         if (this.keepaliveInterval) {

@@ -304,6 +304,11 @@ async function loadInitialSyncState() {
 // ready. A skeleton that never clears is worse than no skeleton at all, so this
 // is deliberately hard to get stuck: it runs on DOMContentLoaded, again on
 // window load, and behind a timeout, and any one of them is enough.
+function onAppReady(callback) {
+  if (window.whenFPVGateReady) window.whenFPVGateReady(callback);
+  else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", callback, { once: true });
+  else callback();
+}
 let skeletonCleared = false;
 
 // The theme lives on the device and arrives with /config, so the page used to
@@ -355,13 +360,13 @@ function hideAppSkeleton() {
   setTimeout(() => el.remove(), 300);
 }
 
-document.addEventListener("DOMContentLoaded", hideAppSkeleton);
+onAppReady( hideAppSkeleton);
 window.addEventListener("load", hideAppSkeleton);
 // Backstop: if an init step throws before either listener fires, the user still
 // gets a usable page rather than staring at a shimmer.
 setTimeout(hideAppSkeleton, 8000);
 
-document.addEventListener("DOMContentLoaded", () => {
+onAppReady( () => {
   // Fetch version on page load
   fetchVersion();
   
@@ -653,6 +658,7 @@ function handleRaceStateEvent(state) {
       renderUnifiedRaceView();
     }
     raceRunning = true;
+    if (audioAnnouncer?.beginRacePlayback) audioAnnouncer.beginRacePlayback();
     c5RaceLabel = typeof RaceEvent !== "undefined" ? RaceEvent.raceLabel(c5Race.racers) : {};
     lapTimerStartMs = Date.now();
     startRaceTimer();
@@ -663,6 +669,7 @@ function handleRaceStateEvent(state) {
   } else if (state === "stopped") {
     // Race stopped (e.g. from LCD) â€“ stop timer and reset displays like stopRace()
     raceRunning = false;
+    if (audioAnnouncer?.endRacePlayback) audioAnnouncer.endRacePlayback();
     stopRaceTimer();
     timer.innerHTML = i18n.t("race.timer_default");
     currentLapStartMs = 0;
@@ -679,6 +686,7 @@ function handleRaceStateEvent(state) {
   } else if (state === "cleared") {
     // Laps cleared - reset UI
     raceRunning = false;
+    if (audioAnnouncer?.endRacePlayback) audioAnnouncer.endRacePlayback();
     stopRaceTimer();
     resetLapDisplay();
     updateRaceButtons();
@@ -956,7 +964,11 @@ function c5RaceResync() {
         const wasRunning = raceRunning;
         raceRunning = !!d.running;
         if (d.running) c5ObservedTimestamp = d.timestamp;
-        if (raceRunning && !wasRunning) startRaceTimer();
+        if (raceRunning && !wasRunning) {
+          startRaceTimer();
+          if (typeof audioAnnouncer !== 'undefined' && audioAnnouncer.beginRacePlayback) audioAnnouncer.beginRacePlayback();
+        }
+        if (!raceRunning && wasRunning && typeof audioAnnouncer !== 'undefined' && audioAnnouncer.endRacePlayback) audioAnnouncer.endRacePlayback();
         if (!raceRunning) stopRaceTimer();
         updateRaceButtons();
         if (d.busy || d.saveFailed) {
@@ -1496,7 +1508,7 @@ async function updateConnectionStatus(mode, connected) {
   }
 }
 
-onload = async function (e) {
+async function initializeApp(e) {
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
@@ -1859,7 +1871,8 @@ onload = async function (e) {
       }
     }).catch(() => {});
   }
-};
+}
+onAppReady(initializeApp);
 
 let batteryVoltageInterval = null;
 let batteryAlarmActive = false;
@@ -3178,6 +3191,7 @@ function setBeepVolume(volume) {
 }
 
 function beep(duration, frequency, type) {
+  if (typeof navigator !== "undefined" && navigator.userActivation && !navigator.userActivation.isActive && !browserAudioUnlocked) return;
   // Create or reuse AudioContext
   if (!beepAudioContext) {
     beepAudioContext = new AudioContext();
@@ -10741,7 +10755,7 @@ function saveLeaderColorMode() {
 }
 
 // Restore dropdown on page load
-document.addEventListener("DOMContentLoaded", function () {
+onAppReady( function () {
   const sel = document.getElementById("leaderColorMode");
   if (sel) sel.value = localStorage.getItem("leaderColorMode") || "0";
 });

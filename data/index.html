@@ -122,14 +122,6 @@
         .sk-card:nth-of-type(n + 3) { display: none; }
       }
     </style>
-    <link rel="stylesheet" type="text/css" href="style.css" />
-    <link rel="stylesheet" type="text/css" href="settings-ui.css" />
-    <link rel="stylesheet" type="text/css" href="history-ui.css" />
-    <link rel="stylesheet" type="text/css" href="calib-styles.css" />
-    <script src="jquery-3.7.1.min.js" defer></script>
-    <script src="i18n.js" defer></script>
-    <script src="audio-announcer.js" defer></script>
-    <script src="smoothie.js" defer></script>
   </head>
 
   <body>
@@ -199,6 +191,7 @@
 
       <div id="race" class="tabcontent">
         <div id="eventRaceBanner" class="ev-race-banner" style="display: none"></div>
+        <div id="raceVoiceStatus" role="status" style="font-size: 12px; color: var(--secondary-color); margin: 8px 0"></div>
         <span id="timer" data-i18n="race.timer_default">00:00:00s</span>
         <div id="lapCounter" style="text-align: center; font-size: 18px; font-weight: bold; color: var(--primary-color); margin: 8px 0">
           <span id="lapCounterText" data-i18n="race.lap_counter">Lap 0</span> - <span id="currentLapTimer">00:00:00s</span>
@@ -2049,15 +2042,56 @@
         <button class="battery-alarm-dismiss" onclick="dismissBatteryAlarm()" data-i18n="battery_alarm.dismiss">Dismiss</button>
       </div>
     </div>
-
-    <script src="history-filters.js" defer></script>
-    <script src="script.js" defer></script>
-    <script src="race-trace.js" defer></script>
-    <script src="c5-multipilot.js" defer></script>
-      <script src="event-director-ui.js" defer></script>
-      <script src="event.js" defer></script>
-      <script src="settings-ui.js" defer></script>
-      <script src="history-analysis.js" defer></script>
-      <script src="history-ui.js" defer></script>
+    <script>
+    // Download dependencies one at a time before starting any live requests.
+    // This also lets a busy gate retry a file instead of executing half an app.
+    (() => {
+      const ready = [];
+      window.fpvGateLoading = true;
+      window.whenFPVGateReady = fn => window.fpvGateLoading ? ready.push(fn) : fn();
+      const status = document.createElement('div');
+      status.id = 'appLoadStatus'; status.setAttribute('role', 'status');
+      status.style.cssText = 'position:fixed;bottom:16px;left:16px;right:16px;z-index:10001;padding:12px;background:#18272d;color:#fff;border-radius:8px;font:14px sans-serif';
+      document.body.appendChild(status);
+      const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+      async function download(file) {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          status.textContent = `Loading ${file}${attempt ? ' (retry ' + attempt + ')' : ''}…`;
+          const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 20000);
+          try {
+            const response = await fetch(file, {signal:controller.signal, cache:'no-cache'});
+            if (!response.ok) { if(response.body) await response.body.cancel(); throw new Error(`HTTP ${response.status}`); }
+            return await response.text();
+          } catch (error) { if(attempt === 3) throw new Error(`Could not load ${file}: ${error.message}`); }
+          finally { clearTimeout(timeout); }
+          await delay(500 * (attempt + 1));
+        }
+      }
+      (async () => {
+        const styles = ["style.css", "settings-ui.css", "history-ui.css", "calib-styles.css"];
+        for (const file of styles) { const style=document.createElement('style'); style.textContent=await download(file); document.head.appendChild(style); }
+        const scripts = ["jquery-3.7.1.min.js", "i18n.js", "audio-announcer.js", "smoothie.js", "history-filters.js", "script.js", "race-trace.js", "c5-multipilot.js", "event-director-ui.js", "event.js", "settings-ui.js", "history-analysis.js", "history-ui.js"], downloaded = [];
+        for (const file of scripts) downloaded.push([file, await download(file)]);
+        let executionError = null;
+        const onError = event => { executionError = event.error || new Error(event.message); };
+        window.addEventListener('error', onError);
+        try {
+          for (const [file, source] of downloaded) {
+            const script=document.createElement('script'); script.textContent=source+'\n//# sourceURL='+location.origin+'/'+file;
+            document.head.appendChild(script);
+            if(executionError) throw executionError;
+          }
+        } finally { window.removeEventListener('error', onError); }
+        window.fpvGateLoading = false;
+        for (const fn of ready) await fn();
+        status.remove();
+      })().catch(error => {
+        console.error('[Startup]', error);
+        status.textContent = error.message + '. ';
+        const retry=document.createElement('button'); retry.type='button'; retry.textContent='Retry loading'; retry.onclick=()=>location.reload(); status.appendChild(retry);
+        document.getElementById('appSkeleton')?.remove();
+      });
+    })();
+    </script>
   </body>
 </html>

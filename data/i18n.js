@@ -171,8 +171,9 @@ class I18n {
 }
 
 const i18n = new I18n();
-document.addEventListener("DOMContentLoaded", () => {
+((typeof window !== "undefined" && window.whenFPVGateReady) || (callback => document.addEventListener("DOMContentLoaded", callback)))(() => {
   // Exposed so the app can wait for the catalogue before its first render;
   // otherwise dynamically built tables would show raw dotted keys.
   i18n.ready = i18n.init();
+  return i18n.ready;
 });

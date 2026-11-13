@@ -435,8 +435,11 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
-            "pack_preparing": "Preparing recorded lap audio: {n}%. Browser voice is used until each phrase is ready.",
-            "pack_ready": "Recorded lap audio prepared. Missing clips use the browser voice.",
+            "pack_paused": "Recorded voice preparation paused while the gate is busy. Browser voice remains available.",
+            "pack_preparing": "Preparing recorded lap audio: {n}%. Start the next race after preparation to use the pack.",
+            "pack_incomplete": "Some recorded clips are unavailable. Browser voice will be used for the next race.",
+            "pack_race_fallback": "This race uses the browser voice because the recorded pack was not ready at the start.",
+            "pack_ready": "Recorded lap audio is ready for the next race.",
             "beep_style": "Browser Beep:",
             "beep_classic": "Classic",
             "beep_soft": "Soft",

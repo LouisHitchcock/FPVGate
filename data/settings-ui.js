@@ -300,6 +300,6 @@ const SettingsUI = (() => {
     theme();sync();switchSettingsSection(null,'general');
     if(typeof i18n!=='undefined')i18n.translatePage();
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialise);else initialise();
+  if(window.whenFPVGateReady)window.whenFPVGateReady(initialise);else if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialise);else initialise();
   return {initialise, sync, theme, accessible, sections};
 })();

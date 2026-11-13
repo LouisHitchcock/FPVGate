@@ -254,6 +254,6 @@ const HistoryUI = (() => {
     // Existing language translation remains responsible for legacy controls.
     theme();if(raceHistoryData.length)render();
   }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialise);else initialise();
+  if(window.whenFPVGateReady)window.whenFPVGateReady(initialise);else if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialise);else initialise();
   return {initialise,render,paint,theme,messages};
 })();

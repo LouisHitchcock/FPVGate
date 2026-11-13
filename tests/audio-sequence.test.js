@@ -37,3 +37,23 @@ test.each(['default','rachel','adam','antoni','matilda','de','es','fr'])('%s pac
 test('playback failure cleans the WAV URL and falls back to one full utterance',async()=>{
  const {a,revoked}=setup();for(const f of ['lap_1.mp3','num_3.mp3','point.mp3','num_44.mp3'])a.decodedClips.set('voice_default_en/'+f,{sampleRate:22050,samples:new Float32Array([.2,.3])});a.playPrerecorded=jest.fn(async()=>{throw new Error('media failed')});a.playWebSpeech=jest.fn();await a.speakComplexLapTime(1,3.44);expect(revoked).toEqual(['blob:joined']);expect(a.playWebSpeech).toHaveBeenCalledWith('Lap 1, 3.44');
 });
+
+test('same-voice configuration refresh preserves prepared clips and in-flight warming',()=>{
+ const {a}=setup();const clip={samples:new Float32Array([.2]),sampleRate:22050};a.decodedClips.set('voice_default_en/num_3.mp3',clip);a.lapPackReady=true;const loading=Promise.resolve();a.lapPreload=loading;const generation=a.audioSourceGeneration;a.setVoice('default');expect(a.decodedClips.get('voice_default_en/num_3.mp3')).toBe(clip);expect(a.lapPreload).toBe(loading);expect(a.audioSourceGeneration).toBe(generation);expect(a.lapPackReady).toBe(true);
+});
+test('a cold race stays on TTS even when its words become cached',async()=>{
+ const {a}=setup();a.beginRacePlayback();for(const f of ['num_3.mp3','point.mp3','num_0.mp3','num_2.mp3'])a.decodedClips.set('voice_default_en/'+f,{sampleRate:22050,samples:new Float32Array([.2])});a.lapPackReady=true;a.playPrerecorded=jest.fn();a.playWebSpeech=jest.fn();await a.speakNumber('3.02');expect(a.playPrerecorded).not.toHaveBeenCalled();expect(a.playWebSpeech).toHaveBeenCalledWith('3.02');a.endRacePlayback();a.beginRacePlayback();await a.speakNumber('3.02');expect(a.playPrerecorded).toHaveBeenCalledTimes(1);
+});
+test('page initialization does not start background audio downloads without a gesture',()=>{
+ const {a,ctx}=setup();a.requestAudioPreload();expect(a.preloadTimer).toBeNull();expect(ctx.fetch).not.toHaveBeenCalled();
+});
+
+test('recorded preparation pauses during a running race without polling or MP3 traffic',async()=>{
+ const {a,ctx}=setup();ctx.raceRunning=true;a.sleep=async()=>{a.audioEnabled=false};expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(false);expect(ctx.fetch).not.toHaveBeenCalled();
+});
+test('low gate memory delays preparation until the request budget recovers',async()=>{
+ const {a,ctx}=setup();ctx.fetch.mockResolvedValueOnce({ok:true,json:async()=>({heapFree:45000,heapLargest:30000,requestsNow:1})}).mockResolvedValueOnce({ok:true,json:async()=>({heapFree:70000,heapLargest:30000,requestsNow:1})});a.sleep=jest.fn(async()=>{});expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(true);expect(a.sleep).toHaveBeenCalledTimes(1);expect(ctx.fetch.mock.calls.every(([url])=>url==='/api/system/info')).toBe(true);
+});
+test('automatic enable waits for interaction before attempting media unlock',async()=>{
+ const {a}=setup();a.unlockAudioContextMobile=jest.fn();a.startSpeechKeepalive=()=>{};a.processQueue=()=>{};await a.enable();expect(a.unlockAudioContextMobile).not.toHaveBeenCalled();expect(a.preloadTimer).toBeNull();
+});
