@@ -411,6 +411,7 @@
             "race_stopped": "比赛停止",
             "arm_quad": "解锁起飞",
             "starting_soon": "五秒内听提示音起跑",
+            "gate1_beep": "首次过门提示音：",
             "gate1": "1号门 {n}",
             "laps_2": "{n} 连续 2 圈 {time}",
             "laps_3": "{n} 连续 3 圈 {time}",

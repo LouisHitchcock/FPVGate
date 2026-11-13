@@ -337,6 +337,7 @@
             "race_stopped": "Rennen gestoppt",
             "arm_quad": "Bewaffne deinen Quad",
             "starting_soon": "Start beim Ton in weniger als fünf",
+            "gate1_beep": "Signalton bei Gate 1:",
             "gate1": "Tor 1 {n}",
             "laps_2": "{n} 2 Runden {time}",
             "laps_3": "{n} 3 Runden {time}",

@@ -1087,6 +1087,10 @@ function announceC5RaceLap(racer, idx, seconds) {
   if (mode === "none" || mode === "") return;
   const t = seconds.toFixed(2);
   if (idx === 0) {
+    if (extras.gate1Beep) {
+      if (!extras.beepEveryLap) beep(100, 330, "square");
+      return;
+    }
     queueSpeak(`<p>${racer.spoken} ${i18n.t("settings.tts.gate1", { n: t })}</p>`);
     return;
   }
@@ -3023,7 +3027,7 @@ async function refreshConfigFromDevice() {
 if (announcerSelect) {
   announcerSelect.addEventListener("change", autoSaveConfig);
 }
-["announcerBeepEveryLap", "announcerWithLapTime"].forEach((id) => {
+["announcerBeepEveryLap", "announcerWithLapTime", "announcerGate1Beep"].forEach((id) => {
   const box = document.getElementById(id);
   if (!box) return;
   box.checked = localStorage.getItem(id) === "1";
@@ -3215,6 +3219,7 @@ function announcerExtras() {
   return {
     beepEveryLap: localStorage.getItem("announcerBeepEveryLap") === "1",
     withLapTime: localStorage.getItem("announcerWithLapTime") === "1",
+    gate1Beep: localStorage.getItem("announcerGate1Beep") === "1",
   };
 }
 
@@ -3250,7 +3255,9 @@ function addLap(lapStr) {
   const announceMode = announcerSelect.options[announcerSelect.selectedIndex].value;
   const extras = announcerExtras();
   if (extras.beepEveryLap && announceMode !== "beep") beep(100, 330, "square");
-  switch (announceMode) {
+  const gate1Beep = lapNo === 0 && extras.gate1Beep && ["1lap", "2lap", "3lap"].includes(announceMode);
+  if (gate1Beep && !extras.beepEveryLap) beep(100, 330, "square");
+  switch (gate1Beep ? "none" : announceMode) {
     case "beep":
       beep(100, 330, "square");
       break;

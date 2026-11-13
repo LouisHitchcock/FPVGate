@@ -280,3 +280,28 @@ test("C5 pilots get the same extras", () => {
   r.announceC5RaceLap(r.state.racers[0], 1, 10);
   expect(r.spoken).toEqual(["BEEP", "Bea 10.00"]);
 });
+
+test.each(["1lap", "2lap", "3lap"])("%s Gate 1 beep keeps later lap calls", (mode) => {
+  for (const beepEveryLap of [false, true]) {
+    const r = race({ mode, extras: { gate1Beep: true, beepEveryLap } });
+    r.addLap("1.00");
+    expect(r.spoken).toEqual(["BEEP"]);
+    ["10.00", "11.00", "12.00"].forEach(t => r.addLap(t));
+    expect(r.spoken.some(t => t.includes("33.00") || t.includes("23.00") || t.includes("12.00"))).toBe(true);
+    expect(r.laps()).toEqual([1, 10, 11, 12]);
+    const c = c5RaceSandbox(mode, 0, true, { gate1Beep: true, beepEveryLap });
+    c.pass(3, 0, 1);
+    c.pass(5, 0, 2);
+    expect(c.spoken).toEqual(["BEEP", "BEEP"]);
+    [10, 11, 12].forEach((t, i) => c.pass(3, i + 1, t));
+    expect(c.spoken.some(t => t.includes("33.00") || t.includes("23.00") || t.includes("12.00"))).toBe(true);
+  }
+});
+test.each(["none", "", "beep"])("Gate 1 override preserves %s mode", (mode) => {
+  const r = race({ mode, extras: { gate1Beep: true } });
+  r.addLap("1.00");
+  const c = c5RaceSandbox(mode, 0, true, { gate1Beep: true });
+  c.pass(3, 0, 1);
+  expect(r.spoken).toEqual(mode === "beep" ? ["BEEP"] : []);
+  expect(c.spoken).toEqual(r.spoken);
+});

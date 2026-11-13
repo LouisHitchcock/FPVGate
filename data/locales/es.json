@@ -338,6 +338,7 @@
             "race_stopped": "Carrera detenida",
             "arm_quad": "Arma tu quad",
             "starting_soon": "Salida al tono en menos de cinco",
+            "gate1_beep": "Pitido en Gate 1:",
             "gate1": "Puerta 1 {n}",
             "laps_2": "{n} 2 vueltas {time}",
             "laps_3": "{n} 3 vueltas {time}",

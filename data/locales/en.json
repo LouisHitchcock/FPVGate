@@ -435,6 +435,7 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
+            "gate1_beep": "Beep for Gate 1:",
             "beep_every_lap": "Beep Every Lap:",
             "with_lap_time": "Say Lap Time Too:",
             "announcer_extras_tip": "Beep Every Lap adds a beep to any announcer type. Say Lap Time Too speaks each lap time with the 2- and 3-lap totals. Both are saved in this browser.",

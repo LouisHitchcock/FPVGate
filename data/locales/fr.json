@@ -338,6 +338,7 @@
             "race_stopped": "Course arrêtée",
             "arm_quad": "Armez votre quad",
             "starting_soon": "Départ au signal dans moins de cinq",
+            "gate1_beep": "Bip pour Gate 1 :",
             "gate1": "Porte 1 {n}",
             "laps_2": "{n} 2 tours {time}",
             "laps_3": "{n} 3 tours {time}",
