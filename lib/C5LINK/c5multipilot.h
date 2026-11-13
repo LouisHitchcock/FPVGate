@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include "c5link.h"
 #include "freertos/semphr.h"
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+#include "rssi_filter.h"
+#include "jump_reject.h"
+#endif
 
 // One lap of one C5 slot. lap 0 is Gate 1 (race start to the first pass).
 struct C5LapEvent {
@@ -43,6 +47,18 @@ struct C5Peak {
         if (l > level) { level = l; levelFirstUs = levelLastUs = us; }
         else if (l == level) levelLastUs = us;
     }
+    void merge(const C5Peak& p) {
+        if (p.value > value) { value=p.value;firstUs=p.firstUs;lastUs=p.lastUs; }
+        else if (p.value == value) {
+            if ((int32_t)(p.firstUs-firstUs)<0) firstUs=p.firstUs;
+            if ((int32_t)(p.lastUs-lastUs)>0) lastUs=p.lastUs;
+        }
+        if (p.level > level) { level=p.level;levelFirstUs=p.levelFirstUs;levelLastUs=p.levelLastUs; }
+        else if (p.level == level) {
+            if ((int32_t)(p.levelFirstUs-levelFirstUs)<0) levelFirstUs=p.levelFirstUs;
+            if ((int32_t)(p.levelLastUs-levelLastUs)>0) levelLastUs=p.levelLastUs;
+        }
+    }
     uint32_t middleUs() const { return firstUs + (lastUs - firstUs) / 2; }
     uint32_t levelMiddleUs() const { return levelFirstUs + (levelLastUs - levelFirstUs) / 2; }
 };
@@ -65,6 +81,17 @@ public:
     bool allFinished();
     uint8_t finishedMask();
     uint16_t rssi(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? filtered_[pilot] : 0; }
+    uint32_t sampleTimeUs(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS ? lastSampleUs_[pilot] : 0; }
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+    void setJumpReject(const rhusb::Reject& config) { jumpConfig_=config; }
+#endif
+    static constexpr uint16_t medianWindowMs() {
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+        return C5_SHARED_MEDIAN_MS;
+#else
+        return 0;
+#endif
+    }
     // Above the enter threshold and not yet below exit (only while a race runs).
     bool inside(uint8_t pilot) const { return pilot < C5Link::C5_MAX_PILOTS && inside_[pilot]; }
     bool takeLap(C5LapEvent &event);
@@ -114,6 +141,18 @@ public:
     bool requestManualLap(uint8_t pilot);
 
 private:
+#if defined(C5_SHARED_MEDIAN_MS) && C5_SHARED_MEDIAN_MS > 0
+    rhusb::RssiFilter levelFilter_[C5Link::C5_MAX_PILOTS];
+    uint16_t filterFrequency_[C5Link::C5_MAX_PILOTS] = {};
+    uint32_t filterInputMs_[C5Link::C5_MAX_PILOTS] = {};
+    uint8_t filterSampledMask_ = 0;
+    uint32_t filterSettleUntilMs_ = 0;
+    struct Admission : rhusb::JumpState {
+        bool held=false;
+        C5Peak jumpFull={},keptPeak={};
+    } admission_[C5Link::C5_MAX_PILOTS];
+    rhusb::Reject jumpConfig_;
+#endif
     Config *config_ = nullptr;
     C5Link *link_ = nullptr;
     volatile bool running_ = false;

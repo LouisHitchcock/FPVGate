@@ -15,7 +15,19 @@ env:
   FPVGATE_RELEASE_VERSION: ${{ inputs.version }}
 
 jobs:
+  native-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check file-transfer admission and cancellation
+        run: |
+          g++ -std=c++17 -O2 -pthread tests/native/file_transfer_slots.cpp -o /tmp/fpvgate-file-slots
+          /tmp/fpvgate-file-slots
+      - name: Check all eight clock-mapped C5 slots
+        run: bash tests/native/build_c5_slot_test.sh
+
   build-firmware:
+    needs: native-checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

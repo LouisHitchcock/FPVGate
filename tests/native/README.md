@@ -58,3 +58,6 @@ Storage/history are simulated. Jest's `storage-replacement.test.js` separately
 compiles production replacement/recovery methods with filesystem fault injection.
 Neither test proves physical media durability. See
 [Event progression](../../docs/GATE_EVENT_PROGRESSION.md).
+
+
+The release workflow also runs `file_transfer_slots.cpp` (admission, cancellation and concurrent ownership) and `build_c5_slot_test.sh` (all eight clock-mapped slots with legacy and shared-median filtering). These are host regressions, not hardware qualification.

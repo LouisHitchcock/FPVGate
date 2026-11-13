@@ -10,6 +10,7 @@ inline long random(long minimum, long maximum) {
 }
 
 extern uint64_t g_nowUs;
+inline int64_t esp_timer_get_time() { return (int64_t)g_nowUs; }
 inline uint32_t micros() { return (uint32_t)g_nowUs; }
 inline uint32_t millis() { return (uint32_t)(g_nowUs / 1000); }
 class String : public std::string {
