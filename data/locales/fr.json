@@ -338,6 +338,8 @@
             "race_stopped": "Course arrêtée",
             "arm_quad": "Armez votre quad",
             "starting_soon": "Départ au signal dans moins de cinq",
+            "pack_preparing": "Préparation des annonces enregistrées : {n} %. La voix du navigateur est utilisée tant que la phrase est en préparation.",
+            "pack_ready": "Annonces enregistrées préparées. Les clips manquants utilisent la voix du navigateur.",
             "beep_style": "Bip du navigateur :",
             "beep_classic": "Classique",
             "beep_soft": "Doux",

@@ -47,8 +47,14 @@ class AudioAnnouncer {
         this.audioLoads = new Map();
         this.audioSourceBytes = 0;
         this.audioSourceGeneration = 0;
-        this.maxAudioSourceBytes = 2 * 1024 * 1024;
-        this.maxAudioSources = 128;
+        this.maxAudioSourceBytes = 4 * 1024 * 1024;
+        this.maxAudioSources = 192;
+        this.decodedClips = new Map();
+        this.decodedLoads = new Map();
+        this.decodedBytes = 0;
+        this.maxDecodedBytes = 16 * 1024 * 1024;
+        this.lapPreload = null;
+        this.decodeContext = null;
         
         // Single reusable Audio element for mobile compatibility
         // Mobile browsers restrict creating new Audio() without user gesture
@@ -179,7 +185,7 @@ class AudioAnnouncer {
                     this.preloadedAudios.delete(oldest);
                 }
                 const url = URL.createObjectURL(blob);
-                this.audioSources.set(audioPath, { url, size: blob.size });
+                this.audioSources.set(audioPath, { url, size: blob.size, blob });
                 this.audioSourceBytes += blob.size;
                 this.preloadedAudios.add(audioPath);
                 return url;
@@ -207,6 +213,11 @@ class AudioAnnouncer {
             if (generation !== this.audioSourceGeneration) return;
             await this.resolveAudioPath(`${primary}/${file}`);
         }
+        if (!this.lapPreload && (window.OfflineAudioContext || window.webkitOfflineAudioContext)) {
+            this.lapPreload = this.preloadLapAudio(generation).finally(() => {
+                if (generation === this.audioSourceGeneration) this.lapPreload = null;
+            });
+        }
     }
 
     clearAudioSources() {
@@ -216,6 +227,128 @@ class AudioAnnouncer {
         this.audioLoads.clear();
         this.audioSourceBytes = 0;
         this.preloadedAudios.clear();
+        this.decodedClips.clear();
+        this.decodedLoads.clear();
+        this.decodedBytes = 0;
+        this.lapPreload = null;
+        this.updatePackStatus('');
+    }
+
+    updatePackStatus(text) {
+        const element = typeof document !== 'undefined' && document.getElementById('voicePackStatus');
+        if (element) element.textContent = text;
+    }
+
+    // Convert to mono at a common rate, trimming only external silence. A small
+    // safety margin retains quiet consonants; silence inside a word is untouched.
+    async decodeVoiceClip(filename) {
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return null;
+        const key = `${primary}/${filename}`;
+        if (this.decodedClips.has(key)) return this.decodedClips.get(key);
+        if (this.decodedLoads.has(key)) return this.decodedLoads.get(key);
+        const generation = this.audioSourceGeneration;
+        const pending = (async () => {
+            const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (!Context) return null;
+            const path = await this.resolveAudioPath(key);
+            const entry = path && this.audioSources.get(path);
+            if (!entry || generation !== this.audioSourceGeneration) return null;
+            if (!this.decodeContext) this.decodeContext = new Context(1, 1, 22050);
+            const decoded = await this.decodeContext.decodeAudioData(await entry.blob.arrayBuffer());
+            const samples = new Float32Array(decoded.length);
+            for (let ch = 0; ch < decoded.numberOfChannels; ++ch) {
+                const data = decoded.getChannelData(ch);
+                for (let i = 0; i < samples.length; ++i) samples[i] += data[i] / decoded.numberOfChannels;
+            }
+            let first = 0, last = samples.length - 1;
+            const threshold = 0.003; // about -50 dBFS
+            while (first < last && Math.abs(samples[first]) < threshold) ++first;
+            while (last > first && Math.abs(samples[last]) < threshold) --last;
+            if (first === last) return null;
+            const margin = Math.round(decoded.sampleRate * 0.015);
+            const clip = { samples: samples.slice(Math.max(0, first - margin), Math.min(samples.length, last + margin + 1)), sampleRate: decoded.sampleRate };
+            if (generation !== this.audioSourceGeneration || clip.samples.byteLength > this.maxDecodedBytes) return null;
+            while (this.decodedBytes + clip.samples.byteLength > this.maxDecodedBytes || this.decodedClips.size >= 192) {
+                const oldest = this.decodedClips.keys().next().value;
+                this.decodedBytes -= this.decodedClips.get(oldest).samples.byteLength;
+                this.decodedClips.delete(oldest);
+            }
+            this.decodedClips.set(key, clip);
+            this.decodedBytes += clip.samples.byteLength;
+            return clip;
+        })().catch(error => { console.warn('[AudioAnnouncer] Clip preparation failed:', filename, error); return null; });
+        this.decodedLoads.set(key, pending);
+        try { return await pending; }
+        finally { if (this.decodedLoads.get(key) === pending) this.decodedLoads.delete(key); }
+    }
+
+    async preloadLapAudio(generation) {
+        // One gate transfer at a time. Prepare common words first; each complete
+        // phrase can use the pack as soon as its own words are ready.
+        const files = ['point.mp3', ...Array.from({length: 21}, (_, n) => `num_${n}.mp3`), ...Array.from({length: 10}, (_, n) => `lap_${n + 1}.mp3`), ...Array.from({length: 79}, (_, n) => `num_${n + 21}.mp3`), ...Array.from({length: 40}, (_, n) => `lap_${n + 11}.mp3`)];
+        for (let i = 0; i < files.length; ++i) {
+            if (generation !== this.audioSourceGeneration || !this.audioEnabled) return;
+            await this.decodeVoiceClip(files[i]);
+            if (generation !== this.audioSourceGeneration) return;
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_preparing', { n: Math.round((i + 1) * 100 / files.length) }) : `Preparing recorded lap audio: ${Math.round((i + 1) * 100 / files.length)}%. Browser voice is used until each phrase is ready.`);
+        }
+        this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_ready') : 'Recorded lap audio prepared. Missing clips use the browser voice.');
+    }
+
+    numberFiles(value) {
+        const text = String(value);
+        if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+        const [whole, decimal] = text.split('.');
+        const files = Number(whole) <= 99 ? [`num_${Number(whole)}.mp3`] : [...whole].map(n => `num_${n}.mp3`);
+        if (decimal) {
+            files.push('point.mp3');
+            if (decimal.length === 2 && decimal[0] !== '0') files.push(`num_${Number(decimal)}.mp3`);
+            else files.push(...[...decimal].map(n => `num_${n}.mp3`));
+        }
+        return files;
+    }
+
+    // Encode a complete utterance as one WAV for the existing mobile-unlocked
+    // Audio element. No network requests or media restarts occur between words.
+    sequenceWav(clips) {
+        const rate = clips[0].sampleRate;
+        if (clips.some(clip => clip.sampleRate !== rate)) throw new Error('Incompatible clip sample rates');
+        const length = clips.reduce((sum, clip) => sum + clip.samples.length, 0);
+        const bytes = new ArrayBuffer(44 + length * 2), view = new DataView(bytes);
+        const text = (at, value) => [...value].forEach((ch, n) => view.setUint8(at + n, ch.charCodeAt(0)));
+        text(0, 'RIFF'); view.setUint32(4, 36 + length * 2, true); text(8, 'WAVE'); text(12, 'fmt ');
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        text(36, 'data'); view.setUint32(40, length * 2, true);
+        let offset = 44;
+        for (const clip of clips) for (const sample of clip.samples) {
+            const value = Math.max(-1, Math.min(1, sample));
+            view.setInt16(offset, value * (value < 0 ? 32768 : 32767), true); offset += 2;
+        }
+        return new Blob([bytes], {type: 'audio/wav'});
+    }
+
+    async playVoiceSequence(files) {
+        if (!files || !this.audioEnabled) return false;
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return false;
+        let clips = files.map(file => this.decodedClips.get(`${primary}/${file}`));
+        if (clips.some(clip => !clip)) {
+            if (this.webSpeechAvailable) return false; // one full TTS call while warming
+            clips = [];
+            const generation = this.audioSourceGeneration;
+            for (const file of files) {
+                const clip = await this.decodeVoiceClip(file);
+                if (!clip || !this.audioEnabled || generation !== this.audioSourceGeneration) return false;
+                clips.push(clip);
+            }
+        }
+        const url = URL.createObjectURL(this.sequenceWav(clips));
+        try { await this.playPrerecorded('assembled-lap', 0, url); }
+        catch (error) { console.warn('[AudioAnnouncer] Assembled playback failed:', error); return false; }
+        finally { URL.revokeObjectURL(url); }
+        return true;
     }
 
     /**
@@ -223,8 +356,8 @@ class AudioAnnouncer {
      * Uses reusable Audio element on mobile for better compatibility
      * @param {number} overlapMs - Milliseconds to resolve early for crossfade (default: 50ms)
      */
-    async playPrerecorded(audioPath, overlapMs = 50) {
-        const source = await this.loadAudioSource(audioPath);
+    async playPrerecorded(audioPath, overlapMs = 50, preparedSource = null) {
+        const source = preparedSource || await this.loadAudioSource(audioPath);
         if (!source) throw new Error(`Audio unavailable: ${audioPath}`);
         return new Promise((resolve, reject) => {
             // Use reusable audio element if available (mobile compatibility)
@@ -240,7 +373,7 @@ class AudioAnnouncer {
             audio.preload = 'auto';
             audio.playbackRate = this.rate;
             audio.volume = this.volume;
-            audio.preservesPitch = false;
+            audio.preservesPitch = true;
             
             let resolved = false;
             const overlapSeconds = overlapMs / 1000;
@@ -270,6 +403,10 @@ class AudioAnnouncer {
             
             // Play when ready
             const playAudio = () => {
+                audio.oncanplay = null;
+                // Loading a new source can reset playbackRate; apply it when ready.
+                audio.defaultPlaybackRate = this.rate;
+                audio.playbackRate = this.rate;
                 audio.play().then(() => {
                     console.log('[AudioAnnouncer] Playing:', audioPath);
                 }).catch((err) => {
@@ -454,7 +591,7 @@ class AudioAnnouncer {
             // Format 4: "time" only (e.g., "12.34")
             const timeOnlyMatch = cleanText.match(/^([\d.]+)$/);
             if (timeOnlyMatch) {
-                const lapTime = parseFloat(timeOnlyMatch[1]);
+                const lapTime = timeOnlyMatch[1];
                 console.log('[AudioAnnouncer] Detected time-only format:', lapTime);
                 await this.speakNumber(lapTime);
                 return;
@@ -582,21 +719,11 @@ class AudioAnnouncer {
         const phoneticName = (phoneticInput?.value || pilotNameInput?.value || pilot).toLowerCase().trim();
         const fileName = phoneticName.replace(/\s+/g, '_');
         
-        try {
-            // Try to use pre-recorded pilot name + lap
-            if (await this.playVoiceFile(`${fileName}_lap.mp3`)) {
-                console.log('[AudioAnnouncer] Using complex speech with pre-recorded chunks');
-                await this.speakNumber(lapNumber);
-                // No pause - immediate transition to lap time
-                await this.speakNumber(lapTime);
-                return;
-            } else {
-                console.log('[AudioAnnouncer] Pilot-specific audio not found, using fallback');
-            }
-        } catch (e) {
-            console.error('[AudioAnnouncer] Complex speech with pilot failed:', e);
-        }
-        
+        const number = this.numberFiles(lapTime.toFixed(2));
+        if (number && await this.playVoiceSequence([`${fileName}_lap.mp3`, ...this.numberFiles(lapNumber), ...number])) return;
+        // Pilot-specific phrases are optional; warm them for a later call.
+        if (this.audioEnabled) this.decodeVoiceClip(`${fileName}_lap.mp3`);
+
         // Fallback: Use Web Speech API
         const fullText = `${pilot} Lap ${lapNumber}, ${lapTime}`;
         console.log('[AudioAnnouncer] Using Web Speech fallback for:', fullText);
@@ -640,18 +767,9 @@ class AudioAnnouncer {
         }
         
         // ElevenLabs voice - try pre-recorded files first
-        try {
-            // Check if we have pre-recorded "Lap X" file
-            if (lapNumber >= 1 && lapNumber <= 50 && await this.playVoiceFile(`lap_${lapNumber}.mp3`)) {
-                console.log('[AudioAnnouncer] Using pre-recorded lap number');
-                // No pause - immediate transition to lap time
-                await this.speakNumber(lapTime);
-                return;
-            }
-        } catch (e) {
-            console.error('[AudioAnnouncer] Lap+time speech failed:', e);
-        }
-        
+        const files = this.numberFiles(lapTime.toFixed(2));
+        if (files && lapNumber >= 1 && lapNumber <= 50 && await this.playVoiceSequence([`lap_${lapNumber}.mp3`, ...files])) return;
+
         // Fallback: Use Web Speech API
         const fullText = `Lap ${lapNumber}, ${lapTime}`;
         console.log('[AudioAnnouncer] Using Web Speech fallback for:', fullText);
@@ -681,79 +799,8 @@ class AudioAnnouncer {
             }
             return;
         }
-        // ElevenLabs voice - try pre-recorded number files first
-        // Split into whole and decimal parts
-        const parts = numStr.split('.');
-        const wholePart = parseInt(parts[0]);
-        const decimalPart = parts[1];
-        
-        try {
-            // Speak whole number part (0-99 as words)
-            if (wholePart >= 0 && wholePart <= 99) {
-                if (!(await this.playVoiceFile(`num_${wholePart}.mp3`, 30))) {
-                    throw new Error(`Missing pre-recorded number file for ${wholePart}`);
-                }
-            } else {
-                // Fallback: spell out digit by digit for numbers >= 100
-                console.log('[AudioAnnouncer] Number >= 100, using digit-by-digit:', wholePart);
-                for (const char of parts[0]) {
-                    if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
-                        throw new Error(`Missing pre-recorded digit file for ${char}`);
-                    }
-                }
-            }
-            
-            // Speak decimal part if exists
-            if (decimalPart) {
-                if (!(await this.playVoiceFile('point.mp3', 20))) {
-                    throw new Error('Missing pre-recorded point file');
-                }
-                
-                // Handle decimals with leading zeros properly
-                // For lap times, we always want to preserve leading zeros (e.g., "01" = "zero one", not "one")
-                if (decimalPart.length === 2) {
-                    // Two-digit decimal: speak each digit separately to preserve leading zeros
-                    const firstDigit = parseInt(decimalPart[0]);
-                    const secondDigit = parseInt(decimalPart[1]);
-                    
-                    // If first digit is 0, we must say it
-                    if (firstDigit === 0) {
-                        if (!(await this.playVoiceFile('num_0.mp3', 30))) {
-                            throw new Error('Missing pre-recorded digit file for 0');
-                        }
-                        if (!(await this.playVoiceFile(`num_${secondDigit}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded digit file for ${secondDigit}`);
-                        }
-                    } else {
-                        // Parse as a two-digit number (e.g., "44" -> forty-four)
-                        const decimalNum = parseInt(decimalPart);
-                        if (!(await this.playVoiceFile(`num_${decimalNum}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded number file for ${decimalNum}`);
-                        }
-                    }
-                } else if (decimalPart.length === 1) {
-                    // Single digit decimal (e.g., "4.5")
-                    const digit = parseInt(decimalPart);
-                    if (!(await this.playVoiceFile(`num_${digit}.mp3`, 30))) {
-                        throw new Error(`Missing pre-recorded digit file for ${digit}`);
-                    }
-                } else {
-                    // More than 2 digits: spell out digit by digit
-                    console.log('[AudioAnnouncer] Decimal > 2 digits, using digit-by-digit:', decimalPart);
-                    for (const char of decimalPart) {
-                        if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded digit file for ${char}`);
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('[AudioAnnouncer] Error speaking number, fallback to Web Speech:', num, e);
-            // Fallback to Web Speech API
-            if (this.webSpeechAvailable) {
-                await this.playWebSpeech(numStr);
-            }
-        }
+        if (await this.playVoiceSequence(this.numberFiles(numStr))) return;
+        if (this.webSpeechAvailable) await this.playWebSpeech(numStr);
     }
 
     /**

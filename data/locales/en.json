@@ -435,6 +435,8 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
+            "pack_preparing": "Preparing recorded lap audio: {n}%. Browser voice is used until each phrase is ready.",
+            "pack_ready": "Recorded lap audio prepared. Missing clips use the browser voice.",
             "beep_style": "Browser Beep:",
             "beep_classic": "Classic",
             "beep_soft": "Soft",

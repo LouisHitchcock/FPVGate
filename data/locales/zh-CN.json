@@ -411,6 +411,8 @@
             "race_stopped": "比赛停止",
             "arm_quad": "解锁起飞",
             "starting_soon": "五秒内听提示音起跑",
+            "pack_preparing": "正在准备录制的圈速语音：{n}%。每条播报准备就绪前使用浏览器语音。",
+            "pack_ready": "录制的圈速语音已准备完毕。缺失的片段将使用浏览器语音。",
             "beep_style": "浏览器提示音：",
             "beep_classic": "经典",
             "beep_soft": "柔和",

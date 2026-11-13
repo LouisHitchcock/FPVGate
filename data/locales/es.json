@@ -338,6 +338,8 @@
             "race_stopped": "Carrera detenida",
             "arm_quad": "Arma tu quad",
             "starting_soon": "Salida al tono en menos de cinco",
+            "pack_preparing": "Preparando anuncios grabados: {n} %. Se usa la voz del navegador hasta que cada frase esté lista.",
+            "pack_ready": "Anuncios grabados preparados. Los clips ausentes usan la voz del navegador.",
             "beep_style": "Pitido del navegador:",
             "beep_classic": "Clásico",
             "beep_soft": "Suave",

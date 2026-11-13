@@ -337,6 +337,8 @@
             "race_stopped": "Rennen gestoppt",
             "arm_quad": "Bewaffne deinen Quad",
             "starting_soon": "Start beim Ton in weniger als fünf",
+            "pack_preparing": "Aufgezeichnete Rundenansagen werden vorbereitet: {n}%. Bis eine Ansage bereit ist, wird die Browser-Stimme verwendet.",
+            "pack_ready": "Aufgezeichnete Rundenansagen vorbereitet. Fehlende Clips verwenden die Browser-Stimme.",
             "beep_style": "Browser-Signalton:",
             "beep_classic": "Klassisch",
             "beep_soft": "Sanft",
