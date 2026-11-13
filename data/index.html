@@ -855,6 +855,7 @@
                   <input type="range" id="beepVolume" step="5" min="0" max="100" value="100" oninput="updateBeepVolume(this,value)" />
                 </div>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.volume_help">Controls spoken announcements and beeps on this browser. It does not change the gate buzzer.</div>
 
               <h3 data-i18n="settings.tts.title">TTS Settings</h3>
 
@@ -868,6 +869,7 @@
                   <option value="3lap" data-i18n="settings.tts.announcer_options.3lap">3 Consecutive Laps Time</option>
                 </select>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.announcer_help">Choose a beep, each lap time, or a rolling total of the last two or three laps. Extra beeps can be added below.</div>
 
               <div class="config-item">
                 <label for="browserBeepStyle" data-i18n="settings.tts.beep_style">Browser Beep:</label>
@@ -893,6 +895,7 @@
                   </label>
                 </div>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.every_lap_help">Adds a beep at each crossing alongside any spoken announcement. Saved in this browser.</div>
               <div class="config-item">
                 <label for="announcerGate1Beep" data-i18n="settings.tts.gate1_beep">Beep for Gate 1:</label>
                 <div style="flex: 1">
@@ -902,6 +905,7 @@
                   </label>
                 </div>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.gate1_help">Use a short beep instead of the spoken Gate 1 call. Later laps keep your selected announcement. Saved in this browser.</div>
               <div class="config-item">
                 <label for="announcerWithLapTime" data-i18n="settings.tts.with_lap_time">Say Lap Time Too:</label>
                 <div style="flex: 1">
@@ -911,7 +915,7 @@
                   </label>
                 </div>
               </div>
-              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.announcer_extras_tip">Beep Every Lap adds a beep to any announcer type. Say Lap Time Too speaks each lap time with the 2- and 3-lap totals. Both are saved in this browser.</div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.individual_lap_help">For the 2- and 3-lap announcers, speak each individual lap time as well as the rolling total. Saved in this browser.</div>
 
               <div class="config-item">
                 <label for="raceCountdownMode" data-i18n="settings.tts.race_countdown">Race Countdown:</label>
@@ -966,6 +970,7 @@
                   <input type="range" min="0.1" max="2" step="0.1" id="rate" oninput="updateAnnouncerRate(this,value)" />
                 </div>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.rate_help">Adjust how quickly announcements are spoken. 1.0 is normal speed; higher values are faster.</div>
 
               <div class="config-item">
                 <label data-i18n="settings.tts.control">Voice Control:</label>
@@ -975,6 +980,7 @@
                   <button id="GenerateAudioButton" onclick="generateAudio()" style="flex: 1; padding: 8px" data-i18n="settings.tts.test">Test Voice</button>
                 </div>
               </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.playback_help">Enable spoken announcements on this browser. Beeps follow the separate beep settings. Test Voice plays a sample announcement.</div>
 
               <div id="speakerSection" class="config-item" style="display: none;">
                 <label for="speakerEnabled" data-i18n="settings.tts.speaker_output">Speaker Output (I2S):</label>

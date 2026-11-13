@@ -79,3 +79,17 @@ html.configuration-open,html.configuration-open body{overflow:hidden}
 @media(forced-colors:active){#settingsModal button,#settingsModal input,#settingsModal select{border:1px solid ButtonText!important}#settingsModal input[type=checkbox]:checked{background:Highlight}#settingsModal input[type=checkbox]::before{background:ButtonText}#settingsModal .settings-nav-item.active{outline:2px solid Highlight}}
 /* Touch screens: 16px fields stop iOS zooming on focus; every control is at least 40px tall. */
 @media(pointer:coarse){#settingsModal input:not([type=checkbox]):not([type=range]):not([type=color]),#settingsModal select,#settingsModal button,#settingsModal .settings-nav-item{min-height:42px}#settingsModal input:not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),#settingsModal select,#settingsModal textarea{font-size:16px!important}#settingsModal .switch{height:40px!important}#settingsModal input[type=checkbox]:not(.cfg-checkbox){margin:7px 0!important}#settingsModal label:has(>input[type=checkbox]){display:inline-flex;align-items:center;min-height:40px}#settingsModal .cfg-group a{display:inline-flex;align-items:center;min-height:40px}}
+
+/* Option A: aligned rows with explanations beside their controls. */
+@media(min-width:801px){#settingsModal .cfg-row:not([style*="display: none"]):not([style*="display:none"]):not([hidden]){grid-template-columns:minmax(150px,200px) minmax(0,440px)}}
+#settingsModal .cfg-row>.cfg-row-help{grid-column:2;margin:0 0 4px!important;font-size:13px!important;line-height:1.5}
+#settingsModal .cfg-group{padding-bottom:20px;border-bottom:1px solid var(--cfg-divider)}
+#settingsModal .cfg-group:last-child{padding-bottom:0;border-bottom:0}
+#settingsModal .cfg-group>h3{border-bottom:0;margin-bottom:10px}
+#settingsModal button.cfg-download{min-height:46px;padding:10px 18px!important;font-size:14px}
+#settingsModal button.cfg-download::before{content:'\2193';font-size:20px;line-height:1;margin-right:8px}
+#settingsModal button.cfg-secondary{background:transparent!important;color:var(--cfg-muted)!important;border:1px solid var(--cfg-line)!important}
+#settingsModal .switch{min-height:44px!important}
+#settingsModal input[type=checkbox][role=switch]{outline-offset:4px}
+#settingsModal #voicePackStatus{font-size:13px!important;line-height:1.5;margin:8px 0}
+@media(max-width:800px){#settingsModal .cfg-row>.cfg-row-help{grid-column:1/-1}}

@@ -70,9 +70,8 @@ const SettingsUI = (() => {
   function enhanceRows(root) {
     root.querySelectorAll('.config-item').forEach(node => node.classList.add('cfg-row'));
     root.querySelectorAll('input[type="checkbox"]').forEach(input => {
-      const native = ['otaPreReleaseToggle','elrsForget','serialAutoScroll','raceAnalyticsToggleConsistency','raceAnalyticsToggleLapTimes'].includes(input.id);
-      input.classList.toggle('cfg-checkbox', native);
-      if (!native) input.setAttribute('role','switch');
+      input.classList.remove('cfg-checkbox');
+      input.setAttribute('role','switch');
       if (!input.id && input.dataset.evPref) input.id = 'cfg-event-' + input.dataset.evPref;
       if ([...(input.labels || [])].some(n=>n.textContent.trim()) || input.getAttribute('aria-label') || input.getAttribute('aria-labelledby')) return;
       const switchLabel = input.closest('.switch');
@@ -91,11 +90,13 @@ const SettingsUI = (() => {
     });
     root.querySelectorAll('.config-item').forEach(node => {
       const help = node.nextElementSibling;
-      const input = node.querySelector('input,select');
+      const input = node.querySelector('input,select,button');
       if (input && help && /margin-left:\s*170px/.test(help.getAttribute('style') || '')) {
         help.classList.add('cfg-help');
         if (!help.id) help.id = 'cfg-help-' + input.id;
         input.setAttribute('aria-describedby', [...new Set((input.getAttribute('aria-describedby') || '').split(' ').filter(Boolean).concat(help.id))].join(' '));
+        help.classList.add('cfg-row-help');
+        node.append(help);
       }
     });
   }
@@ -220,8 +221,19 @@ const SettingsUI = (() => {
     add(pages.general,'Race limits','limits',block(source.general,'settings.race_setup.title'));
     add(pages.general,'Race start','start',[countdown]);
     add(pages.pilot,'Pilot & channel','pilot',contents(source.pilot));
-    add(pages.audio,'Announcements & voice','announcements',block(source.general,'settings.tts.title'));
-    add(pages.audio,'Output','output',[volume]);
+    const audioNodes = block(source.general,'settings.tts.title');
+    // Move the original nodes, preserving handlers, values and download status.
+    const audioSource = element('div'); audioSource.append(...audioNodes); source.general.append(audioSource);
+    add(pages.audio,'Announcements','announcements',[
+      row('announcerSelect'), row('lapFormatSelect')]);
+    add(pages.audio,'Beeps','beeps',[
+      row('browserBeepStyle'), row('announcerBeepEveryLap'),
+      row('announcerGate1Beep'), row('announcerWithLapTime')]);
+    add(pages.audio,'Voice & playback','voiceAndPlayback',[
+      row('voiceSelect'), ...audioSource.children, volume]);
+    pages.audio.querySelector('#downloadVoicePackButton').classList.add('cfg-primary','cfg-download');
+    pages.audio.querySelector('#removeVoicePackButton').classList.add('cfg-secondary');
+    audioSource.remove();
     add(pages.tracks,'Track distance','tracks',contents(source.tracks));
     add(pages.system,'Receiver & signal filtering','receiver',block(source.system,'settings.system.receiver_radio'));
     add(pages.system,'Battery monitoring','battery',block(source.system,'settings.system.battery'));
