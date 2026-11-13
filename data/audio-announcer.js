@@ -43,6 +43,12 @@ class AudioAnnouncer {
         // Pre-recorded audio cache
         this.audioCache = new Map();
         this.preloadedAudios = new Set();
+        this.audioSources = new Map();
+        this.audioLoads = new Map();
+        this.audioSourceBytes = 0;
+        this.audioSourceGeneration = 0;
+        this.maxAudioSourceBytes = 2 * 1024 * 1024;
+        this.maxAudioSources = 128;
         
         // Single reusable Audio element for mobile compatibility
         // Mobile browsers restrict creating new Audio() without user gesture
@@ -136,25 +142,80 @@ class AudioAnnouncer {
      * Check if pre-recorded audio exists for this phrase
      */
     async hasPrerecordedAudio(audioPath) {
-        if (this.preloadedAudios.has(audioPath)) {
-            return true;
+        return !!(await this.loadAudioSource(audioPath));
+    }
+
+    // Consume each response before playing. A GET used only as an existence
+    // check left an unread download competing with the audio element's second
+    // GET for the gate's single file-transfer slot.
+    async loadAudioSource(audioPath) {
+        const cached = this.audioSources.get(audioPath);
+        if (cached) {
+            this.audioSources.delete(audioPath);
+            this.audioSources.set(audioPath, cached);
+            return cached.url;
         }
-        
-        try {
-            // Use GET instead of HEAD for better compatibility
-            const response = await fetch(audioPath, { method: 'GET', cache: 'no-cache' });
-            if (response.ok) {
+        if (this.audioLoads.has(audioPath)) return this.audioLoads.get(audioPath);
+        const generation = this.audioSourceGeneration;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const pending = (async () => {
+            try {
+                const response = await fetch(audioPath, { signal: controller.signal });
+                if (!response.ok) {
+                    if (response.body) await response.body.cancel();
+                    return null;
+                }
+                const blob = await response.blob();
+                if (generation !== this.audioSourceGeneration || !blob.size || blob.size > this.maxAudioSourceBytes) return null;
+                while (this.audioSources.size >= this.maxAudioSources || this.audioSourceBytes + blob.size > this.maxAudioSourceBytes) {
+                    // Keep race confirmations warm throughout a long race.
+                    const oldest = [...this.audioSources.keys()].find(path => !/(?:^|\/)(gate_1|race_complete|race_stopped)\.mp3$/.test(path));
+                    if (!oldest) return null;
+                    const entry = this.audioSources.get(oldest);
+                    URL.revokeObjectURL(entry.url);
+                    this.audioSourceBytes -= entry.size;
+                    this.audioSources.delete(oldest);
+                    this.preloadedAudios.delete(oldest);
+                }
+                const url = URL.createObjectURL(blob);
+                this.audioSources.set(audioPath, { url, size: blob.size });
+                this.audioSourceBytes += blob.size;
                 this.preloadedAudios.add(audioPath);
-                console.log('[AudioAnnouncer] Verified audio file exists:', audioPath);
-                return true;
-            } else {
-                console.warn('[AudioAnnouncer] Audio file not found (status ' + response.status + '):', audioPath);
+                return url;
+            } catch (error) {
+                console.warn('[AudioAnnouncer] Audio download failed:', audioPath, error);
+                return null;
+            } finally {
+                clearTimeout(timeout);
             }
-        } catch (e) {
-            console.warn('[AudioAnnouncer] Error checking audio file:', audioPath, e);
+        })();
+        this.audioLoads.set(audioPath, pending);
+        try {
+            return await pending;
+        } finally {
+            if (this.audioLoads.get(audioPath) === pending) this.audioLoads.delete(audioPath);
         }
-        
-        return false;
+    }
+
+    async preloadRaceAudio() {
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return;
+        const generation = this.audioSourceGeneration;
+        // Sequential downloads avoid flooding the gate during page startup.
+        for (const file of ['gate_1.mp3', 'race_complete.mp3', 'race_stopped.mp3']) {
+            if (generation !== this.audioSourceGeneration) return;
+            await this.resolveAudioPath(`${primary}/${file}`);
+        }
+    }
+
+    clearAudioSources() {
+        ++this.audioSourceGeneration;
+        for (const entry of this.audioSources.values()) URL.revokeObjectURL(entry.url);
+        this.audioSources.clear();
+        this.audioLoads.clear();
+        this.audioSourceBytes = 0;
+        this.preloadedAudios.clear();
     }
 
     /**
@@ -163,6 +224,8 @@ class AudioAnnouncer {
      * @param {number} overlapMs - Milliseconds to resolve early for crossfade (default: 50ms)
      */
     async playPrerecorded(audioPath, overlapMs = 50) {
+        const source = await this.loadAudioSource(audioPath);
+        if (!source) throw new Error(`Audio unavailable: ${audioPath}`);
         return new Promise((resolve, reject) => {
             // Use reusable audio element if available (mobile compatibility)
             // This avoids creating new Audio() which can fail without user gesture
@@ -203,7 +266,7 @@ class AudioAnnouncer {
             };
             
             // Set source and play
-            audio.src = audioPath;
+            audio.src = source;
             
             // Play when ready
             const playAudio = () => {
@@ -751,7 +814,8 @@ class AudioAnnouncer {
         
         // Clear audio cache so new voice files are loaded
         this.audioCache.clear();
-        this.preloadedAudios.clear();
+        this.clearAudioSources();
+        if (this.audioEnabled) this.preloadRaceAudio();
         
         console.log('[AudioAnnouncer] Voice changed, cache cleared');
     }
@@ -762,6 +826,7 @@ class AudioAnnouncer {
     async enable() {
         this.audioEnabled = true;
         console.log('[AudioAnnouncer] Audio enabled');
+        this.preloadRaceAudio();
         
         // Mobile browsers require audio to be "unlocked" with user interaction
         await this.unlockAudioContextMobile();
