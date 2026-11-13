@@ -435,6 +435,9 @@
         "tts": {
             "title": "TTS Settings",
             "announcer_type": "Announcer Type:",
+            "pack_wait_race": "Voice preparation resumes after this race.",
+            "pack_wait_memory": "Voice preparation is waiting for memory on the gate ({n} KB free). Browser voice remains available.",
+            "pack_wait_connection": "Voice preparation is waiting for the gate to respond.",
             "pack_paused": "Recorded voice preparation paused while the gate is busy. Browser voice remains available.",
             "pack_preparing": "Preparing recorded lap audio: {n}%. Start the next race after preparation to use the pack.",
             "pack_incomplete": "Some recorded clips are unavailable. Browser voice will be used for the next race.",

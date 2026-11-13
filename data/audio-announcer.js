@@ -233,20 +233,26 @@ class AudioAnnouncer {
     async waitForAudioBudget(generation) {
         while (this.audioEnabled && generation === this.audioSourceGeneration) {
             let available = false;
+            let reason = 'pack_wait_race', freeKB = 0;
             if (!(typeof raceRunning !== 'undefined' && raceRunning)) {
+                reason = 'pack_wait_connection';
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 5000);
                 try {
                     const response = await fetch('/api/system/info', {signal:controller.signal});
                     if (response.ok) {
                         const state = await response.json();
-                        available = state.heapFree >= 55000 && state.heapLargest >= 16000 && state.requestsNow <= 4;
+                        // requestsNow includes persistent/SSE connections until
+                        // disconnect. It is not a count of active file transfers.
+                        available = state.heapFree >= 55000 && state.heapLargest >= 16000;
+                        reason = 'pack_wait_memory';
+                        freeKB = Math.round(state.heapFree / 1024);
                     } else if (response.body) await response.body.cancel();
                 } catch (_) {}
                 finally { clearTimeout(timeout); }
             }
             if (available) return true;
-            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_paused') : 'Recorded voice preparation paused while the gate is busy. Browser voice remains available.');
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.' + reason, { n: freeKB }) : reason === 'pack_wait_race' ? 'Voice preparation resumes after this race.' : reason === 'pack_wait_memory' ? `Voice preparation is waiting for memory on the gate (${freeKB} KB free). Browser voice remains available.` : 'Voice preparation is waiting for the gate to respond.');
             await this.sleep(5000);
         }
         return false;

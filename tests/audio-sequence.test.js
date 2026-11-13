@@ -57,3 +57,10 @@ test('low gate memory delays preparation until the request budget recovers',asyn
 test('automatic enable waits for interaction before attempting media unlock',async()=>{
  const {a}=setup();a.unlockAudioContextMobile=jest.fn();a.startSpeechKeepalive=()=>{};a.processQueue=()=>{};await a.enable();expect(a.unlockAudioContextMobile).not.toHaveBeenCalled();expect(a.preloadTimer).toBeNull();
 });
+
+test('idle persistent connections do not prevent preparation when memory has headroom',async()=>{
+ const {a,ctx}=setup();ctx.fetch.mockResolvedValue({ok:true,json:async()=>({heapFree:58416,heapLargest:27636,requestsNow:8})});expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(true);
+});
+test('memory pause explains the actual reason and available memory',async()=>{
+ const {a,ctx}=setup();ctx.fetch.mockResolvedValue({ok:true,json:async()=>({heapFree:45056,heapLargest:27636,requestsNow:1})});a.updatePackStatus=jest.fn();a.sleep=async()=>{a.audioEnabled=false};expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(false);expect(a.updatePackStatus.mock.calls[0][0]).toContain('44 KB free');
+});
