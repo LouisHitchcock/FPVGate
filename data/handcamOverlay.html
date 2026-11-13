@@ -343,12 +343,12 @@
     <div class="panel top-left">
       <div class="stack">
         <div>
-          <div class="label">Lap</div>
+          <div class="label" data-i18n="osd.table_lap">Lap</div>
           <div class="value info" id="lapCount">0/8</div>
         </div>
         <div class="divider"></div>
         <div>
-          <div class="label">Fastest</div>
+          <div class="label" data-i18n="osd.fastest_lap">Fastest</div>
           <div class="value good" id="fastest">--</div>
         </div>
       </div>
@@ -356,7 +356,7 @@
 
     <div class="panel top-center">
       <div class="top-center-inner" id="currentPanel">
-        <div class="label">Current Lap</div>
+        <div class="label" data-i18n="osd.current_lap">Current Lap</div>
         <div class="value-big" id="currentLap">0.00s</div>
       </div>
     </div>
@@ -364,21 +364,21 @@
     <div class="panel top-right">
       <div class="stack">
         <div>
-          <div class="label">Last Lap</div>
+          <div class="label" data-i18n="osd.last_lap">Last Lap</div>
           <div class="value" id="lastLap">--</div>
         </div>
         <div>
-          <div class="label">Gap to Fastest</div>
+          <div class="label" data-i18n="osd.gap_to_fastest">Gap to Fastest</div>
           <div class="value" id="gap">--</div>
         </div>
         <div class="divider"></div>
         <div class="mini-grid">
           <div class="mini-stat">
-            <div class="label">B3</div>
+            <div class="label" data-i18n="osd.best_3_short">B3</div>
             <div class="value good2" id="best3">--</div>
           </div>
           <div class="mini-stat">
-            <div class="label">Med</div>
+            <div class="label" data-i18n="osd.median_short">Med</div>
             <div class="value" id="median">--</div>
           </div>
         </div>
@@ -386,11 +386,11 @@
     </div>
 
     <div class="panel recent-panel">
-      <div class="label panel-title">Recent Laps</div>
+      <div class="label panel-title" data-i18n="osd.recent_laps">Recent Laps</div>
       <div class="recent-grid">
-        <span>Lap</span>
-        <span>Time</span>
-        <span>Gap</span>
+        <span data-i18n="osd.table_lap">Lap</span>
+        <span data-i18n="osd.table_time">Time</span>
+        <span data-i18n="osd.table_gap">Gap</span>
       </div>
       <div class="recent-viewport">
         <div class="recent-rows" id="recentRows"></div>
@@ -398,7 +398,7 @@
     </div>
 
     <div class="panel rssi-panel" id="rssiPanel">
-      <div class="label panel-title">RSSI Graph</div>
+      <div class="label panel-title" data-i18n="osd.rssi_graph">RSSI Graph</div>
       <div class="rssi-layout">
 
         <div class="rssi-graph-wrap">
@@ -410,6 +410,7 @@
 
   <div class="safe-guides"></div>
   <div class="debug-chip" id="debugChip"></div>
+  <script src="i18n.js?v=1.7.2"></script>
   <script src="smoothie.js?v=1.7.2"></script>
 
   <script>

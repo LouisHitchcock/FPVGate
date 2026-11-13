@@ -32,10 +32,14 @@ class I18n {
 
   async loadLocale(lang) {
     if (this.locales[lang]) return;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
-      // Use absolute path for mobile browser compatibility (Safari/Firefox)
+      // Use absolute path for mobile browser compatibility (Safari/Firefox).
+      // The timeout keeps a stalled catalogue request from holding up the app.
       const response = await fetch(`/locales/${lang}.json`, {
-        cache: 'no-cache'
+        cache: 'no-cache',
+        signal: controller.signal
       });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -53,6 +57,8 @@ class I18n {
         console.log(`[i18n] Falling back to: ${this.fallbackLang}`);
         await this.loadLocale(this.fallbackLang);
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -127,6 +133,18 @@ class I18n {
       el.placeholder = this.t(key);
     });
 
+    // Attributes that cannot carry text content, such as tooltips and
+    // optgroup labels, are translated in place.
+    document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+      el.title = this.t(el.getAttribute("data-i18n-title"));
+    });
+    document.querySelectorAll("[data-i18n-label]").forEach((el) => {
+      el.label = this.t(el.getAttribute("data-i18n-label"));
+    });
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+      el.setAttribute("aria-label", this.t(el.getAttribute("data-i18n-aria-label")));
+    });
+
     // Update select options if needed
     document.querySelectorAll("[data-i18n-options]").forEach((el) => {
       const key = el.getAttribute("data-i18n-options");
@@ -154,5 +172,7 @@ class I18n {
 
 const i18n = new I18n();
 document.addEventListener("DOMContentLoaded", () => {
-  i18n.init();
+  // Exposed so the app can wait for the catalogue before its first render;
+  // otherwise dynamically built tables would show raw dotted keys.
+  i18n.ready = i18n.init();
 });

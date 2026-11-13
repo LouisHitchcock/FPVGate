@@ -78,9 +78,11 @@ const bandNames = ['A',
 // Initialize on load
 window.addEventListener('load', () => {
   console.log('FPVGate OSD loaded');
-  loadConfig();
+  // Subscribe before waiting for the catalogue: /events does not replay laps,
+  // so a lap during locale loading would otherwise be lost.
   connectToEvents();
   startCurrentLapTimer();
+  loadConfig();
 });
 
 // Load configuration
@@ -109,7 +111,11 @@ function loadConfig() {
     })
     .catch(error => {
       console.error('Failed to load config:', error);
-      pilotCallsignElem.textContent = i18n.t('osd.connection_error');
+      const showConnectionError = () => {
+        pilotCallsignElem.textContent = i18n.t('osd.connection_error');
+      };
+      if (i18n.ready) i18n.ready.then(showConnectionError);
+      else showConnectionError();
     });
 }
 

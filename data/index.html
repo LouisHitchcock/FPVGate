@@ -134,7 +134,7 @@
     <!-- Removed by script.js once the app has initialised. Mirrors the real
          shell - header, tab strip, timer, controls, list - so the layout does
          not jump when the content replaces it. -->
-    <div id="appSkeleton" role="status" aria-live="polite" aria-label="Loading FPVGate">
+    <div id="appSkeleton" role="status" aria-live="polite" aria-label="Loading FPVGate" data-i18n-aria-label="common.loading">
       <div class="sk-row sk-header">
         <div class="sk sk-logo"></div>
         <div class="sk sk-pill"></div>
@@ -267,7 +267,7 @@
         <!-- Debug RSSI Overlay (shown when debug mode enabled) -->
         <div id="debugRssiOverlay" style="display: none; position: fixed; bottom: 12px; right: 12px; width: 320px; height: 120px; background: rgba(0,0,0,0.85); border-radius: 8px; border: 1px solid var(--border-color); z-index: 1100; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
           <div id="debugRssiDragHandle" style="display: flex; justify-content: space-between; align-items: center; padding: 0 6px; margin-bottom: 2px; cursor: grab; user-select: none;">
-            <span style="font-size: 10px; color: var(--secondary-color); font-weight: bold;">&#x2630; RSSI DEBUG</span>
+            <span style="font-size: 10px; color: var(--secondary-color); font-weight: bold;">&#x2630; <span data-i18n="race.rssi_debug">RSSI DEBUG</span></span>
             <div style="display: flex; align-items: center; gap: 8px;">
               <span id="debugRssiValue" style="font-size: 10px; color: var(--primary-color); font-family: monospace;">--</span>
               <button id="debugRssiPopoutBtn" onclick="openRssiDebugPopout(event)" title="Open RSSI debug in a new window" data-i18n-title="settings.diagnostics.debug_popout" style="background: transparent; border: 1px solid var(--border-color); color: var(--primary-color); padding: 0 6px; margin: 0; font-size: 11px; line-height: 16px; height: 18px; border-radius: 3px; cursor: pointer;">&#x29C9;</button>
@@ -278,23 +278,23 @@
 
         <!-- Sync Mode: Race Analysis (Multi-Pilot) -->
         <div id="raceAnalysis" class="lap-analysis" style="display: none;">
-          <h3>Race Analysis</h3>
+          <h3 data-i18n="analysis.race_title">Race Analysis</h3>
           <div class="stats-boxes" style="margin-bottom: 12px;">
             <div class="stat-box">
-              <div class="stat-label">Best 3 Laps</div>
+              <div class="stat-label" data-i18n="analysis.best_3_laps">Best 3 Laps</div>
               <div class="stat-value" id="raceAlwaysBest3">--</div>
             </div>
             <div class="stat-box">
-              <div class="stat-label">Median Lap</div>
+              <div class="stat-label" data-i18n="analysis.median_lap">Median Lap</div>
               <div class="stat-value" id="raceAlwaysMedian">--</div>
             </div>
           </div>
-          <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;">
+          <div id="raceAnalysisEmptyMessage" class="no-data" style="display: none; padding: 16px 20px;" data-i18n="analysis.race_empty">
             Enable at least one analytics tab in System Settings to display additional race analytics.
           </div>
           <div id="raceAnalyticsTabs" class="analysis-tabs" style="margin-top: 8px;"></div>
           <div id="raceAnalysisContent" class="analysis-content" style="min-height: 350px;">
-            <p class="no-data">Enable an analytics tab to display race analytics</p>
+            <p class="no-data" data-i18n="analysis.race_no_tab">Enable an analytics tab to display race analytics</p>
           </div>
         </div>
       </div>
@@ -378,10 +378,10 @@
             <div class="calib-input-group" style="flex: 1; margin: 0;">
               <label data-i18n="calib.system" style="margin-bottom: 4px;">System</label>
               <select id="calibSystemSelect" class="calib-select">
-                <option value="analog">Analog</option>
-                <option value="hdzero">HDZero</option>
-                <option value="walksnail">Walksnail</option>
-                <option value="dji">DJI</option>
+                <option value="analog" data-i18n="settings.pilot.system_options.analog">Analog</option>
+                <option value="hdzero" data-i18n="settings.pilot.system_options.hdzero">HDZero</option>
+                <option value="walksnail" data-i18n="settings.pilot.system_options.walksnail">Walksnail</option>
+                <option value="dji" data-i18n="settings.pilot.system_options.dji">DJI</option>
               </select>
             </div>
             <div class="calib-input-group" style="flex: 1; margin: 0;">
@@ -490,10 +490,10 @@
         <div class="marshal-layout">
           <div class="marshal-graph-col">
             <div class="marshal-chart-wrap" id="marshalChartWrap">
-              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select."></canvas>
+              <canvas id="marshalChart" width="760" height="320" class="marshal-chart" tabindex="0" role="img" aria-label="Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select." data-i18n-aria-label="history.marshal_chart_aria"></canvas>
               <div class="marshal-zoom-controls">
-                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomIn()" title="Zoom in" aria-label="Zoom in">+</button>
-                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomOut()" title="Zoom out" aria-label="Zoom out">−</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomIn()" title="Zoom in" aria-label="Zoom in" data-i18n-title="history.marshal_zoom_in" data-i18n-aria-label="history.marshal_zoom_in">+</button>
+                <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomOut()" title="Zoom out" aria-label="Zoom out" data-i18n-title="history.marshal_zoom_out" data-i18n-aria-label="history.marshal_zoom_out">−</button>
                 <button type="button" class="marshal-btn marshal-zoom-btn" onclick="marshalZoomReset()" data-i18n="history.marshal_zoom_reset">Reset</button>
               </div>
             </div>
@@ -539,10 +539,10 @@
             </div>
           </div>
 
-          <aside class="marshal-list-col" aria-label="Pass list">
+          <aside class="marshal-list-col" aria-label="Pass list" data-i18n-aria-label="history.marshal_pass_list_aria">
             <h4 class="marshal-list-title" data-i18n="history.marshal_passes_title">Lap Times</h4>
             <p id="marshalListHint" class="marshal-list-hint" data-i18n="history.marshal_list_hint">Click a lap to locate it on the graph.</p>
-            <div id="marshalLapsList" class="marshal-laps-list" role="listbox" aria-label="Recorded gate passes"></div>
+            <div id="marshalLapsList" class="marshal-laps-list" role="listbox" aria-label="Recorded gate passes" data-i18n-aria-label="history.marshal_passes_aria"></div>
 
             <!-- Shown only when a race has no RSSI trace. With no graph to drag
                  markers on, typed entry is the only way to correct lap times. -->
@@ -551,7 +551,7 @@
             <button type="button" id="marshalAddLapBtn" class="marshal-btn" style="display: none; width: 100%; margin-top: 8px" onclick="addLapToEditor()" data-i18n="history.edit_add_lap">+ Add Lap</button>
           </aside>
 
-          <aside class="marshal-details-col" aria-label="Race details">
+          <aside class="marshal-details-col" aria-label="Race details" data-i18n-aria-label="history.marshal_details_aria">
             <h4 class="marshal-list-title" data-i18n="history.edit_details_title">Race Details</h4>
             <div class="marshal-field">
               <label for="raceName" data-i18n="history.edit_race_name">Race Name:</label>
@@ -623,7 +623,7 @@
           <div class="wizard-instructions">
             <p><strong data-i18n="calib.wizard_marking_instructions">Click on the chart to mark the highest point (peak) for each lap:</strong></p>
           </div>
-          <div id="wizardManualStatus" style="margin: 12px 0; padding: 8px; background-color: var(--bg-secondary); border-radius: 4px; font-weight: bold">Mark Peak 1</div>
+          <div id="wizardManualStatus" style="margin: 12px 0; padding: 8px; background-color: var(--bg-secondary); border-radius: 4px; font-weight: bold" data-i18n="calib.wizard_mark_peak_n" data-i18n-params='{"n": 1}'>Mark Peak 1</div>
           <div style="position: relative">
             <canvas id="wizardChart" style="cursor: crosshair; border: 2px solid var(--border-color); border-radius: 4px"></canvas>
           </div>
@@ -662,7 +662,7 @@
               <label data-i18n="calib.wizard_min_lap">Min Lap Time:</label>
               <div class="result-value-input-wrap">
                 <input type="number" id="calculatedMinLap" class="result-value-input result-value-input-minlap" min="1" max="20" step="0.1" inputmode="decimal" />
-                <span class="result-value-unit">s</span>
+                <span class="result-value-unit" data-i18n="race.table.seconds_short">s</span>
               </div>
             </div>
             <div class="result-item result-item-meta">
@@ -847,7 +847,7 @@
               </div>
 
               <div id="speakerSection" class="config-item" style="display: none;">
-                <label for="speakerEnabled">Speaker Output (I2S):</label>
+                <label for="speakerEnabled" data-i18n="settings.tts.speaker_output">Speaker Output (I2S):</label>
                 <div style="flex: 1">
                   <label class="switch">
                     <input type="checkbox" id="speakerEnabled" onchange="toggleSpeaker(this.checked)" />
@@ -855,7 +855,7 @@
                   </label>
                 </div>
               </div>
-              <div id="speakerNote" style="display: none; font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Plays announcements through the attached MAX98357A speaker</div>
+              <div id="speakerNote" style="display: none; font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.speaker_note">Plays announcements through the attached MAX98357A speaker</div>
             </div>
 
             <!-- Pilot Section -->
@@ -866,10 +866,10 @@
                 <div class="config-item">
                   <label for="systemSelect" data-i18n="settings.pilot.system">System:</label>
                   <select id="systemSelect">
-                    <option value="analog">Analog</option>
-                    <option value="hdzero">HDZero</option>
-                    <option value="walksnail">Walksnail</option>
-                    <option value="dji">DJI</option>
+                    <option value="analog" data-i18n="settings.pilot.system_options.analog">Analog</option>
+                    <option value="hdzero" data-i18n="settings.pilot.system_options.hdzero">HDZero</option>
+                    <option value="walksnail" data-i18n="settings.pilot.system_options.walksnail">Walksnail</option>
+                    <option value="dji" data-i18n="settings.pilot.system_options.dji">DJI</option>
                   </select>
                 </div>
 
@@ -979,7 +979,7 @@
               <h2 data-i18n="settings.led.title">LED Setup</h2>
 
               <div class="config-item">
-                <label for="ledPreset">LED Preset:</label>
+                <label for="ledPreset" data-i18n="settings.led.preset">LED Preset:</label>
                 <select id="ledPreset" onchange="changeLedPreset()">
                   <option value="0" data-i18n="settings.led.presets.off">Off</option>
                   <option value="1" data-i18n="settings.led.presets.solid">Solid Colour</option>
@@ -1084,63 +1084,63 @@
                 <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.led.lap_flash_tip">Send /Lap webhook (White flash)</div>
 
                 <div class="config-item" style="margin-top: 16px">
-                  <label for="leaderColorMode">Race Leader Color:</label>
+                  <label for="leaderColorMode" data-i18n="settings.led.race_leader_color">Race Leader Color:</label>
                   <select id="leaderColorMode" onchange="saveLeaderColorMode()">
-                    <option value="0">Disabled</option>
-                    <option value="1">Highest Lap Count</option>
-                    <option value="2">Fastest Lap</option>
-                    <option value="3">Fastest 3 Consecutive</option>
-                    <option value="4">Most Recent Lap</option>
-                    <option value="5">Fastest Average</option>
+                    <option value="0" data-i18n="settings.led.leader_disabled">Disabled</option>
+                    <option value="1" data-i18n="settings.led.leader_highest_lap">Highest Lap Count</option>
+                    <option value="2" data-i18n="settings.led.leader_fastest_lap">Fastest Lap</option>
+                    <option value="3" data-i18n="settings.led.leader_fastest_3">Fastest 3 Consecutive</option>
+                    <option value="4" data-i18n="settings.led.leader_most_recent">Most Recent Lap</option>
+                    <option value="5" data-i18n="settings.led.leader_fastest_average">Fastest Average</option>
                   </select>
                 </div>
-                <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Automatically set gate LEDs to the race leader's pilot color</div>
+                <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.led.leader_tip">Automatically set gate LEDs to the race leader's pilot color</div>
 
-                <h4 style="margin-top: 20px; margin-bottom: 12px">Gate LED Control</h4>
+                <h4 style="margin-top: 20px; margin-bottom: 12px" data-i18n="settings.led.gate_control_title">Gate LED Control</h4>
 
                 <!-- All Gates Master Control -->
                 <div style="padding: 14px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 12px">
                   <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer" onclick="document.getElementById('allGatesPanel').style.display = document.getElementById('allGatesPanel').style.display === 'none' ? 'block' : 'none'">
-                    <span style="font-weight: bold; font-size: 15px">All Gates</span>
-                    <span style="font-size: 12px; color: var(--secondary-color)">Master Control</span>
+                    <span style="font-weight: bold; font-size: 15px" data-i18n="settings.led.all_gates">All Gates</span>
+                    <span style="font-size: 12px; color: var(--secondary-color)" data-i18n="settings.led.master_control">Master Control</span>
                   </div>
                   <div id="allGatesPanel" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color)">
                     <div class="config-item" style="margin-bottom: 8px">
-                      <label style="min-width: 80px">Effect:</label>
+                      <label style="min-width: 80px" data-i18n="settings.led.effect">Effect:</label>
                       <select id="gateEffectAll" style="flex: 1">
-                        <option value="off">Off</option>
-                        <option value="solid" selected>Solid</option>
-                        <option value="rainbow">Rainbow</option>
-                        <option value="fade">Color Fade</option>
-                        <option value="pulse">Pulse</option>
-                        <option value="sparkle">Sparkle</option>
+                        <option value="off" data-i18n="settings.led.effects.off">Off</option>
+                        <option value="solid" selected data-i18n="settings.led.effects.solid">Solid</option>
+                        <option value="rainbow" data-i18n="settings.led.effects.rainbow">Rainbow</option>
+                        <option value="fade" data-i18n="settings.led.effects.fade">Color Fade</option>
+                        <option value="pulse" data-i18n="settings.led.effects.pulse">Pulse</option>
+                        <option value="sparkle" data-i18n="settings.led.effects.sparkle">Sparkle</option>
                       </select>
                     </div>
                     <div class="config-item" style="margin-bottom: 8px">
-                      <label style="min-width: 80px">Color:</label>
+                      <label style="min-width: 80px" data-i18n="settings.led.color">Color:</label>
                       <input type="color" id="gateColorAll" value="#FF0000" style="height: 36px; flex: 1; max-width: 80px; border: 2px solid var(--border-color); border-radius: 4px" />
                     </div>
                     <div class="config-item" style="margin-bottom: 8px">
-                      <label style="min-width: 80px">Brightness:</label>
+                      <label style="min-width: 80px" data-i18n="settings.led.brightness_short">Brightness:</label>
                       <div style="flex: 1; display: flex; align-items: center; gap: 8px">
                         <input type="range" id="gateBrightnessAll" min="0" max="255" value="200" style="flex: 1" oninput="document.getElementById('gateBrightnessAllVal').textContent=this.value" />
                         <span id="gateBrightnessAllVal" style="font-size: 13px; min-width: 28px">200</span>
                       </div>
                     </div>
                     <div class="config-item" style="margin-bottom: 12px">
-                      <label style="min-width: 80px">Speed:</label>
+                      <label style="min-width: 80px" data-i18n="settings.led.speed_short">Speed:</label>
                       <div style="flex: 1; display: flex; align-items: center; gap: 8px">
                         <input type="range" id="gateSpeedAll" min="1" max="100" value="50" style="flex: 1" oninput="document.getElementById('gateSpeedAllVal').textContent=this.value" />
                         <span id="gateSpeedAllVal" style="font-size: 13px; min-width: 28px">50</span>
                       </div>
                     </div>
-                    <button onclick="sendToAllGates()" style="width: 100%; background-color: var(--accent-color)">Apply to All Gates</button>
+                    <button onclick="sendToAllGates()" style="width: 100%; background-color: var(--accent-color)" data-i18n="settings.led.apply_all_gates">Apply to All Gates</button>
                   </div>
                 </div>
 
                 <!-- Individual Gate Devices -->
                 <div id="gateDevicesList">
-                  <p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">Loading gate devices...</p>
+                  <p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px" data-i18n="settings.led.loading_gates">Loading gate devices...</p>
                 </div>
               </div>
             </div>
@@ -1214,39 +1214,39 @@
                 <!-- RotorHazard config panel (shown when RH mode selected) -->
                 <div id="rhConfigPanel" style="display: none; margin-top: 8px">
                   <div class="config-item">
-                    <label for="rhHostIP">RH Host IP:</label>
-                    <input type="text" id="rhHostIP" placeholder="e.g. 192.168.0.50" maxlength="31" style="flex: 1" />
+                    <label for="rhHostIP" data-i18n="settings.sync.rh_host_ip">RH Host IP:</label>
+                    <input type="text" id="rhHostIP" placeholder="e.g. 192.168.0.50" maxlength="31" style="flex: 1" data-i18n-placeholder="settings.sync.rh_host_placeholder" />
                   </div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">IP address of the RotorHazard server (port 5000 is used automatically)</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.sync.rh_host_tip">IP address of the RotorHazard server (port 5000 is used automatically)</div>
 
                   <div class="config-item" style="margin-top: 12px">
-                    <label for="rhNodeIndex">Node Seat (0-7):</label>
+                    <label for="rhNodeIndex" data-i18n="settings.sync.rh_node_seat">Node Seat (0-7):</label>
                     <select id="rhNodeIndex">
-                      <option value="0">Seat 0</option>
-                      <option value="1">Seat 1</option>
-                      <option value="2">Seat 2</option>
-                      <option value="3">Seat 3</option>
-                      <option value="4">Seat 4</option>
-                      <option value="5">Seat 5</option>
-                      <option value="6">Seat 6</option>
-                      <option value="7">Seat 7</option>
+                      <option value="0" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 0}'>Seat 0</option>
+                      <option value="1" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 1}'>Seat 1</option>
+                      <option value="2" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 2}'>Seat 2</option>
+                      <option value="3" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 3}'>Seat 3</option>
+                      <option value="4" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 4}'>Seat 4</option>
+                      <option value="5" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 5}'>Seat 5</option>
+                      <option value="6" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 6}'>Seat 6</option>
+                      <option value="7" data-i18n="settings.sync.rh_seat_n" data-i18n-params='{"n": 7}'>Seat 7</option>
                     </select>
                   </div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px">Which RH node seat this FPVGate corresponds to</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.sync.rh_node_tip">Which RH node seat this FPVGate corresponds to</div>
 
                   <div class="config-item" style="margin-top: 12px">
-                    <label>Connection Status:</label>
+                    <label data-i18n="settings.sync.rh_connection_status">Connection Status:</label>
                     <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                      <span id="rhStatusBadge" style="padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; background-color: var(--bg-secondary); color: var(--secondary-color)">Unknown</span>
-                      <button onclick="refreshRHStatus()" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)">Refresh</button>
+                      <span id="rhStatusBadge" style="padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; background-color: var(--bg-secondary); color: var(--secondary-color)" data-i18n="settings.sync.rh_unknown">Unknown</span>
+                      <button onclick="refreshRHStatus()" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)" data-i18n="settings.sync.rh_refresh">Refresh</button>
                     </div>
                   </div>
 
                   <div class="config-item" style="margin-top: 12px">
-                    <label>Clock Sync:</label>
+                    <label data-i18n="settings.sync.rh_clock_sync">Clock Sync:</label>
                     <div style="flex: 1; display: flex; align-items: center; gap: 8px">
-                      <span id="rhSyncStatus" style="font-size: 12px; color: var(--secondary-color)">Not synced</span>
-                      <button onclick="syncRHClock()" id="rhSyncBtn" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)">Sync Now</button>
+                      <span id="rhSyncStatus" style="font-size: 12px; color: var(--secondary-color)" data-i18n="settings.sync.rh_not_synced">Not synced</span>
+                      <button onclick="syncRHClock()" id="rhSyncBtn" style="padding: 4px 12px; font-size: 12px; background-color: var(--accent-color)" data-i18n="settings.sync.rh_sync_now">Sync Now</button>
                     </div>
                   </div>
                 </div>
@@ -1336,8 +1336,8 @@
                 </div>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.system.notes_auto_open_tip">Automatically open race notes when a race is stopped.</div>
-              <h3>Race Analytics Display</h3>
-              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);">
+              <h3 data-i18n="settings.system.race_analytics_title">Race Analytics Display</h3>
+              <div style="margin-bottom: 16px; padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--secondary-color);" data-i18n="settings.system.race_analytics_desc">
                 Choose which multi-pilot race analytics panels to display in the Race tab (up to 3 enabled at once).
               </div>
 
@@ -1347,8 +1347,8 @@
                   <span class="slider"></span>
                 </label>
                 <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest Lap</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show fastest lap time and lap number details</div>
+                  <div style="font-weight: bold; font-size: 14px;" data-i18n="analysis.fastest_lap">Fastest Lap</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;" data-i18n="settings.system.race_analytics_fastest_lap_desc">Show fastest lap time and lap number details</div>
                 </div>
               </div>
 
@@ -1358,8 +1358,8 @@
                   <span class="slider"></span>
                 </label>
                 <div>
-                  <div style="font-weight: bold; font-size: 14px;">Fastest 3 Consecutive</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show best 3-lap consecutive block and lap range</div>
+                  <div style="font-weight: bold; font-size: 14px;" data-i18n="analysis.fastest_3_consec">Fastest 3 Consecutive</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;" data-i18n="settings.system.race_analytics_fastest_3_desc">Show best 3-lap consecutive block and lap range</div>
                 </div>
               </div>
 
@@ -1369,8 +1369,8 @@
                   <span class="slider"></span>
                 </label>
                 <div>
-                  <div style="font-weight: bold; font-size: 14px;">Lap Times</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show per-lap trend chart for all pilots</div>
+                  <div style="font-weight: bold; font-size: 14px;" data-i18n="analysis.panel_lap_times">Lap Times</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;" data-i18n="settings.system.race_analytics_lap_times_desc">Show per-lap trend chart for all pilots</div>
                 </div>
               </div>
 
@@ -1380,8 +1380,8 @@
                   <span class="slider"></span>
                 </label>
                 <div>
-                  <div style="font-weight: bold; font-size: 14px;">Consistency</div>
-                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;">Show distribution and spread of lap times</div>
+                  <div style="font-weight: bold; font-size: 14px;" data-i18n="analysis.panel_consistency">Consistency</div>
+                  <div style="font-size: 12px; color: var(--secondary-color); margin-top: 2px;" data-i18n="settings.system.race_analytics_consistency_desc">Show distribution and spread of lap times</div>
                 </div>
               </div>
 
@@ -1533,7 +1533,7 @@
 
               <h3 data-i18n="settings.system.appearance">Appearance</h3>
               <div class="config-item">
-                <label for="languageSelector">Language:</label>
+                <label for="languageSelector" data-i18n="settings.system.language">Language:</label>
                 <select id="languageSelector" class="lang-selector">
                   <option value="en">English</option>
                   <option value="fr">Français</option>
@@ -1546,7 +1546,7 @@
               <div class="config-item">
                 <label for="themeSelect" data-i18n="settings.themes.theme">Theme:</label>
                 <select id="themeSelect" onchange="changeTheme()">
-                  <optgroup label="Material">
+                  <optgroup label="Material" data-i18n-label="settings.themes.group_material">
                     <option value="lighter">Material Lighter</option>
                     <option value="oceanic" selected>Material Oceanic</option>
                     <option value="darker">Material Darker</option>
@@ -1558,14 +1558,14 @@
                     <option value="volcano">Material Volcano</option>
                     <option value="space">Material Space</option>
                   </optgroup>
-                  <optgroup label="Popular">
+                  <optgroup label="Popular" data-i18n-label="settings.themes.group_popular">
                     <option value="monokai">Monokai Pro</option>
                     <option value="dracula">Dracula</option>
                     <option value="github">GitHub</option>
                     <option value="githubdark">GitHub Dark</option>
                     <option value="synthwave">SynthWave '84</option>
                   </optgroup>
-                  <optgroup label="Classic">
+                  <optgroup label="Classic" data-i18n-label="settings.themes.group_classic">
                     <option value="arcdark">Arc Dark</option>
                     <option value="onedark">One Dark</option>
                     <option value="onelight">One Light</option>
@@ -1575,8 +1575,8 @@
                     <option value="lightowl">Light Owl</option>
                     <option value="moonlight">Moonlight</option>
                   </optgroup>
-                  <optgroup label="Custom">
-                    <option value="custom">Custom Theme</option>
+                  <optgroup label="Custom" data-i18n-label="settings.themes.group_custom">
+                    <option value="custom" data-i18n="settings.themes.custom_option">Custom Theme</option>
                   </optgroup>
                 </select>
               </div>
@@ -1626,7 +1626,7 @@
               <div class="ota-panel">
                 <div id="otaSourceOnline">
                   <div class="ota-line">
-                    <select id="otaVersionSelect" onchange="onOtaVersionChange()" aria-label="Version">
+                    <select id="otaVersionSelect" onchange="onOtaVersionChange()" aria-label="Version" data-i18n-aria-label="settings.firmware.version_aria">
                       <option value="" data-i18n="settings.firmware.loading_versions">Loading versions...</option>
                     </select>
                     <label class="ota-checkbox">
@@ -1827,8 +1827,8 @@
     <!-- Low Battery Alarm Modal -->
     <div id="lowBatteryAlarmModal" class="battery-alarm-modal" style="display: none">
       <div class="battery-alarm-content">
-        <div class="battery-alarm-icon">LOW BATTERY</div>
-        <div class="battery-alarm-voltage" id="batteryAlarmVoltage">--V (--V/cell)</div>
+        <div class="battery-alarm-icon" data-i18n="battery_alarm.title">LOW BATTERY</div>
+        <div class="battery-alarm-voltage" id="batteryAlarmVoltage" data-i18n="battery_alarm.voltage_placeholder">--V (--V/cell)</div>
         <button class="battery-alarm-dismiss" onclick="dismissBatteryAlarm()" data-i18n="battery_alarm.dismiss">Dismiss</button>
       </div>
     </div>
