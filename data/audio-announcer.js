@@ -58,6 +58,8 @@ class AudioAnnouncer {
         this.lapPackReady = false;
         this.racePackMode = null;
         this.preloadTimer = null;
+        this.packDownloadActive = false;
+        this.packRestore = null;
         this.userActivated = false;
         if (typeof document !== 'undefined') {
             const activate = () => {
@@ -176,6 +178,7 @@ class AudioAnnouncer {
             return cached.url;
         }
         if (this.audioLoads.has(audioPath)) return this.audioLoads.get(audioPath);
+        if (!this.packDownloadActive && typeof document !== 'undefined') return null;
         const generation = this.audioSourceGeneration;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
@@ -219,19 +222,161 @@ class AudioAnnouncer {
     }
 
     requestAudioPreload() {
-        // Never add SD traffic to a cold page load or start browser audio without
-        // a gesture. Give the UI requests time to settle after interaction.
-        if (!this.audioEnabled || !this.userActivated || this.preloadTimer) return;
-        this.preloadTimer = setTimeout(async () => {
-            this.preloadTimer = null;
-            if (!this.audioEnabled || !this.userActivated) return;
-            if (window.fpvGateLoading) { this.requestAudioPreload(); return; }
-            await this.preloadRaceAudio();
-        }, 10000);
+        // Only restore local storage automatically. Network downloads require
+        // the Download voice pack button, including after page reloads.
+        if (this.getPrimaryVoiceDirectory() && !this.lapPackReady && !this.packDownloadActive) this.restoreSavedVoicePack();
+    }
+
+    packText(key, fallback, params = {}) {
+        return typeof i18n !== 'undefined' ? i18n.t('settings.tts.' + key, params) : fallback;
+    }
+
+    voiceStore(mode, action) {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) { reject(new Error('Browser storage unavailable')); return; }
+            const request = window.indexedDB.open('FPVGateVoicePacks', 1);
+            request.onupgradeneeded = () => request.result.createObjectStore('packs', {keyPath:'voice'});
+            request.onerror = () => reject(request.error);
+            request.onblocked = () => reject(new Error('Browser storage blocked'));
+            request.onsuccess = () => {
+                const db = request.result;
+                try {
+                    const tx = db.transaction('packs', mode), operation = action(tx.objectStore('packs'));
+                    let result;
+                    operation.onsuccess = () => { result = operation.result; };
+                    tx.oncomplete = () => { db.close(); resolve(result); };
+                    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error || new Error('Storage transaction failed')); };
+                } catch (error) { db.close(); reject(error); }
+            };
+        });
+    }
+
+    requiredLapFiles() {
+        return ['point.mp3', ...Array.from({length:100}, (_, n) => `num_${n}.mp3`), ...Array.from({length:50}, (_, n) => `lap_${n + 1}.mp3`)];
+    }
+
+    async restoreSavedVoicePack() {
+        if (this.packRestore) return this.packRestore;
+        const voice = this.selectedVoice, generation = this.audioSourceGeneration;
+        const pending = (async () => {
+            try {
+                const pack = await this.voiceStore('readonly', store => store.get(voice));
+                if (generation !== this.audioSourceGeneration || this.packDownloadActive) return false;
+                if (!pack || pack.schema !== 'pcm22k-v1' || pack.voice !== voice) {
+                    this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+                    return false;
+                }
+                const clips = new Map(); let bytes = 0;
+                for (const clip of pack.clips || []) {
+                    if (!/^[^./\\]+\.mp3$/.test(clip.file) || clip.sampleRate !== 22050 || !(clip.samples instanceof ArrayBuffer) || !clip.samples.byteLength || clip.samples.byteLength % 4) throw new Error('Invalid saved voice pack');
+                    bytes += clip.samples.byteLength;
+                    if (bytes > this.maxDecodedBytes || clips.size >= 192) throw new Error('Saved voice pack exceeds cache limit');
+                    clips.set(clip.file, {samples:new Float32Array(clip.samples), sampleRate:clip.sampleRate});
+                }
+                if (!this.requiredLapFiles().every(file => clips.has(file))) throw new Error('Incomplete saved voice pack');
+                const primary = this.getPrimaryVoiceDirectory();
+                for (const [file, clip] of clips) this.decodedClips.set(`${primary}/${file}`, clip);
+                this.decodedBytes = bytes;
+                for (const phrase of pack.phrases || []) {
+                    if (!/^[^./\\]+\.mp3$/.test(phrase.file) || !phrase.blob?.size || this.audioSourceBytes + phrase.blob.size > this.maxAudioSourceBytes) continue;
+                    const key = `${primary}/${phrase.file}`;
+                    const previous = this.audioSources.get(key);
+                    if (previous) { URL.revokeObjectURL(previous.url); this.audioSourceBytes -= previous.size; }
+                    this.audioSources.set(key, {blob:phrase.blob, size:phrase.blob.size, url:URL.createObjectURL(phrase.blob)});
+                    this.audioSourceBytes += phrase.blob.size;
+                }
+                this.lapPackReady = true;
+                this.updatePackStatus(this.packText('pack_saved_ready', 'Voice pack saved in this browser and ready.'));
+                return true;
+            } catch (error) {
+                console.warn('[AudioAnnouncer] Saved pack unavailable:', error);
+                if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+                return false;
+            }
+        })();
+        this.packRestore = pending;
+        try { return await pending; }
+        finally { if (this.packRestore === pending) this.packRestore = null; }
+    }
+
+    optionalPilotFiles() {
+        const names = new Set();
+        if (typeof c5RacePilotsNow === 'function') {
+            for (const racer of c5RacePilotsNow()) if (racer.spoken) names.add(racer.spoken);
+        }
+        if (typeof document !== 'undefined') {
+            const name = document.getElementById('pphonetic')?.value || document.getElementById('pname')?.value;
+            if (name) names.add(name);
+        }
+        return [...names].flatMap(name => {
+            const file = name.toLowerCase().trim().replace(/\s+/g, '_');
+            if (!file || file.length > 80 || /[./\\]/.test(file)) return [];
+            return [`${file}_lap.mp3`, `${file}_2laps.mp3`, `${file}_3laps.mp3`];
+        });
+    }
+
+    async downloadVoicePack() {
+        if (this.packDownloadActive || !this.getPrimaryVoiceDirectory() || (typeof raceRunning !== 'undefined' && raceRunning)) return;
+        this.clearAudioSources();
+        this.packDownloadActive = true;
+        const generation = this.audioSourceGeneration, voice = this.selectedVoice;
+        this.updatePackStatus(this.packText('pack_downloading', 'Downloading voice pack for this browser…'));
+        try {
+            const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (!Context) throw new Error('Audio decoding unavailable');
+            const primary = this.getPrimaryVoiceDirectory();
+            for (const file of ['gate_1.mp3','race_complete.mp3','race_stopped.mp3','arm_your_quad.mp3','starting_tone.mp3']) {
+                if (!await this.waitForAudioBudget(generation)) return;
+                await this.resolveAudioPath(`${primary}/${file}`);
+            }
+            await this.preloadLapAudio(generation);
+            if (generation !== this.audioSourceGeneration) return;
+            if (!this.lapPackReady) throw new Error('Some voice clips could not be downloaded');
+            // Pilot phrases are optional, but retain existing custom pack support.
+            for (const file of this.optionalPilotFiles()) {
+                if (!await this.waitForAudioBudget(generation)) return;
+                await this.decodeVoiceClip(file);
+                if (generation !== this.audioSourceGeneration) return;
+            }
+            if (!this.requiredLapFiles().every(file => this.decodedClips.has(`${primary}/${file}`))) throw new Error('Voice pack exceeds the browser audio cache budget');
+            const clips = [...this.decodedClips].map(([key, clip]) => ({file:key.substring(key.lastIndexOf('/')+1), sampleRate:clip.sampleRate, samples:clip.samples.buffer.slice(clip.samples.byteOffset, clip.samples.byteOffset+clip.samples.byteLength)}));
+            const phrases = [...this.audioSources].filter(([key]) => !/\/(?:num_\d+|lap_\d+|point)\.mp3$/.test(key)).map(([key, entry]) => ({file:key.substring(key.lastIndexOf('/')+1), blob:entry.blob}));
+            await this.voiceStore('readwrite', store => store.put({voice, schema:'pcm22k-v1', savedAt:Date.now(), clips, phrases}));
+            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_saved_ready', 'Voice pack saved in this browser and ready.'));
+        } catch (error) {
+            console.warn('[AudioAnnouncer] Voice download/save failed:', error);
+            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_save_failed', 'Could not save the complete voice pack. Retry Download voice pack.'));
+        } finally {
+            this.packDownloadActive = false;
+            this.syncPackButtons();
+        }
+    }
+
+    async removeSavedVoicePack() {
+        if (this.packDownloadActive || (typeof raceRunning !== 'undefined' && raceRunning)) return;
+        try {
+            await this.voiceStore('readwrite', store => store.delete(this.selectedVoice));
+            this.clearAudioSources();
+            this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+        } catch (error) {
+            console.warn('[AudioAnnouncer] Could not remove saved pack:', error);
+            this.updatePackStatus(this.packText('pack_storage_failed', 'Browser storage is unavailable. Check site storage permissions.'));
+        }
+    }
+
+    syncPackButtons() {
+        if (typeof document === 'undefined') return;
+        const selected = !!this.getPrimaryVoiceDirectory();
+        const voiceSelect = document.getElementById('voiceSelect');
+        if (voiceSelect) voiceSelect.disabled = this.packDownloadActive;
+        for (const id of ['downloadVoicePackButton', 'removeVoicePackButton']) {
+            const button = document.getElementById(id);
+            if (button) button.disabled = !selected || this.packDownloadActive || (typeof raceRunning !== 'undefined' && raceRunning);
+        }
     }
 
     async waitForAudioBudget(generation) {
-        while (this.audioEnabled && generation === this.audioSourceGeneration) {
+        while ((this.audioEnabled || this.packDownloadActive) && generation === this.audioSourceGeneration) {
             let available = false;
             let reason = 'pack_wait_race', freeKB = 0;
             if (!(typeof raceRunning !== 'undefined' && raceRunning)) {
@@ -289,10 +434,12 @@ class AudioAnnouncer {
         this.lapPreload = null;
         if (this.preloadTimer) clearTimeout(this.preloadTimer);
         this.preloadTimer = null;
+        this.packRestore = null;
         this.updatePackStatus('');
     }
 
     updatePackStatus(text) {
+        this.syncPackButtons();
         const element = typeof document !== 'undefined' && document.getElementById('voicePackStatus');
         if (element) element.textContent = text;
         const raceStatus = typeof document !== 'undefined' && document.getElementById('raceVoiceStatus');
@@ -349,7 +496,7 @@ class AudioAnnouncer {
         // phrase can use the pack as soon as its own words are ready.
         const files = ['point.mp3', ...Array.from({length: 21}, (_, n) => `num_${n}.mp3`), ...Array.from({length: 10}, (_, n) => `lap_${n + 1}.mp3`), ...Array.from({length: 79}, (_, n) => `num_${n + 21}.mp3`), ...Array.from({length: 40}, (_, n) => `lap_${n + 11}.mp3`)];
         for (let i = 0; i < files.length; ++i) {
-            if (generation !== this.audioSourceGeneration || !this.audioEnabled) return;
+            if (generation !== this.audioSourceGeneration || (!this.audioEnabled && !this.packDownloadActive)) return;
             if (!await this.waitForAudioBudget(generation)) return;
             await this.decodeVoiceClip(files[i]);
             if (generation !== this.audioSourceGeneration) return;
@@ -396,12 +543,13 @@ class AudioAnnouncer {
     beginRacePlayback() {
         if (this.racePackMode !== null) return;
         this.racePackMode = this.lapPackReady;
+        this.syncPackButtons();
         if (!this.racePackMode && this.getPrimaryVoiceDirectory()) {
             this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_race_fallback') : 'This race uses the browser voice because the recorded pack was not ready at the start.');
         }
     }
 
-    endRacePlayback() { this.racePackMode = null; }
+    endRacePlayback() { this.racePackMode = null; this.syncPackButtons(); }
 
     async playVoiceSequence(files) {
         if (!files || !this.audioEnabled || this.racePackMode === false) return false;
@@ -928,6 +1076,7 @@ class AudioAnnouncer {
      * Change voice and clear audio cache
      */
     setVoice(voice) {
+        if (this.packDownloadActive) return;
         const normalizedVoice = this.normalizeVoiceSelection(voice);
         if (normalizedVoice === this.selectedVoice) {
             localStorage.setItem('selectedVoice', normalizedVoice);

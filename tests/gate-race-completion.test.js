@@ -196,3 +196,19 @@ test('reconnect uses the finished roster even after the next heat changed live c
   await p.c5RaceResync();
   expect(p.c5Race.racers[0]).toMatchObject({ name: 'Original pilot', spoken: 'Original', freq: 5658, color: '#123456' });
 });
+
+test('C5 start renders manual-lap buttons from the confirmed running state',async()=>{
+ const p=page([snapshot({running:true,savedTimestamp:0})]);const rendered=[];p.renderUnifiedRaceView=()=>rendered.push(p.raceRunning);await p.c5RaceResync();expect(rendered).toEqual([true]);
+});
+test('queued start waits for the native detector instead of treating HTTP 202 as GO',async()=>{
+ const p=page([snapshot({running:false,busy:true,savedTimestamp:0}),snapshot({running:true,savedTimestamp:0})]);const original=p.fetch;p.fetch=jest.fn(async (url,options)=>url.startsWith('/timer/start')?{ok:true,json:async()=>({status:'OK',gateManaged:true})}:original(url,options));vm.runInContext(extract('startC5RaceTimer'),p);const state=await p.startC5RaceTimer();expect(state.running).toBe(true);expect(p.raceRunning).toBe(true);expect(p.fetch.mock.calls.filter(([url])=>url==='/api/c5/race')).toHaveLength(2);
+});
+test('rejected native start does not confirm a running race',async()=>{
+ const p=page([snapshot()]);p.fetch=jest.fn(async()=>({ok:false}));vm.runInContext(extract('startC5RaceTimer'),p);await expect(p.startC5RaceTimer()).rejects.toThrow('rejected');expect(p.raceRunning).toBe(false);
+});
+
+test('C5 GO cue waits for confirmed native start, not the queued request',async()=>{
+ const p=page([snapshot()]);let release;const armed=new Promise(resolve=>{release=resolve});const classList={add:jest.fn(),remove:jest.fn()};
+ Object.assign(p,{raceSyncMode:3,raceCountdownMode:1,c5GateManaged:true,c5RacePilotsNow:()=>[{}],C5UI:{saveState:()=>"saved"},c5RaceResync:async()=>snapshot(),document:{getElementById:()=>null},updateLapCounter:()=>{},startRaceButton:{classList},addLapButton:{},c5MultiMode:()=>true,beepAudioContext:null,audioEnabled:false,audioAnnouncer:null,beep:jest.fn(),navigator:{},startTimer:jest.fn(()=>armed),startDistancePolling:()=>{},heatTimeoutId:null,maxHeatTime30s:0,fetch:jest.fn(async()=>({})),setTimeout:fn=>{fn();return 1}});
+ vm.runInContext(extract('startRace'),p);const pending=p.startRace();for(let i=0;i<20&&!p.startTimer.mock.calls.length;i++)await Promise.resolve();expect(p.startTimer).toHaveBeenCalledTimes(1);expect(p.beep).not.toHaveBeenCalled();release();await pending;expect(p.beep).toHaveBeenCalledWith(500,880,'square');
+});

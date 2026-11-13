@@ -220,5 +220,28 @@ int main() {
         assert(f.control.status().error != nullptr);
         assert(writes == 0);
     }
+    {
+        Fixture f(0, 0, 1);
+        f.config.minLap = 60000;
+        f.start();
+        f.pass(0, 1); // Manual Gate 1 is allowed 1 ms after start as well.
+        uint32_t laps[64];
+        assert(f.detector.copyLaps(0, laps, 64) == 1 && laps[0] == 1);
+    }
+    // Gate 1 must accept an RF pass immediately after GO even with a very
+    // large minimum lap. Only subsequent completed laps are time-filtered.
+    for (uint8_t mask : {uint8_t(1), uint8_t(255)}) {
+        Fixture f(0, 0, mask);
+        f.config.minLap = 60000;
+        f.start();
+        f.rfPass(0, 1);
+        uint32_t laps[64];
+        assert(f.detector.copyLaps(0, laps, 64) == 1);
+        assert(laps[0] > 0 && laps[0] < 100);
+        f.rfPass(0, 1000);
+        assert(f.detector.copyLaps(0, laps, 64) == 1);
+        f.rfPass(0, 61000);
+        assert(f.detector.copyLaps(0, laps, 64) == 2);
+    }
     std::cout << "PASS: C5 gate completion, heat limits, history, retries, idempotency and continued RH passes\n";
 }

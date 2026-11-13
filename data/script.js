@@ -653,11 +653,11 @@ function handleRaceStateEvent(state) {
     }
     currentRaceSessionTimestamp = null;
     // Race started (from master or local)
+    raceRunning = true;
     if (!c5Race.active || c5HasRaceLaps()) {
       c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
       renderUnifiedRaceView();
     }
-    raceRunning = true;
     if (audioAnnouncer?.beginRacePlayback) audioAnnouncer.beginRacePlayback();
     c5RaceLabel = typeof RaceEvent !== "undefined" ? RaceEvent.raceLabel(c5Race.racers) : {};
     lapTimerStartMs = Date.now();
@@ -956,8 +956,6 @@ function c5RaceResync() {
         if (!((d.racers >> p.slot) & 1)) continue;
         c5Race.laps[p.slot] = (p.laps || []).map((ms) => ms / 1000);
       }
-      renderUnifiedRaceView();
-      updateAnalysisSectionVisibility();
       if (c5GateManaged) {
         currentRaceSessionTimestamp = d.savedTimestamp || null;
         c5StopReason = d.stopReason || "";
@@ -981,6 +979,9 @@ function c5RaceResync() {
           stopDistancePolling();
         }
       }
+      // The manual-lap buttons must render from the newly confirmed state.
+      renderUnifiedRaceView();
+      updateAnalysisSectionVisibility();
       return d;
     })
     .catch((e) => console.warn("[C5] race resync failed", e))
@@ -3379,7 +3380,26 @@ function addLap(lapStr) {
   }
 }
 
+async function startC5RaceTimer() {
+  const response = await fetch("/timer/start?timestamp=" + Math.floor(Date.now() / 1000), {
+    method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error("Race start rejected by gate");
+  await response.json();
+  // HTTP 202 means queued, not armed. Config/SD preparation must finish before
+  // the local GO cue, otherwise an immediate first crossing is lost.
+  for (let attempt = 0; attempt < 150; ++attempt) {
+    const state = await c5RaceResync();
+    if (!state) throw new Error("Cannot confirm that the gate has started");
+    if (state.running) return state;
+    if (!state.busy) throw new Error(state.error || "Gate could not start the race");
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error("Gate is still preparing the race; check its status before starting again");
+}
+
 function startTimer() {
+  if (c5ReceiverSelected() && c5GateManaged) return startC5RaceTimer();
   var millis = 0;
   var seconds = 0;
   var minutes = 0;
@@ -3952,6 +3972,7 @@ async function startRace() {
     audioAnnouncer.unlockAudioContextMobile().catch(() => {});
   }
 
+  const gateOwnsStart = c5ReceiverSelected() && c5GateManaged;
   // Branch on countdown mode
   if (raceCountdownMode === 0) {
     // Classic "Less than 5": queue TTS, wait for announcements, then random 1-5s delay
@@ -3980,28 +4001,32 @@ async function startRace() {
         if (s === 5) queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
         await new Promise((r) => setTimeout(r, 1000));
       }
-      raceCountdownNumberEl.textContent = "GO!";
-      raceCountdownNumberEl.classList.add("go");
+      raceCountdownNumberEl.textContent = gateOwnsStart ? i18n.t("race.preparing_start") : "GO!";
+      if (!gateOwnsStart) raceCountdownNumberEl.classList.add("go");
       await new Promise((r) => setTimeout(r, 500));
-      raceCountdownEl.style.display = "none";
+      if (!gateOwnsStart) raceCountdownEl.style.display = "none";
     } else {
       await new Promise((r) => setTimeout(r, RACE_COUNTDOWN_SECONDS * 1000 + 500));
     }
   }
 
-  // Play start beep and begin race (synced with device)
-  beep(1, 1, "square"); // needed for some reason to make sure we fire the first beep
-  beep(500, 880, "square");
-
-  // Vibrate for mobile devices (works even in silent mode on iOS)
-  if (navigator.vibrate) {
-    navigator.vibrate(500); // 500ms vibration
-  }
+  const announceGo = () => {
+    beep(500, 880, "square");
+    if (navigator.vibrate) navigator.vibrate(500);
+    if (raceCountdownEl && raceCountdownNumberEl && raceCountdownMode !== 0) {
+      raceCountdownNumberEl.textContent = "GO!";
+      raceCountdownNumberEl.classList.add("go");
+      setTimeout(() => { raceCountdownEl.style.display = "none"; }, 500);
+    }
+  };
+  if (!gateOwnsStart) announceGo();
 
   try {
     await startTimer();
+    if (gateOwnsStart) announceGo();
   } catch (err) {
     clearInterval(timerInterval);
+    if (raceCountdownEl) raceCountdownEl.style.display = "none";
     handleRaceStateEvent("stopped");
     startRaceButton.classList.remove("active");
     alert(err.message);
