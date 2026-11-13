@@ -1,0 +1,166 @@
+/* Race History only; original race controls and configuration keep their styles. */
+/* Spacing follows the approved design's 4/8/12/16/24px scale: related items sit close together. */
+#history[data-redesigned]{box-sizing:border-box;padding:20px 24px;max-width:1240px;margin:0 auto;color:var(--rh-strong);background:var(--rh-background)}
+#history[data-redesigned] *{box-sizing:border-box}
+#history[data-redesigned] [hidden]{display:none!important}
+#history .rh-page-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin-bottom:8px}
+#history .rh-page-head h2{margin:0 auto 0 0;font-size:22px;font-weight:600;color:var(--rh-strong)}
+#history .rh-page-head .history-header{flex:1 1 auto;margin:0;gap:12px}
+#history[data-redesigned] .rh-page-head .history-quick-sort{flex:0 1 auto;width:auto;min-width:180px;max-width:100%;margin:0}
+#history .history-controls{display:flex;flex-wrap:wrap;gap:4px;margin:0}
+#history[data-redesigned] button{margin:0;min-height:34px;font:inherit;font-size:13px;line-height:1.4;border:0;border-radius:6px;padding:6px 12px;background:transparent;color:var(--rh-strong);cursor:pointer;max-width:100%;white-space:normal;box-shadow:none;text-shadow:none}
+#history[data-redesigned] button:hover{background:color-mix(in srgb,var(--rh-accent-fill) 15%,transparent)}
+#history[data-redesigned] button:disabled{opacity:.5;cursor:default}
+/* Clear All keeps the app's solid destructive button (its background is !important in style.css). */
+#history[data-redesigned] .danger-button{color:#fff}
+#history[data-redesigned] :focus-visible{outline:3px solid var(--rh-accent);outline-offset:2px}
+#history .history-filter-panel{border:0;border-top:1px solid var(--rh-line);border-bottom:1px solid var(--rh-line);border-radius:0;background:transparent;margin:0 0 8px;padding:0}
+#history[data-redesigned] summary{min-height:34px;cursor:pointer;padding:8px 0;color:var(--rh-strong);font-size:14px;font-weight:500}
+#history .history-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 16px;padding:4px 0 8px}
+#history .history-filters label{display:block;min-width:0;margin:0;color:var(--rh-strong);font-size:13px;font-weight:400}
+#history .history-filters label>span{display:block;margin-bottom:4px}
+#history[data-redesigned] input:not([type=checkbox]):not([type=range]),#history[data-redesigned] select{box-sizing:border-box;width:100%;min-width:0;min-height:36px;padding:6px 10px;border:0;border-bottom:1px solid var(--rh-line);border-radius:4px 4px 0 0;background:var(--rh-surface);color:var(--rh-strong);font:inherit;font-size:14px}
+#history .history-filter-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 8px}
+#history .history-filter-footer small{font-size:12px;color:var(--rh-muted)}
+#history #historyFilterStatus{font-size:12px;color:var(--rh-muted);margin:0 0 16px;min-height:18px}
+#history .history-list{display:block;min-width:0}
+#history .rh-day{margin:0 0 28px;min-width:0}
+#history .rh-day-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;border-bottom:1px solid var(--rh-line);padding-bottom:6px}
+#history .rh-day-head h3{margin:0;font-size:19px;font-weight:600;color:var(--rh-strong)}
+#history .rh-day-head p{margin:0;flex:1;font-size:12px;color:var(--rh-muted);font-variant-numeric:tabular-nums}
+#history .rh-day-head button{color:var(--rh-accent);min-height:28px;padding:2px 6px}
+#history .rh-session{margin:12px 0 6px;color:var(--rh-muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+#history .rh-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;min-width:0}
+#history .rh-race{padding:0;margin:0;border:0;border-radius:8px;min-width:0;background:transparent;box-shadow:none;overflow:visible}
+#history button.rh-tile{display:grid;align-content:start;gap:4px;width:100%;height:100%;padding:12px;background:color-mix(in srgb,var(--rh-surface) 40%,var(--rh-background));text-align:left;border:1px solid var(--rh-line-soft);border-radius:8px;color:var(--rh-strong);overflow-wrap:anywhere}
+#history .rh-tile:hover{border-color:var(--rh-line)}
+#history .rh-tile[aria-expanded=true]{background:color-mix(in srgb,var(--rh-accent-fill) 15%,var(--rh-background));border-color:var(--rh-accent)}
+#history .rh-tile-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:14px}
+#history .rh-tile-top strong{font-weight:600;overflow-wrap:anywhere;min-width:0}
+#history .rh-tile time{font-size:12px;font-weight:400;white-space:nowrap;color:var(--rh-muted)}
+#history .rh-who{display:flex;gap:6px;align-items:center;font-size:14px;font-weight:500;min-width:0}
+#history .rh-who>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#history .rh-swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;margin-right:6px}
+#history .rh-who .rh-swatch{margin-right:0}
+#history .rh-meta,#history .rh-help{font-size:12px;font-weight:400;color:var(--rh-muted);line-height:1.5;overflow-wrap:anywhere}
+#history .rh-help{margin:8px 0 0}
+#history .rh-review{color:var(--rh-warning);font-size:12px;line-height:1.5}
+
+/* Race detail: matches the approved mock-up. */
+#history #raceDetails{grid-column:1/-1;width:100%;min-width:0;max-width:100%;margin:8px 0 12px;padding:24px;background:var(--rh-background);border:1px solid var(--rh-line);border-radius:10px;color:var(--rh-strong);box-shadow:none}
+#history .rh-detail-head{display:flex;align-items:flex-start;flex-wrap:wrap;gap:8px 12px}
+#history .rh-detail-title{flex:1 1 240px;min-width:0}
+#history #raceDetailsTitle{font-size:18px;font-weight:600;line-height:1.35;margin:0;color:var(--rh-strong);overflow-wrap:anywhere}
+#history #historyDetailMeta{margin:2px 0 0;font-size:12px;line-height:1.5;color:var(--rh-muted)}
+#history .rh-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+#history[data-redesigned] .rh-actions button{border:1px solid var(--rh-line);padding:5px 12px}
+#history[data-redesigned] .rh-actions button:hover{border-color:var(--rh-muted);background:transparent}
+#history[data-redesigned] .rh-actions button[aria-pressed=true]{border-color:var(--rh-accent);color:var(--rh-accent)}
+#history .rh-detail-end{display:flex;align-items:flex-start;gap:2px}
+#history[data-redesigned] .rh-quiet{color:var(--rh-muted);padding-left:6px;padding-right:6px}
+#history[data-redesigned] .rh-quiet:hover{color:var(--rh-strong);background:transparent}
+#history[data-redesigned] .rh-danger,#history[data-redesigned] .rh-danger:hover{color:var(--rh-danger)}
+#history #raceDetails .close-button{position:static;float:none;flex:none;margin:0;border:0;background:transparent;font-size:13px}
+#history .rh-notes{margin:8px 0 0;font-size:13px;line-height:1.5;color:var(--rh-strong);white-space:pre-wrap;overflow-wrap:anywhere}
+#history .rh-notes span{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--rh-muted);margin-right:4px}
+#history .rh-playback{margin:12px 0 0;padding:8px 0;border-top:1px solid var(--rh-line)}
+/* The markers and their labels extend above and below the 80px bar. */
+#history .rh-playback .race-timeline{margin:0;background:transparent;padding:28px 0 8px;min-width:0;max-width:100%;border-radius:0}
+#history .rh-playback .timeline-container{margin:0 32px 32px}
+#history .rh-playback .race-timeline h4,#history .rh-playback #playbackBtn,#history .rh-playback #stopPlaybackBtn{display:none!important}
+#history .rh-playback .race-timeline>div[style*="display: flex"]{flex-wrap:wrap;justify-content:flex-start!important;margin-top:8px!important}
+#history .rh-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:20px 0 16px;padding:0;border-top:1px solid var(--rh-line);border-bottom:1px solid var(--rh-line)}
+#history .rh-keys>div{min-width:0;padding:12px 16px 12px 0}
+#history .rh-keys>div+div{padding-left:16px;border-left:1px solid var(--rh-line-soft)}
+#history .rh-keys dt{font-size:11px;line-height:1.5;text-transform:uppercase;letter-spacing:.06em;font-weight:600;color:var(--rh-muted)}
+#history .rh-keys dd{font-size:20px;font-weight:600;line-height:1.3;margin:2px 0 0;color:var(--rh-strong);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+#history .rh-keys small{display:block;font-size:12px;color:var(--rh-muted);overflow-wrap:anywhere;line-height:1.5}
+#history .rh-findings{display:grid;gap:6px;padding:0;list-style:none;margin:0 0 20px;font-size:14px;line-height:1.5}
+#history .rh-findings li{padding-left:12px;border-left:2px solid var(--rh-line);overflow-wrap:anywhere}
+#history .rh-findings li.rh-review{border-left-color:var(--rh-warning);color:var(--rh-strong);font-size:14px}
+#history .rh-findings b{font-weight:600;color:var(--rh-strong)}
+#history[data-redesigned] .rh-link{display:inline;min-height:0;padding:0;line-height:inherit;vertical-align:baseline;color:var(--rh-accent);font-size:inherit;text-decoration:underline;text-underline-offset:2px}
+#history[data-redesigned] .rh-link:hover{background:transparent}
+#history .rh-better{color:var(--rh-accent)}
+#history .rh-sub{font-size:12px;color:var(--rh-muted)}
+#history .rh-tabs{display:flex;gap:24px;overflow-x:auto;border-bottom:1px solid var(--rh-line);margin:0 0 12px;padding:0 2px;scroll-padding:8px}
+#history[data-redesigned] .rh-tabs button{flex:none;white-space:nowrap;border-bottom:2px solid transparent;border-radius:0;padding:8px 0;color:var(--rh-muted);font-weight:500}
+#history[data-redesigned] .rh-tabs button[aria-selected=true]{border-bottom-color:var(--rh-accent);color:var(--rh-strong)}
+#history[data-redesigned] .rh-tabs button:hover{background:transparent;color:var(--rh-strong)}
+#history #historyAnalysisPanel{min-width:0;max-width:100%}
+#history #historyAnalysisPanel h4{margin:4px 0 8px}
+#history .rh-scroll{max-width:100%;overflow-x:auto;margin:0;scroll-padding:8px}
+#history .rh-scroll table{width:100%;border-collapse:collapse;background:transparent;table-layout:auto;font-size:14px;font-variant-numeric:tabular-nums}
+#history .rh-scroll th,#history .rh-scroll td{padding:8px;border:0;border-bottom:1px solid var(--rh-line-soft);text-align:right;white-space:nowrap;color:var(--rh-strong);background:transparent}
+#history .rh-scroll thead th{font-size:11px;font-weight:600;color:var(--rh-muted);text-transform:uppercase;letter-spacing:.06em;border-bottom-color:var(--rh-line);padding-top:0;background:transparent}
+#history .rh-scroll tr>:first-child{position:sticky;left:0;text-align:left;z-index:1;background:var(--rh-background)}
+#history .rh-scroll tbody th{font-weight:500;text-align:left}
+/* No zebra striping from the global table style; rows are separated by soft lines only. */
+#history .rh-scroll tr,#history .rh-scroll tr:nth-child(even),#history .rh-scroll tr:hover{background:transparent}
+#history .rh-scroll caption,#history .rh-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+#history .rh-scroll td{background:rgba(0,0,0,var(--rh-shade,0));font-weight:400}
+#history .rh-scroll td.rh-best,#history .rh-scroll td.rh-cell-best{font-weight:700}
+#history .rh-scroll td.rh-fastest{outline:1px solid var(--rh-strong);outline-offset:-4px}
+#history .rh-scroll td.rh-flag{outline:1px dashed var(--rh-warning);outline-offset:-4px}
+#history .rh-results .rh-pos{width:28px;color:var(--rh-muted);text-align:left}
+#history .rh-results .rh-first .rh-pos{color:var(--rh-strong);font-weight:600}
+#history .rh-results .rh-name,#history .rh-results thead .rh-name{text-align:left;position:static}
+#history .rh-results tr>:first-child{min-width:28px}
+#history .rh-segment{display:inline-flex;border:1px solid var(--rh-line);border-radius:6px;overflow:hidden;margin:0 0 12px}
+#history[data-redesigned] .rh-segment button{border-radius:0;min-height:30px;padding:4px 12px}
+#history[data-redesigned] .rh-segment button[aria-pressed=true]{background:var(--rh-surface);color:var(--rh-strong);font-weight:600}
+#history .rh-chart{max-width:100%;overflow:auto}
+#history .rh-chart svg{display:block;width:100%;min-width:600px;max-width:100%;height:auto}
+#history .rh-chart svg text{font:12px system-ui,sans-serif;fill:var(--rh-muted)}
+#history .rh-grid{stroke:var(--rh-line)}
+#history .rh-legend{display:flex;flex-wrap:wrap;gap:12px;padding:0;margin:8px 0 0;list-style:none;font-size:12px;color:var(--rh-strong)}
+#history #raceDetails details{margin-top:8px}
+#history #raceDetails h4{font-size:14px;font-weight:600;color:var(--rh-strong)}
+
+@media(max-width:900px){#history .history-filters{grid-template-columns:repeat(2,minmax(0,1fr))}#history .rh-keys{grid-template-columns:repeat(2,minmax(0,1fr))}#history .rh-keys>div:nth-child(3){border-left:0;padding-left:0}#history .rh-keys>div:nth-child(n+3){border-top:1px solid var(--rh-line-soft)}}
+/* Phone: close sits beside the title, actions take their own row, wide columns are hidden. */
+@media(max-width:580px){
+  #history[data-redesigned]{padding:12px 8px}
+  #history .rh-page-head h2{font-size:21px}
+  #history[data-redesigned] .rh-page-head .history-quick-sort{min-width:0;flex:1 1 150px}
+  #history .history-controls{gap:0;width:100%}
+  #history[data-redesigned] .history-controls button{font-size:12px;padding:6px 8px}
+  #history .rh-day{margin-bottom:20px}
+  #history .rh-day-head h3{font-size:18px;width:100%}
+  #history .rh-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  #history button.rh-tile{padding:10px}
+  #history .rh-tile-top{flex-wrap:wrap;font-size:13px;gap:2px 4px}
+  #history .rh-tile-top time{font-size:11px}
+  #history .rh-who{font-size:13px}
+  #history .rh-meta{font-size:11px}
+  #history #raceDetails{padding:16px 12px}
+  #history .rh-detail-title{order:1;flex-basis:0}
+  #history .rh-detail-end{order:2}
+  #history .rh-actions{order:3;flex-basis:100%;gap:6px}
+  #history[data-redesigned] .rh-actions button{flex:1 1 auto;padding:5px 8px}
+  #history .rh-keys{margin:16px 0 12px}
+  #history .rh-keys>div{padding:10px 8px 10px 0}
+  #history .rh-keys>div+div{padding-left:10px}
+  #history .rh-keys dd{font-size:18px}
+  #history .rh-findings{margin-bottom:16px;font-size:13px}
+  #history .rh-findings li.rh-review{font-size:13px}
+  #history .rh-tabs{gap:18px}
+  #history .rh-hide-phone{display:none}
+  /* Long names truncate so laps, time, gap and best stay on screen. */
+  #history .rh-results .rh-name{max-width:28vw;overflow:hidden;text-overflow:ellipsis}
+  #history .rh-scroll .rh-results th,#history .rh-scroll .rh-results td{padding-left:5px;padding-right:5px}
+  #history .rh-scroll .rh-results thead th{min-width:0}
+  #history .rh-scroll th,#history .rh-scroll td{padding:8px 6px}
+  #history .rh-scroll table{font-size:13px}
+  #history .history-filter-footer{align-items:flex-start}
+  #history .history-filters label{font-size:12px}
+}
+@media(max-width:360px){#history #raceDetails{padding:14px 8px}#history .rh-results .rh-name{max-width:24vw}#history .rh-results .rh-swatch{margin-right:4px}#history .rh-results tr>:first-child,#history .rh-results .rh-pos{min-width:18px;width:18px}}
+/* Touch screens keep comfortable targets without spreading the desktop layout. */
+@media(pointer:coarse){#history[data-redesigned] button:not(.rh-link),#history[data-redesigned] summary{min-height:40px}#history[data-redesigned] input:not([type=checkbox]):not([type=range]),#history[data-redesigned] select{min-height:40px;font-size:16px}#history[data-redesigned] .rh-tabs button{min-height:40px}#history .rh-playback label{min-height:40px}}
+#history .rh-playback :is(.timeline-time,.timeline-lap-time){font-size:11px}
+/* The race editor opens from History; on touch screens its controls get the same treatment. */
+@media(pointer:coarse){#marshalModal button{min-height:40px;min-width:40px}#marshalModal input:not([type=checkbox]):not([type=range]):not([type=color]),#marshalModal select,#marshalModal textarea{min-height:40px;font-size:16px}#marshalModal label:has(>input[type=checkbox]){display:inline-flex;align-items:center;min-height:40px}}
+@media(forced-colors:active){#history button.rh-tile{border:1px solid ButtonText}#history .rh-tile[aria-expanded=true]{outline:2px solid Highlight}#history .rh-swatch{border:1px solid CanvasText}}
+#history .rh-scroll thead th{white-space:normal;min-width:64px;max-width:180px}
+#history .rh-scroll thead th:first-child{min-width:28px}

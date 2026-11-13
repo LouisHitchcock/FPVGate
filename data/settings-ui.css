@@ -1,0 +1,81 @@
+html.configuration-open,html.configuration-open body{overflow:hidden}
+/* Configuration only. Race, History, Calibration and Event keep their styles. */
+#settingsModal{padding:16px;overflow:auto}
+#settingsModal .settings-modal-container{width:min(1180px,100%);height:min(850px,92dvh);max-width:1180px;max-height:92dvh;min-height:0;display:flex;flex-direction:column;background:var(--cfg-panel);color:var(--cfg-body);border:0;border-radius:8px;overflow:hidden;box-shadow:0 16px 48px #0004}
+#settingsModal [hidden]{display:none!important}
+#settingsModal .cfg-titlebar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 10px 24px;border-bottom:2px solid var(--cfg-accent-fill);flex:none}
+#settingsModal .cfg-titlebar h2{margin:0;font-size:20px;font-weight:600;color:var(--cfg-strong)}
+#settingsModal .cfg-titlebar button{width:40px;height:40px;min-width:40px;padding:6px;font-size:22px;background:transparent!important;color:var(--cfg-body)!important}
+#settingsModal .cfg-body{display:grid;grid-template-columns:226px minmax(0,1fr);flex:1;min-height:0;overflow:hidden}
+#settingsModal .settings-sidebar{width:auto;min-width:0;overflow:auto;background:var(--cfg-side);color:var(--cfg-side-ink);border:0;padding:12px 8px}
+#settingsModal .settings-nav{display:block;padding:0;margin:0;width:100%;overflow:visible;white-space:normal}
+/* Category labels: small, spaced capitals with a divider above, so they read as headings rather than tabs. */
+#settingsModal .cfg-nav-group{font-size:11px;font-weight:700;line-height:1.4;color:var(--cfg-side-muted);text-transform:uppercase;letter-spacing:.1em;margin:14px 10px 6px;padding-top:14px;border-top:1px solid color-mix(in srgb,var(--cfg-side-ink) 14%,transparent);cursor:default;user-select:none}
+#settingsModal .cfg-nav-group:first-child{margin-top:0;padding-top:4px;border-top:0}
+#settingsModal .settings-nav-item{display:block;min-height:34px;width:100%;margin:0;padding:6px 10px 6px 20px;text-align:left;border:0;border-left:3px solid transparent;border-radius:0 4px 4px 0;background:transparent!important;border-left:3px solid transparent!important;color:var(--cfg-side-ink)!important;font-size:14px;font-weight:400;white-space:normal}
+#settingsModal .settings-nav-item.active{background:color-mix(in srgb,var(--cfg-accent-fill) 24%,var(--cfg-side))!important;border-left:3px solid var(--cfg-accent)!important;font-weight:600}
+#settingsModal .settings-nav-item:hover{background:color-mix(in srgb,var(--cfg-strong) 8%,var(--cfg-side))!important}
+#settingsModal .settings-content{padding:20px 28px 24px;overflow:auto;min-height:0;min-width:0;scroll-padding:16px;background:var(--cfg-panel)}
+#settingsModal .settings-section{max-width:none}
+#settingsModal .settings-section>h2{margin:0 0 12px;padding:0;border:0;color:var(--cfg-strong);font-size:22px;font-weight:600;line-height:1.35}
+#settingsModal .settings-section>h2:focus{outline:0}
+#settingsModal .cfg-group{margin:20px 0 0;min-width:0}
+#settingsModal .settings-section>.cfg-group:first-of-type{margin-top:0}
+#settingsModal .cfg-group>h3{font-size:15px;font-weight:600;color:var(--cfg-accent);margin:0 0 4px;padding:0 0 6px;border-bottom:1px solid var(--cfg-divider)}
+#settingsModal h3,#settingsModal h4{color:var(--cfg-accent);font-weight:600;font-size:15px}
+#settingsModal h4{margin:14px 0 4px}
+#settingsModal p,#settingsModal li{line-height:1.5;overflow-wrap:anywhere}
+#settingsModal .cfg-group>div[style*="margin-left: 170px"],#settingsModal .cfg-help{margin:-2px 0 8px!important;padding:0;color:var(--cfg-muted)!important;font-size:12px!important}
+#settingsModal .cfg-group [style*="color: var(--secondary-color)"],#settingsModal .c5p-hint,#settingsModal .ota-hint{color:var(--cfg-muted)!important}
+#settingsModal .cfg-row:not([style*="display: none"]):not([style*="display:none"]):not([hidden]){display:grid!important;grid-template-columns:minmax(0,1fr) minmax(200px,.8fr);align-items:center!important;gap:6px 24px;margin:0!important;padding:8px 0!important;min-width:0}
+#settingsModal .cfg-row>label:not(.switch){min-width:0!important;max-width:none;width:auto;margin:0!important;font-size:14px!important;font-weight:500!important;color:var(--cfg-strong)!important;line-height:1.5}
+#settingsModal .cfg-row>div{min-width:0;max-width:100%}
+#settingsModal .cfg-row .input-with-value{display:flex;align-items:center;gap:12px;min-width:0;width:100%}
+#settingsModal .input-with-value>span{font-size:13px;color:var(--cfg-accent);min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
+#settingsModal .input-with-value:has(.cfg-number)>span:not(.cfg-unit){display:none}
+#settingsModal .cfg-unit{min-width:0!important;width:auto;color:var(--cfg-muted)!important;white-space:nowrap;font-size:12px!important}
+#settingsModal input:not([type=checkbox]):not([type=range]):not([type=color]),#settingsModal select,#settingsModal textarea{box-sizing:border-box;min-height:36px;min-width:0;max-width:100%;width:100%;padding:6px 12px!important;border:1px solid transparent!important;border-bottom-color:var(--cfg-line)!important;border-radius:4px 4px 0 0;background:var(--cfg-field)!important;color:var(--cfg-strong)!important;font:inherit;font-size:14px!important;line-height:1.5;box-shadow:none}
+#settingsModal input:hover:not([type=checkbox]):not([type=range]),#settingsModal select:hover{border-bottom-color:var(--cfg-accent)!important}
+#settingsModal input[type=range]{width:100%;min-width:0;min-height:32px;margin:0;accent-color:var(--cfg-accent-fill)}
+#settingsModal input[type=color]{min-height:36px;width:64px!important;max-width:100%;padding:4px;border:0!important;border-bottom:1px solid var(--cfg-line)!important;border-radius:4px 4px 0 0;background:var(--cfg-field)}
+#settingsModal input[type=file]{font-size:12px!important}
+#settingsModal input::file-selector-button{font:inherit;min-height:32px;background:var(--cfg-button);color:var(--cfg-strong);border:0;border-radius:4px;margin-right:8px;padding:4px 8px}
+#settingsModal .switch{width:52px!important;height:32px!important;min-width:52px;display:inline-flex;align-items:center;justify-content:flex-end;vertical-align:middle;margin:0}
+#settingsModal .switch .slider{display:none!important}
+#settingsModal input[type=checkbox]:not(.cfg-checkbox){appearance:none;-webkit-appearance:none;position:relative!important;opacity:1!important;width:46px!important;min-width:46px;height:26px!important;margin:3px 0!important;border:0!important;border-radius:20px;background:#617885;cursor:pointer;vertical-align:middle;flex:none}
+#settingsModal input[type=checkbox]:not(.cfg-checkbox)::before{content:'';display:block;position:absolute;top:4px;left:4px;width:18px;height:18px;border-radius:50%;background:#f1f5f7;transform:none}
+#settingsModal input[type=checkbox]:not(.cfg-checkbox):checked{background:var(--cfg-accent-fill)}
+#settingsModal input[type=checkbox]:not(.cfg-checkbox):checked::before{left:24px}
+#settingsModal input.cfg-checkbox{appearance:auto!important;-webkit-appearance:auto!important;position:static!important;opacity:1!important;width:20px!important;height:20px!important;margin:6px 8px 6px 0!important;accent-color:var(--cfg-accent-fill);vertical-align:middle;flex:none}
+#settingsModal .switch:has(.cfg-checkbox){justify-content:flex-start}
+#settingsModal button{min-height:34px;max-width:100%;padding:6px 14px!important;border:0!important;border-radius:5px;background:var(--cfg-button)!important;color:var(--cfg-strong)!important;font:inherit;font-size:13px;line-height:1.5;white-space:normal;overflow-wrap:anywhere;cursor:pointer;box-shadow:none!important;text-shadow:none!important;animation:none!important;margin-top:2px;margin-bottom:2px}
+#settingsModal button:hover:not(:disabled){filter:brightness(1.12)}
+#settingsModal button:disabled,#settingsModal input:disabled,#settingsModal select:disabled{opacity:.5;cursor:default}
+#settingsModal button.cfg-primary,#settingsModal #otaStartBtn,#settingsModal #c5FwStartBtn,#settingsModal #elrsSave{background:var(--cfg-action)!important;color:var(--cfg-action-ink)!important;font-weight:600}
+#settingsModal .cfg-group>div[style*="display: flex"]{flex-wrap:wrap;gap:8px!important}
+#settingsModal .cfg-group div[style*="background-color:"]{box-shadow:none}
+#settingsModal .cfg-group :is(#novaFilterSection,#c5PilotSection){padding:4px 0!important;background:transparent!important;margin-left:0!important}
+#settingsModal .cfg-group #novaFilterSection>div:has(.switch){padding:6px 0;gap:16px}
+#settingsModal .cfg-group #novaFilterSection>div:has(.switch)>div{min-width:0}
+#settingsModal .cfg-group #novaFilterSection>div:has(.switch) label:not(.switch){color:var(--cfg-strong);font-weight:500!important}
+#settingsModal #gateLEDOptions{margin-left:0!important}
+#settingsModal #bandChannelFreq{display:block}
+#settingsModal .cfg-row>div:has(.cfg-voice-toggle){display:flex;flex-wrap:wrap;gap:8px}
+#settingsModal .cfg-voice-toggle{display:flex;align-items:center;gap:12px;justify-content:space-between;width:100%;min-height:36px;color:var(--cfg-strong)}
+#settingsModal .ev-preference-grid{display:grid;grid-template-columns:1fr;gap:4px}
+#settingsModal .ev-preference-grid>label{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:36px;color:var(--cfg-strong);font-size:14px;font-weight:400}
+#settingsModal .ev-preference-grid>label>select{width:55%}
+#settingsModal .ev-preference-grid .c5p-check input{order:2;margin-left:auto!important}
+#settingsModal .settings-footer{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 20px;background:var(--cfg-side);border:0}
+#settingsModal .cfg-save-copy{min-width:0}
+#settingsModal .cfg-save-copy small{display:block;font-size:11px;line-height:1.45;color:var(--cfg-side-muted);max-width:65ch}
+#settingsModal .cfg-save-status{font-size:13px;color:var(--cfg-side-ink);margin:0 0 4px}
+#settingsModal .cfg-save-status:empty{display:none}
+#settingsModal .cfg-error{color:#ffb4b4}
+#settingsModal .cfg-mobile-category{display:none}
+#settingsModal :focus-visible{outline:3px solid var(--cfg-accent)!important;outline-offset:3px}
+@media(max-width:800px){#settingsModal .cfg-body{grid-template-columns:190px minmax(0,1fr)}#settingsModal .settings-content{padding:16px 20px}#settingsModal .cfg-row:not([style*="display: none"]):not([style*="display:none"]):not([hidden]){grid-template-columns:1fr;gap:4px}#settingsModal .cfg-row:has(.switch){grid-template-columns:minmax(0,1fr) 64px!important}#settingsModal .settings-nav-item{font-size:13px}#settingsModal .ev-preference-grid>label:has(select){display:block}#settingsModal .ev-preference-grid>label>select{width:100%;margin-top:6px}}
+@media(max-width:580px){#settingsModal{padding:0;align-items:stretch}#settingsModal .settings-modal-container{width:100%;height:100dvh;max-height:100dvh;border-radius:0}#settingsModal .cfg-titlebar{padding:6px 8px 6px 16px}#settingsModal .cfg-body{display:flex;flex-direction:column}#settingsModal .settings-sidebar{display:none}#settingsModal .cfg-mobile-category{display:block;flex:none;padding:8px 16px;background:var(--cfg-side)}#settingsModal .cfg-mobile-category label{display:block;font-size:12px;color:var(--cfg-side-muted);margin-bottom:4px}#settingsModal .settings-content{flex:1;padding:12px 16px 16px;min-height:0}#settingsModal .settings-section>h2{font-size:20px;margin-bottom:8px}#settingsModal .settings-footer{padding:8px 16px;align-items:center;gap:12px}#settingsModal .settings-footer>.cfg-primary{flex:none;max-width:45%;font-size:12px}#settingsModal .cfg-save-copy small{font-size:11px}#settingsModal .cfg-group button{font-size:12px}#settingsModal .ota-line,#settingsModal .ota-actions{flex-wrap:wrap}#settingsModal .cfg-group #syncDevicesList>div{flex-wrap:wrap;gap:8px}#settingsModal .cfg-group #syncDevicesList>div>div{min-width:0;flex-wrap:wrap}#settingsModal .cfg-group #serialMonitor{height:220px!important;max-width:100%;overflow:auto}#settingsModal .cfg-row>label{white-space:normal}}
+@media(forced-colors:active){#settingsModal button,#settingsModal input,#settingsModal select{border:1px solid ButtonText!important}#settingsModal input[type=checkbox]:checked{background:Highlight}#settingsModal input[type=checkbox]::before{background:ButtonText}#settingsModal .settings-nav-item.active{outline:2px solid Highlight}}
+/* Touch screens: 16px fields stop iOS zooming on focus; every control is at least 40px tall. */
+@media(pointer:coarse){#settingsModal input:not([type=checkbox]):not([type=range]):not([type=color]),#settingsModal select,#settingsModal button,#settingsModal .settings-nav-item{min-height:42px}#settingsModal input:not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),#settingsModal select,#settingsModal textarea{font-size:16px!important}#settingsModal .switch{height:40px!important}#settingsModal input[type=checkbox]:not(.cfg-checkbox){margin:7px 0!important}#settingsModal label:has(>input[type=checkbox]){display:inline-flex;align-items:center;min-height:40px}#settingsModal .cfg-group a{display:inline-flex;align-items:center;min-height:40px}}
