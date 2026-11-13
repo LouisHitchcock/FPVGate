@@ -1,6 +1,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm');
 const source=fs.readFileSync(path.join(__dirname,'../data/history-filters.js'),'utf8');
-function filters(){const c={Date,Number,document,renderRaceHistory:jest.fn()};vm.createContext(c);vm.runInContext(source,c);return c;}
+function filters(extra={}){const c={Date,Number,document,renderRaceHistory:jest.fn(),...extra};vm.createContext(c);vm.runInContext(source,c);return c;}
+function store(values={}){return {getItem:k=>k in values?values[k]:null,setItem:(k,v)=>{values[k]=String(v);},values};}
 const seconds=(date)=>Math.floor(new Date(date).getTime()/1000);
 const legacy={timestamp:seconds('2026-10-01T12:00:00'),pilotName:'Alice',pilotCallsign:'ACE',lapTimes:[4000,10000,11000],name:'Practice',trackName:'North',notes:'wet track'};
 const multi={timestamp:seconds('2026-11-09T23:59:59'),pilots:[{name:'Bea',callsign:'BEE',lapTimes:[3000,9000,9500]},{name:'Cal',callsign:'CGG',lapTimes:[3500,12000]}],importedAt:seconds('2026-11-10T01:00:00')};
@@ -31,8 +32,8 @@ test('sorting preserves original card indices for edit/delete/detail actions',()
  expect(c.filterHistoryRows([legacy,multi],{sort:'import-desc'}).map(r=>r.index)).toEqual([1,0]);
 });
 test('clear resets all controls and renders once',()=>{
- document.body.innerHTML=['historyPilot','historySearch','historyFrom','historyTo','historyMinLaps','historyMaxLaps','historyImported','historySort'].map(id=>`<input id="${id}" value="x">`).join('');
- const c=filters();c.clearHistoryFilters();expect(c.readHistoryFilters()).toEqual({pilot:'',search:'',from:'',to:'',minLaps:'',maxLaps:'',imported:'all',sort:'race-desc'});expect(c.renderRaceHistory).toHaveBeenCalledTimes(1);
+ document.body.innerHTML=['historyPilot','historySearch','historyFrom','historyTo','historyMinLaps','historyMaxLaps','historyImported','historySort','historyQuickSort'].map(id=>`<input id="${id}" value="x">`).join('');
+ const c=filters({localStorage:store({historyAdvancedFilters:'1'})});c.clearHistoryFilters();expect(document.getElementById('historyQuickSort').value).toBe('race-desc');expect(c.readHistoryFilters()).toEqual({pilot:'',search:'',from:'',to:'',minLaps:'',maxLaps:'',imported:'all',sort:'race-desc'});expect(c.renderRaceHistory).toHaveBeenCalledTimes(1);
 });
 const main=fs.readFileSync(path.join(__dirname,'../data/script.js'),'utf8');const loader=main.slice(main.indexOf('async function loadRaceHistory('),main.indexOf('\nfunction renderRaceHistory()'));
 function history(fetch){document.body.innerHTML='<p id="historyFilterStatus"></p>';const c={fetch,document,console:{error:jest.fn()},i18n:{t:key=>key},renderRaceHistory:jest.fn(),raceHistoryData:[],historyLoadGeneration:0};vm.createContext(c);vm.runInContext(loader,c);return c;}
@@ -68,4 +69,39 @@ test('full backup uses every fetched race, not the old capped download endpoint'
  const click=jest.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
  vm.createContext(ctx);vm.runInContext(main.slice(main.indexOf('async function downloadRaces()'),main.indexOf('\nfunction downloadSingleRace(')),ctx);
  await ctx.downloadRaces();expect(JSON.parse(blob).races).toHaveLength(87);expect(click).toHaveBeenCalledTimes(1);expect(ctx.URL.revokeObjectURL).toHaveBeenCalledWith('blob:backup');click.mockRestore();
+});
+
+test('number of pilots sorts multi-pilot races first, then newest',()=>{
+ const c=filters(),single2={...legacy,timestamp:legacy.timestamp+60};
+ expect(c.filterHistoryRows([legacy,multi,single2],{sort:'pilots-desc'}).map(r=>r.index)).toEqual([1,2,0]);
+ expect(c.historyPilotCount(legacy)).toBe(1);expect(c.historyPilotCount({pilots:[]})).toBe(1);
+});
+test('by default only the title sort applies; hidden advanced filters cannot hide races',()=>{
+ document.body.innerHTML='<select id="historyQuickSort"><option value="race-desc">a</option><option value="laps-asc" selected>b</option></select><input id="historyPilot" value="nobody"><input id="historySort" value="race-asc">';
+ const c=filters({localStorage:store()});expect(c.readHistoryFilters()).toEqual({sort:'laps-asc'});
+ expect(c.filterHistoryRows([legacy,multi],c.readHistoryFilters()).map(r=>r.index)).toEqual([0,1]);
+ const noStorage=filters();expect(noStorage.historyAdvancedFiltersEnabled()).toBe(false);
+});
+test('advanced filters switch shows the panel, hides the title sort and is remembered',()=>{
+ document.body.innerHTML='<details id="historyFilterPanel" hidden></details><select id="historyQuickSort"></select><input type="checkbox" id="historyAdvancedFilters"><input id="historyPilot" value="ace"><input id="historySort" value="race-asc">';
+ const local=store(),c=filters({localStorage:local});c.applyHistoryAdvancedFilters();
+ expect(document.getElementById('historyFilterPanel').hidden).toBe(true);expect(document.getElementById('historyQuickSort').hidden).toBe(false);
+ c.toggleHistoryAdvancedFilters(true);expect(local.values.historyAdvancedFilters).toBe('1');expect(c.renderRaceHistory).toHaveBeenCalledTimes(1);
+ expect(document.getElementById('historyFilterPanel').hidden).toBe(false);expect(document.getElementById('historyQuickSort').hidden).toBe(true);
+ expect(document.getElementById('historyAdvancedFilters').checked).toBe(true);expect(c.readHistoryFilters()).toMatchObject({pilot:'ace',sort:'race-asc'});
+ c.toggleHistoryAdvancedFilters(false);expect(local.values.historyAdvancedFilters).toBe('0');expect(document.getElementById('historyFilterPanel').hidden).toBe(true);
+});
+test('title sort and panel Sort by stay in step',()=>{
+ const opts='<option value="race-desc">a</option><option value="pilots-desc">b</option><option value="race-asc">c</option>';
+ document.body.innerHTML=`<select id="historyQuickSort">${opts}</select><select id="historySort">${opts}</select>`;
+ const c=filters();c.setHistorySort('pilots-desc');
+ expect(document.getElementById('historyQuickSort').value).toBe('pilots-desc');expect(document.getElementById('historySort').value).toBe('pilots-desc');expect(c.renderRaceHistory).toHaveBeenCalledTimes(1);
+ c.setHistorySort('');expect(document.getElementById('historySort').value).toBe('race-desc');
+});
+test('both sort menus offer the same six orders in index.html',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../data/index.html'),'utf8');
+ const values=id=>[...html.slice(html.indexOf(`id="${id}"`),html.indexOf('</select>',html.indexOf(`id="${id}"`))).matchAll(/option value="([^"]+)"/g)].map(m=>m[1]);
+ expect(values('historyQuickSort')).toEqual(['race-asc','race-desc','laps-desc','laps-asc','pilots-desc','import-desc']);
+ expect(values('historySort')).toEqual(values('historyQuickSort'));
+ expect(html).toMatch(/id="historyFilterPanel"[^>]*hidden/);
 });

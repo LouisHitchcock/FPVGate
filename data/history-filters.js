@@ -3,6 +3,9 @@ function historyRaceLaps(race) {
   const pilots = Array.isArray(race.pilots) && race.pilots.length ? race.pilots : [race];
   return pilots.reduce((sum, p) => sum + Math.max(0, (p.lapTimes || []).length - 1), 0);
 }
+function historyPilotCount(race) {
+  return Array.isArray(race.pilots) && race.pilots.length ? race.pilots.length : 1;
+}
 function historyPilotText(race) {
   return [race.pilotName, race.pilotCallsign, ...(race.pilots || []).flatMap(p => [p.name, p.callsign])]
     .filter(Boolean).join(' ').toLowerCase();
@@ -39,13 +42,41 @@ function filterHistoryRows(races, filters = {}, now = Date.now()) {
     else if (mode === 'import-desc') difference = (Number(b.race.importedAt) || 0) - (Number(a.race.importedAt) || 0);
     else if (mode === 'laps-desc') difference = historyRaceLaps(b.race) - historyRaceLaps(a.race);
     else if (mode === 'laps-asc') difference = historyRaceLaps(a.race) - historyRaceLaps(b.race);
+    else if (mode === 'pilots-desc') difference = historyPilotCount(b.race) - historyPilotCount(a.race);
     return difference || b.race.timestamp - a.race.timestamp;
   });
 }
+// The full filter panel is opt-in (Settings > User Interface), remembered on
+// this device. Otherwise only the sort dropdown beside the title is shown.
+function historyAdvancedFiltersEnabled() {
+  try { return localStorage.getItem('historyAdvancedFilters') === '1'; } catch { return false; }
+}
 function readHistoryFilters() {
   const value = id => document.getElementById(id)?.value || '';
+  // Hidden filters are ignored, so a value left in the panel cannot hide races.
+  if (!historyAdvancedFiltersEnabled()) return {sort: value('historyQuickSort') || value('historySort')};
   return {pilot: value('historyPilot'), search: value('historySearch'), from: value('historyFrom'), to: value('historyTo'),
     minLaps: value('historyMinLaps'), maxLaps: value('historyMaxLaps'), imported: value('historyImported'), sort: value('historySort')};
+}
+// The title dropdown and the panel's Sort by are one setting.
+function setHistorySort(mode) {
+  for (const id of ['historyQuickSort', 'historySort']) {
+    const field = document.getElementById(id); if (field) field.value = mode || 'race-desc';
+  }
+  renderRaceHistory();
+}
+function applyHistoryAdvancedFilters() {
+  const advanced = historyAdvancedFiltersEnabled();
+  const panel = document.getElementById('historyFilterPanel'), quick = document.getElementById('historyQuickSort');
+  if (panel) panel.hidden = !advanced;
+  if (quick) quick.hidden = advanced;
+  const toggle = document.getElementById('historyAdvancedFilters');
+  if (toggle) toggle.checked = advanced;
+}
+function toggleHistoryAdvancedFilters(enabled) {
+  try { localStorage.setItem('historyAdvancedFilters', enabled ? '1' : '0'); } catch {}
+  applyHistoryAdvancedFilters();
+  renderRaceHistory();
 }
 function applyHistoryFilters() { renderRaceHistory(); }
 function clearHistoryFilters() {
@@ -55,5 +86,7 @@ function clearHistoryFilters() {
   const imported = document.getElementById('historyImported'), sort = document.getElementById('historySort');
   if (imported) imported.value = 'all';
   if (sort) sort.value = 'race-desc';
+  const quick = document.getElementById('historyQuickSort');
+  if (quick) quick.value = 'race-desc';
   renderRaceHistory();
 }

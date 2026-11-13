@@ -1493,6 +1493,7 @@ onload = async function (e) {
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
   applyRaceNotesButton();
+  applyHistoryAdvancedFilters();
   syncRaceAnalyticsToggleUI();
 
   config.style.display = "none";
@@ -10949,6 +10950,7 @@ function openSettingsModal() {
   modal.classList.add("active");
     syncOpenRaceNotesOnRaceEndToggle();
     applyRaceNotesButton();
+    applyHistoryAdvancedFilters();
 
     // Refresh each time the modal opens rather than once at page load, so the
     // panel reflects the device after an update without needing a reload.

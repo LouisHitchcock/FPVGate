@@ -214,7 +214,13 @@
         "marshal_chart_aria": "Race RSSI history graph. Scroll to zoom, drag background to pan, drag markers to move crossings. Ctrl+click to multi-select.",
         "marshal_pass_list_aria": "Pass list",
         "marshal_passes_aria": "Recorded gate passes",
-        "marshal_details_aria": "Race details"
+        "marshal_details_aria": "Race details",
+        "sort_earliest": "Earliest race",
+        "sort_latest": "Last race",
+        "sort_total_laps": "Total laps",
+        "sort_fewest_laps": "Fewest laps",
+        "sort_pilots": "Number of pilots",
+        "sort_last_imported": "Last imported"
     },
     "calib": {
         "title": "RSSI Calibration",
@@ -828,6 +834,11 @@
             "skipped": "SKIPPED",
             "summary": "{passed} passed, {skipped} skipped, {failed} failed (of {total})",
             "spread": "Spread: {spread} | Min: {min} | Max: {max}"
+        },
+        "ui": {
+            "history_title": "Race History",
+            "history_advanced_filters": "Advanced Filters:",
+            "history_advanced_filters_tip": "Show the full filter panel on the Race History tab: pilot, text, date and lap filters. Off shows just the sort dropdown. Remembered on this device."
         }
     },
     "modals": {

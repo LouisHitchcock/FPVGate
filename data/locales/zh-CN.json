@@ -179,7 +179,13 @@
         "marshal_chart_aria": "比赛 RSSI 历史曲线。滚轮缩放，拖动空白处平移，拖动标记可移动过门点。Ctrl+点击可多选。",
         "marshal_pass_list_aria": "过门列表",
         "marshal_passes_aria": "已记录的过门点",
-        "marshal_details_aria": "比赛详情"
+        "marshal_details_aria": "比赛详情",
+        "sort_earliest": "最早的比赛",
+        "sort_latest": "最近的比赛",
+        "sort_total_laps": "总圈数",
+        "sort_fewest_laps": "最少圈数",
+        "sort_pilots": "飞手人数",
+        "sort_last_imported": "最近导入"
     },
     "calib": {
         "title": "RSSI 校准",
@@ -706,6 +712,11 @@
             "skipped": "已跳过",
             "summary": "通过 {passed} 项，跳过 {skipped} 项，失败 {failed} 项（共 {total} 项）",
             "spread": "极差：{spread} | 最小：{min} | 最大：{max}"
+        },
+        "ui": {
+            "history_title": "比赛历史",
+            "history_advanced_filters": "高级筛选：",
+            "history_advanced_filters_tip": "在比赛历史页显示完整的筛选面板：飞手、文字、日期和圈数筛选。关闭时只显示排序下拉框。仅保存在此设备上。"
         }
     },
     "modals": {

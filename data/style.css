@@ -1019,6 +1019,28 @@ footer {
 }
 
 /* Race History Section */
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-header h2 {
+  margin-right: auto;
+}
+
+.history-quick-sort {
+  width: auto;
+  min-width: 180px;
+}
+
+.history-quick-sort[hidden],
+.history-filter-panel[hidden] {
+  display: none;
+}
+
 .history-controls {
   display: flex;
   gap: 12px;
