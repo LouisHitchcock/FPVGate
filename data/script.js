@@ -1075,7 +1075,7 @@ function addC5ManualLap(slot, button) {
     .finally(() => { if (button) setTimeout(() => { button.disabled = !raceRunning; }, 400); });
 }
 
-// Always include the pilot name when speaking multi-pilot lap times or totals.
+// C5 heat announcements honor the selected lap format.
 function announceC5RaceLap(racer, idx, seconds) {
   const mode = announcerSelect.options[announcerSelect.selectedIndex].value;
   const extras = announcerExtras();
@@ -1103,7 +1103,11 @@ function announceC5RaceLap(racer, idx, seconds) {
     if (parts.length) queueSpeak(`<p>${racer.spoken} ${parts.join(", ")}</p>`);
     return;
   }
-  queueSpeak(`<p>${racer.spoken}, ${t}</p>`);
+  const lap = i18n.t("race.lap_counter", { n: idx });
+  const text = lapFormat === "timeonly" ? t
+    : lapFormat === "laptime" ? `${lap}, ${t}`
+    : `${racer.spoken} ${lap}, ${t}`;
+  queueSpeak(`<p>${text}</p>`);
 }
 
 // Render the race view - switches between personal (single) and multi-pilot view
@@ -3272,8 +3276,8 @@ function addLap(lapStr) {
   // Render unified multi-pilot view
   renderUnifiedRaceView();
 
-  // Determine effective lap format - force "Pilot + Time" in sync modes
-  const effectiveLapFormat = (raceSyncMode === 1 || raceSyncMode === 2 || raceSyncMode === 3) ? 'full' : lapFormat;
+  // Respect the selected lap format in synchronized races too.
+  const effectiveLapFormat = lapFormat;
   
   const announceMode = announcerSelect.options[announcerSelect.selectedIndex].value;
   const extras = announcerExtras();
@@ -3296,7 +3300,7 @@ function addLap(lapStr) {
         let text;
         switch (effectiveLapFormat) {
           case "full":
-            text = `<p>${pilotName}, ${lapStr}</p>`;
+            text = `<p>${pilotName} ${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
             break;
           case "laptime":
             text = `<p>${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
@@ -3305,7 +3309,7 @@ function addLap(lapStr) {
             text = `<p>${lapStr}</p>`;
             break;
           default:
-            text = `<p>${pilotName}, ${lapStr}</p>`;
+            text = `<p>${pilotName} ${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
         }
         queueSpeak(text);
       }

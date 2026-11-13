@@ -113,9 +113,9 @@ test.each(["none", "", "beep", "1lap", "2lap", "3lap"])("%p with unlimited laps 
 test.each([
   [0, "laptime", "race.lap_counter:1, 10.00"],
   [0, "timeonly", "10.00"],
-  [1, "timeonly", "Anna, 10.00"],
-  [2, "laptime", "Anna, 10.00"],
-  [3, "timeonly", "Anna, 10.00"],
+  [1, "timeonly", "10.00"],
+  [2, "laptime", "race.lap_counter:1, 10.00"],
+  [3, "timeonly", "10.00"],
 ])("every-lap formatting in sync mode %p with %p", (sync, format, expected) => {
   const r = race({ mode: "1lap", sync, format, phonetic: "Anna" });
   r.addLap("1.00");
@@ -132,13 +132,13 @@ test.each([1, 2])("consecutive announcements include the pilot in sync mode %p",
 test("every-lap and beep modes are unchanged", () => {
   const r = race({ mode: "1lap" });
   ["1.00", "10.00"].forEach((t) => r.addLap(t));
-  expect(r.spoken).toEqual(["Gate 1 1.00", "Ann, 10.00"]);
+  expect(r.spoken).toEqual(["Gate 1 1.00", "Ann race.lap_counter:1, 10.00"]);
   const b = race({ mode: "beep" });
   ["1.00", "10.00"].forEach((t) => b.addLap(t));
   expect(b.spoken).toEqual(["BEEP", "BEEP"]);
 });
 
-function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false, extras = {}) {
+function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false, extras = {}, format = "full") {
   const spoken = [];
   const stops = [];
   const pending = [];
@@ -147,6 +147,7 @@ function c5RaceSandbox(mode, maxLaps = 0, gateManaged = false, extras = {}) {
   const stubs = {
     announcerSelect: { selectedIndex: 0, options: [{ value: mode }] },
     c5Race: state,
+    lapFormat: format,
     c5GateManaged: gateManaged,
     queueSpeak: (t) => spoken.push(t.replace(/<\/?p>/g, "")),
     beep: () => spoken.push("BEEP"),
@@ -208,7 +209,7 @@ test.each(["none", "", "beep", "1lap", "2lap", "3lap"])("C5 %p stops only after 
 });
 
 test.each([
-  ["1lap", ["Bea Gate 1 1.20", "Bea, 10.00"]],
+  ["1lap", ["Bea Gate 1 1.20", "Bea race.lap_counter:1, 10.00"]],
   ["beep", ["BEEP", "BEEP"]],
   ["none", []],
   ["", []],
@@ -304,4 +305,14 @@ test.each(["none", "", "beep"])("Gate 1 override preserves %s mode", (mode) => {
   c.pass(3, 0, 1);
   expect(r.spoken).toEqual(mode === "beep" ? ["BEEP"] : []);
   expect(c.spoken).toEqual(r.spoken);
+});
+
+test.each([
+  ["laptime", "race.lap_counter:1, 10.00", "race.lap_counter:2, 11.00"],
+  ["timeonly", "10.00", "11.00"],
+  ["full", "Bea race.lap_counter:1, 10.00", "Bea race.lap_counter:2, 11.00"],
+])("C5 heat honors %s with Gate 1 and per-lap beeps", (format, first, second) => {
+  const r = c5RaceSandbox("1lap", 0, true, { gate1Beep: true, beepEveryLap: true }, format);
+  r.pass(3, 0, 1); r.pass(3, 1, 10); r.pass(3, 2, 11);
+  expect(r.spoken).toEqual(["BEEP", "BEEP", first, "BEEP", second]);
 });
