@@ -5190,7 +5190,7 @@ function renderAlwaysOnRaceStats(stats, pilots, leaderName) {
       }
     }
   }
-  const who = (name, detail) => (name ? `${name} Â· ${detail}` : detail);
+  const who = (name, detail) => (name ? `${name} \u00b7 ${detail}` : detail);
   setRaceStatBox("raceAlwaysFastest", fastest && fastest.s.fastest, fastest && who(fastest.name, `Lap ${fastest.s.fastestIndex}`));
   setRaceStatBox("raceAlwaysFastest3Consec", consec && consec.s.fastest3ConsecValue, consec && who(consec.name, consec.s.fastest3ConsecLaps));
   setRaceStatBox("raceAlwaysBest3", stats && stats.best3Value, stats && who(leaderName, stats.best3Laps));
@@ -7036,7 +7036,7 @@ function renderMarshalPilotList() {
       <button type="button" class="c5p-eye" onclick="event.stopPropagation(); marshalToggleTrace(${p.slot})" title="Show or hide this trace"></button>
       <b class="marshal-pilot-ch">${channel}</b>
       <span class="marshal-pilot-name">${escapeHtml(p.name || `Pilot ${i + 1}`)}</span>
-      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} Â· ${best}</span>
+      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} \u00b7 ${best}</span>
     </div>`;
   }).join("");
 }
@@ -7274,13 +7274,13 @@ function mergeLapInEditor(index) {
   renderLapEditList();
 }
 
-// One line on the collapsed Race Details bar: name Â· tag Â· distance.
+// One line on the collapsed Race Details bar: name \u00b7 tag \u00b7 distance.
 function updateMarshalDetailsSummary() {
   const name = document.getElementById("raceName").value.trim();
   const tag = document.getElementById("raceTag").value.trim();
   const distance = parseFloat(document.getElementById("raceDistance").value);
   document.getElementById("marshalDetailsSummary").textContent =
-    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" Â· ");
+    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" \u00b7 ");
 }
 
 function openRaceEditor(index) {
