@@ -950,9 +950,10 @@
 
               <div class="config-item">
                 <label data-i18n="settings.tts.pack_download_label">Saved voice pack:</label>
-                <div style="display: flex; gap: 8px; flex: 1">
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; flex: 1">
                   <button type="button" id="downloadVoicePackButton" onclick="audioAnnouncer.downloadVoicePack()" data-i18n="settings.tts.pack_download">Download voice pack</button>
                   <button type="button" id="removeVoicePackButton" onclick="audioAnnouncer.removeSavedVoicePack()" data-i18n="settings.tts.pack_remove">Remove saved pack</button>
+                  <button type="button" id="cancelVoicePackButton" hidden onclick="audioAnnouncer.cancelVoicePackDownload()" data-i18n="settings.tts.pack_cancel">Cancel download</button>
                 </div>
               </div>
               <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px" data-i18n="settings.tts.pack_storage_tip">Downloaded packs stay in this browser across reloads. Clearing site data removes them.</div>

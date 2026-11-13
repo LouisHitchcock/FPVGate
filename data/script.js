@@ -456,7 +456,22 @@ async function initializeTransport() {
   updateConnectionStatus("WiFi", true);
 }
 
+function pauseLiveForVoiceDownload() {
+  window.voicePackTransferPaused = true;
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  if (eventSourceReconnectTimer) { clearTimeout(eventSourceReconnectTimer); eventSourceReconnectTimer = null; }
+  if (connectionStatusUpdateInterval) { clearInterval(connectionStatusUpdateInterval); connectionStatusUpdateInterval = null; }
+  let resumed = false;
+  return () => {
+    if (resumed) return;
+    resumed = true;
+    window.voicePackTransferPaused = false;
+    setupWiFiEvents();
+  };
+}
+
 function setupWiFiEvents() {
+  if (window.voicePackTransferPaused) return;
   // Clear any pending reconnect timer
   if (eventSourceReconnectTimer) {
     clearTimeout(eventSourceReconnectTimer);
@@ -3904,6 +3919,10 @@ function openRssiDebugPopout(event) {
 }
 
 async function startRace() {
+  if (audioAnnouncer?.packDownloadActive) {
+    alert(i18n.t("settings.tts.pack_finish_download"));
+    return;
+  }
   if (typeof RaceEvent !== "undefined" && RaceEvent.pendingReview?.()) {
     alert("Confirm the saved Event results before starting another race.");
     document.getElementById("nav-link-event")?.click();

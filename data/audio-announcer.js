@@ -45,6 +45,7 @@ class AudioAnnouncer {
         this.preloadedAudios = new Set();
         this.audioSources = new Map();
         this.audioLoads = new Map();
+        this.audioControllers = new Set();
         this.audioSourceBytes = 0;
         this.audioSourceGeneration = 0;
         this.maxAudioSourceBytes = 4 * 1024 * 1024;
@@ -181,6 +182,7 @@ class AudioAnnouncer {
         if (!this.packDownloadActive && typeof document !== 'undefined') return null;
         const generation = this.audioSourceGeneration;
         const controller = new AbortController();
+        this.audioControllers.add(controller);
         const timeout = setTimeout(() => controller.abort(), 5000);
         const pending = (async () => {
             try {
@@ -211,6 +213,7 @@ class AudioAnnouncer {
                 return null;
             } finally {
                 clearTimeout(timeout);
+                this.audioControllers.delete(controller);
             }
         })();
         this.audioLoads.set(audioPath, pending);
@@ -320,6 +323,8 @@ class AudioAnnouncer {
         this.clearAudioSources();
         this.packDownloadActive = true;
         const generation = this.audioSourceGeneration, voice = this.selectedVoice;
+        const resume = typeof pauseLiveForVoiceDownload === 'function' ? pauseLiveForVoiceDownload() : () => {};
+        this.resumeVoiceDownload = resume;
         this.updatePackStatus(this.packText('pack_downloading', 'Downloading voice pack for this browser…'));
         try {
             const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -345,11 +350,22 @@ class AudioAnnouncer {
             if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_saved_ready', 'Voice pack saved in this browser and ready.'));
         } catch (error) {
             console.warn('[AudioAnnouncer] Voice download/save failed:', error);
-            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_save_failed', 'Could not save the complete voice pack. Retry Download voice pack.'));
+            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText(error.code === 'memory-wait-timeout' ? 'pack_wait_timeout' : 'pack_save_failed', error.code === 'memory-wait-timeout' ? 'The gate has not freed enough memory. Close other gate pages and retry the download.' : 'Could not save the complete voice pack. Retry Download voice pack.'));
         } finally {
-            this.packDownloadActive = false;
+            if (generation === this.audioSourceGeneration) this.packDownloadActive = false;
+            resume();
+            if (this.resumeVoiceDownload === resume) this.resumeVoiceDownload = null;
             this.syncPackButtons();
         }
+    }
+
+    cancelVoicePackDownload() {
+        if (!this.packDownloadActive) return;
+        this.packDownloadActive = false;
+        this.clearAudioSources();
+        this.resumeVoiceDownload?.();
+        this.resumeVoiceDownload = null;
+        this.updatePackStatus(this.packText('pack_cancelled', 'Download cancelled. Previously saved packs are unchanged.'));
     }
 
     async removeSavedVoicePack() {
@@ -366,6 +382,8 @@ class AudioAnnouncer {
 
     syncPackButtons() {
         if (typeof document === 'undefined') return;
+        const cancel = document.getElementById('cancelVoicePackButton');
+        if (cancel) { cancel.hidden = !this.packDownloadActive; cancel.style.display = this.packDownloadActive ? '' : 'none'; }
         const selected = !!this.getPrimaryVoiceDirectory();
         const voiceSelect = document.getElementById('voiceSelect');
         if (voiceSelect) voiceSelect.disabled = this.packDownloadActive;
@@ -376,7 +394,9 @@ class AudioAnnouncer {
     }
 
     async waitForAudioBudget(generation) {
+        const started = Date.now();
         while ((this.audioEnabled || this.packDownloadActive) && generation === this.audioSourceGeneration) {
+            if (typeof c5RaceResync === 'function' && typeof c5ReceiverSelected === 'function' && c5ReceiverSelected()) await c5RaceResync();
             let available = false;
             let reason = 'pack_wait_race', freeKB = 0;
             if (!(typeof raceRunning !== 'undefined' && raceRunning)) {
@@ -389,14 +409,24 @@ class AudioAnnouncer {
                         const state = await response.json();
                         // requestsNow includes persistent/SSE connections until
                         // disconnect. It is not a count of active file transfers.
-                        available = state.heapFree >= 55000 && state.heapLargest >= 16000;
+                        // Explicit downloads suspend this page's SSE/polling. Reserve
+                        // 8 KB above the unchanged 40 KB qualification floor for
+                        // one bounded transfer; background callers remain stricter.
+                        const requiredFree = this.packDownloadActive ? 48000 : 55000;
+                        available = state.heapFree >= requiredFree && state.heapLargest >= 16000;
                         reason = 'pack_wait_memory';
                         freeKB = Math.round(state.heapFree / 1024);
                     } else if (response.body) await response.body.cancel();
                 } catch (_) {}
                 finally { clearTimeout(timeout); }
             }
+            if (generation !== this.audioSourceGeneration) return false;
             if (available) return true;
+            if (this.packDownloadActive && Date.now() - started >= 30000) {
+                const error = new Error('Voice download admission timed out');
+                error.code = 'memory-wait-timeout';
+                throw error;
+            }
             this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.' + reason, { n: freeKB }) : reason === 'pack_wait_race' ? 'Voice preparation resumes after this race.' : reason === 'pack_wait_memory' ? `Voice preparation is waiting for memory on the gate (${freeKB} KB free). Browser voice remains available.` : 'Voice preparation is waiting for the gate to respond.');
             await this.sleep(5000);
         }
@@ -422,6 +452,8 @@ class AudioAnnouncer {
 
     clearAudioSources() {
         ++this.audioSourceGeneration;
+        for (const controller of this.audioControllers) controller.abort();
+        this.audioControllers.clear();
         for (const entry of this.audioSources.values()) URL.revokeObjectURL(entry.url);
         this.audioSources.clear();
         this.audioLoads.clear();

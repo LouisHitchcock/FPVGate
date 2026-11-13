@@ -64,3 +64,13 @@ test('idle persistent connections do not prevent preparation when memory has hea
 test('memory pause explains the actual reason and available memory',async()=>{
  const {a,ctx}=setup();ctx.fetch.mockResolvedValue({ok:true,json:async()=>({heapFree:45056,heapLargest:27636,requestsNow:1})});a.updatePackStatus=jest.fn();a.sleep=async()=>{a.audioEnabled=false};expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(false);expect(a.updatePackStatus.mock.calls[0][0]).toContain('44 KB free');
 });
+
+test('explicit one-file download admits the observed idle 49.7 KB state',async()=>{
+ const {a,ctx}=setup();a.packDownloadActive=true;ctx.fetch.mockResolvedValue({ok:true,json:async()=>({heapFree:49716,heapLargest:19444,requestsNow:13})});expect(await a.waitForAudioBudget(a.audioSourceGeneration)).toBe(true);
+});
+test('manual download admission has a bounded memory wait',async()=>{
+ const {a,ctx}=setup();let now=0;ctx.Date={now:()=>now};a.packDownloadActive=true;ctx.fetch.mockResolvedValue({ok:true,json:async()=>({heapFree:45000,heapLargest:19444,requestsNow:1})});a.sleep=async()=>{now+=10000};await expect(a.waitForAudioBudget(a.audioSourceGeneration)).rejects.toMatchObject({code:'memory-wait-timeout'});
+});
+test('cancel aborts downloads, restores live updates, and invalidates late results',()=>{
+ const {a}=setup();const abort=jest.fn(),resume=jest.fn();a.audioControllers.add({abort});a.resumeVoiceDownload=resume;a.packDownloadActive=true;const generation=a.audioSourceGeneration;a.cancelVoicePackDownload();expect(a.packDownloadActive).toBe(false);expect(abort).toHaveBeenCalledTimes(1);expect(resume).toHaveBeenCalledTimes(1);expect(a.audioSourceGeneration).toBeGreaterThan(generation);
+});
