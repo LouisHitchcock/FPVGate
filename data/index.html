@@ -877,6 +877,21 @@
               </div>
 
               <div class="config-item">
+                <label for="browserBeepStyle" data-i18n="settings.tts.beep_style">Browser Beep:</label>
+                <div style="display: flex; gap: 8px; flex: 1">
+                  <select id="browserBeepStyle" style="flex: 1">
+                    <option value="classic" data-i18n="settings.tts.beep_classic">Classic</option>
+                    <option value="soft" data-i18n="settings.tts.beep_soft">Soft</option>
+                    <option value="high" data-i18n="settings.tts.beep_high">High</option>
+                    <option value="low" data-i18n="settings.tts.beep_low">Low</option>
+                    <option value="double" data-i18n="settings.tts.beep_double">Double</option>
+                  </select>
+                  <button type="button" id="previewBrowserBeep" onclick='beep(100, 330, "square")' data-i18n="settings.tts.beep_preview">Preview</button>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--secondary-color); margin-left: 170px; margin-top: -8px" data-i18n="settings.tts.beep_style_tip">Crossing beep sound on this phone or computer. Saved in this browser.</div>
+
+              <div class="config-item">
                 <label for="announcerBeepEveryLap" data-i18n="settings.tts.beep_every_lap">Beep Every Lap:</label>
                 <div style="flex: 1">
                   <label class="switch">

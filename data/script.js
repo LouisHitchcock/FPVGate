@@ -3033,6 +3033,14 @@ if (announcerSelect) {
   box.checked = localStorage.getItem(id) === "1";
   box.addEventListener("change", () => localStorage.setItem(id, box.checked ? "1" : "0"));
 });
+const browserBeepStyleSelect = document.getElementById("browserBeepStyle");
+if (browserBeepStyleSelect) {
+  const saved = localStorage.getItem("browserBeepStyle") || "classic";
+  browserBeepStyleSelect.value = ["classic", "soft", "high", "low", "double"].includes(saved) ? saved : "classic";
+  browserBeepStyleSelect.addEventListener("change", () => {
+    localStorage.setItem("browserBeepStyle", browserBeepStyleSelect.value);
+  });
+}
 if (pilotNameInput) {
   pilotNameInput.addEventListener("input", autoSaveConfig);
 }
@@ -3190,17 +3198,32 @@ function beep(duration, frequency, type) {
   }
 }
 
+// Only crossing beeps use this browser preference; start and warning tones keep
+// their existing sound. Schedule double tones on the audio clock, not timers.
+function browserBeepPattern(duration, frequency, type) {
+  const original = [[duration, frequency, type, 0]];
+  if (duration !== 100 || frequency !== 330 || type !== "square") return original;
+  switch (localStorage.getItem("browserBeepStyle")) {
+    case "soft": return [[120, 660, "sine", 0]];
+    case "high": return [[90, 1100, "sine", 0]];
+    case "low": return [[140, 220, "triangle", 0]];
+    case "double": return [[65, 660, "sine", 0], [65, 880, "sine", 110]];
+    default: return original;
+  }
+}
+
 function playBeepTone(duration, frequency, type) {
-  var oscillator = beepAudioContext.createOscillator();
-  oscillator.type = type;
-  oscillator.frequency.value = frequency;
-  // Connect through gain node for volume control
-  oscillator.connect(beepGainNode);
-  oscillator.start();
-  // Beep for specified duration
-  setTimeout(function () {
-    oscillator.stop();
-  }, duration);
+  const now = beepAudioContext.currentTime;
+  for (const [length, pitch, waveform, delay] of browserBeepPattern(duration, frequency, type)) {
+    const oscillator = beepAudioContext.createOscillator();
+    oscillator.type = waveform;
+    oscillator.frequency.value = pitch;
+    oscillator.connect(beepGainNode);
+    oscillator.onended = () => oscillator.disconnect();
+    const start = now + delay / 1000;
+    oscillator.start(start);
+    oscillator.stop(start + length / 1000);
+  }
 }
 
 // The total of the last `count` laps, Gate 1 ([0]) excluded, to 2 decimals;
