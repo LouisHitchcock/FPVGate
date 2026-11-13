@@ -9866,6 +9866,27 @@ document.addEventListener("keydown", function (event) {
 });
 
 // Self-Test Functions
+async function testBuzzer() {
+  const button = document.getElementById("testBuzzerButton");
+  const status = document.getElementById("testBuzzerStatus");
+  button.disabled = true;
+  status.textContent = "";
+  try {
+    const response = await fetch("/api/buzzer/test", { method: "POST" });
+    if (!response.ok) {
+      status.textContent = i18n.t(response.status === 409
+        ? "settings.diagnostics.buzzer_busy"
+        : "settings.diagnostics.buzzer_error");
+      return;
+    }
+    status.textContent = i18n.t("settings.diagnostics.buzzer_sent");
+  } catch (error) {
+    status.textContent = i18n.t("settings.diagnostics.buzzer_error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function runSelfTest() {
   const button = document.getElementById("runTestsButton");
   const loadingDiv = document.getElementById("testLoading");
@@ -9898,19 +9919,19 @@ function runSelfTest() {
         const status = statusOf(test);
         const durationMs = test.duration != null ? test.duration : (test.duration_ms || 0);
 
-        let statusIcon = "âœ“";
+        let statusIcon = "\u2713";
         let statusColor = "#4ade80";
         let bgColor = "rgba(74, 222, 128, 0.1)";
 
         if (status === "skip") {
           skippedCount++;
-          statusIcon = "â€“";
+          statusIcon = "\u2013";
           statusColor = "#9ca3af";
           bgColor = "rgba(156, 163, 175, 0.1)";
         } else if (status === "fail") {
           failedCount++;
           anyFailed = true;
-          statusIcon = "âœ—";
+          statusIcon = "\u2717";
           statusColor = "#ff5555";
           bgColor = "rgba(255, 85, 85, 0.1)";
         } else {
@@ -11221,10 +11242,10 @@ function evaluateC5Checks(frames, update, pilots, seconds) {
 
 function renderCheckResults(list, results, labelOf) {
   const style = {
-    pass: ["âœ“", "#4ade80", "rgba(74, 222, 128, 0.1)"],
+    pass: ["\u2713", "#4ade80", "rgba(74, 222, 128, 0.1)"],
     warn: ["!", "#fbbf24", "rgba(251, 191, 36, 0.1)"],
-    fail: ["âœ—", "#ff5555", "rgba(255, 85, 85, 0.1)"],
-    skip: ["â€“", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
+    fail: ["\u2717", "#ff5555", "rgba(255, 85, 85, 0.1)"],
+    skip: ["\u2013", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
   };
   list.innerHTML = results.map((r) => {
     const [icon, color, bg] = style[r.status] || style.skip;

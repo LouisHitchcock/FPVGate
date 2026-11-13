@@ -798,6 +798,10 @@
             "group_custom": "自定义"
         },
         "diagnostics": {
+          "test_buzzer": "测试蜂鸣器",
+          "buzzer_sent": "已请求蜂鸣。您听到了吗？",
+          "buzzer_busy": "请先停止比赛，再测试蜂鸣器。",
+          "buzzer_error": "无法测试蜂鸣器。请检查计时门连接。",
             "title": "诊断",
             "debug_mode": "调试模式",
             "debug_mode_tip": "在比赛界面叠加显示实时 RSSI 曲线",

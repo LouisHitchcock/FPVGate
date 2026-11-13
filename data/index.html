@@ -1908,6 +1908,9 @@
 
               <button id="runTestsButton" onclick="runSelfTest()" style="width: 100%; padding: 12px; margin-bottom: 16px; background-color: var(--accent-color)" data-i18n="settings.diagnostics.run_test">Run System Self-Test</button>
 
+              <button id="testBuzzerButton" onclick="testBuzzer()" style="width: 100%; padding: 12px; margin-bottom: 8px" data-i18n="settings.diagnostics.test_buzzer">Test buzzer</button>
+              <p id="testBuzzerStatus" role="status" aria-live="polite" style="margin: 0 0 16px; font-size: 14px; color: var(--secondary-color)"></p>
+
               <div id="testResults" style="display: none; margin-bottom: 16px">
                 <h4 style="margin-bottom: 12px; color: var(--primary-color)" data-i18n="settings.diagnostics.results_title">Test Results</h4>
                 <div id="testResultsList"></div>

@@ -3068,6 +3068,22 @@ EEPROM:\n";
         led->on(200);
     });
 
+    // A standalone, nonblocking hardware check; keep race audio undisturbed.
+    server.on("/api/buzzer/test", HTTP_POST, [this](AsyncWebServerRequest *request) {
+        const bool timerRunning = timer && timer->isRaceRunning();
+        const auto state = c5RaceControl ? c5RaceControl->status() : C5RaceControl::Status{};
+        if (timerRunning || state.running || state.busy) {
+            request->send(409, "application/json", "{\"error\":\"Stop the race before testing the buzzer\"}");
+            return;
+        }
+        if (!buz) {
+            request->send(503, "application/json", "{\"error\":\"Buzzer unavailable\"}");
+            return;
+        }
+        buz->beep(200);
+        request->send(200, "application/json", "{\"status\":\"OK\"}");
+    });
+
     // Beep volume control endpoint
     server.on("/buzzer/volume", HTTP_POST, [this](AsyncWebServerRequest *request) {
         if (request->hasParam("volume", true)) {

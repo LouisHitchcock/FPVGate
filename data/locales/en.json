@@ -903,6 +903,10 @@
             "group_custom": "Custom"
         },
         "diagnostics": {
+          "test_buzzer": "Test buzzer",
+          "buzzer_sent": "Beep requested. Did you hear it?",
+          "buzzer_busy": "Stop the race before testing the buzzer.",
+          "buzzer_error": "Could not test the buzzer. Check the gate connection.",
             "title": "Diagnostics",
             "debug_mode": "Debug Mode",
             "debug_mode_tip": "Show live RSSI graph overlay on the race screen",

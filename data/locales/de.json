@@ -598,6 +598,10 @@
             "reset": "Auf Standard zurücksetzen"
         },
         "diagnostics": {
+          "test_buzzer": "Summer testen",
+          "buzzer_sent": "Signalton angefordert. Haben Sie ihn gehört?",
+          "buzzer_busy": "Beenden Sie das Rennen, bevor Sie den Summer testen.",
+          "buzzer_error": "Summer konnte nicht getestet werden. Prüfen Sie die Verbindung zum Gate.",
             "title": "Diagnostik",
               "debug_mode": "Debug-Modus",
               "debug_popout": "RSSI-Debug in neuem Fenster öffnen",

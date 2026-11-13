@@ -599,6 +599,10 @@
             "reset": "Réinitialiser par Défaut"
         },
         "diagnostics": {
+          "test_buzzer": "Tester le buzzer",
+          "buzzer_sent": "Bip demandé. L’avez-vous entendu ?",
+          "buzzer_busy": "Arrêtez la course avant de tester le buzzer.",
+          "buzzer_error": "Impossible de tester le buzzer. Vérifiez la connexion à la porte.",
             "title": "Diagnostics",
               "debug_mode": "Mode Debug",
               "debug_popout": "Ouvrir le débogage RSSI dans une nouvelle fenêtre",

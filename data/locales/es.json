@@ -599,6 +599,10 @@
             "reset": "Restablecer a Predeterminado"
         },
         "diagnostics": {
+          "test_buzzer": "Probar zumbador",
+          "buzzer_sent": "Pitido solicitado. ¿Lo has oído?",
+          "buzzer_busy": "Detén la carrera antes de probar el zumbador.",
+          "buzzer_error": "No se pudo probar el zumbador. Comprueba la conexión con la puerta.",
             "title": "Diagnósticos",
               "debug_mode": "Modo Debug",
               "debug_popout": "Abrir depuración RSSI en una nueva ventana",
