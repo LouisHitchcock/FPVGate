@@ -540,12 +540,14 @@ bool Storage::listDir(const String& path, std::vector<String>& files) {
             return false;
         }
         
-        File file = root.openNextFile();
-        while (file) {
-            if (!file.isDirectory()) {
-                files.push_back(String(file.name()));
-            }
-            file = root.openNextFile();
+        // openNextFile() also opens the entry. If an unreadable entry comes
+        // first, its false File stops the whole listing and hides later races.
+        // Enumerate names instead; callers can handle individual read failures.
+        for (;;) {
+            bool isDirectory = false;
+            String name = root.getNextFileName(&isDirectory);
+            if (!name.length()) break;
+            if (!isDirectory) files.push_back(name.substring(name.lastIndexOf('/') + 1));
         }
         spiMutexGive();
         return true;
@@ -558,12 +560,11 @@ bool Storage::listDir(const String& path, std::vector<String>& files) {
         return false;
     }
     
-    File file = root.openNextFile();
-    while (file) {
-        if (!file.isDirectory()) {
-            files.push_back(String(file.name()));
-        }
-        file = root.openNextFile();
+    for (;;) {
+        bool isDirectory = false;
+        String name = root.getNextFileName(&isDirectory);
+        if (!name.length()) break;
+        if (!isDirectory) files.push_back(name.substring(name.lastIndexOf('/') + 1));
     }
     return true;
 }
