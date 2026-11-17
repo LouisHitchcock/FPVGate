@@ -475,6 +475,11 @@ bool RaceHistory::clearAll() {
             if (filename.endsWith(".json") || filename.endsWith(".rssi")) {
                 String filepath = String(RACES_DIR) + "/" + filename;
                 storage->deleteFile(filepath);
+                // This runs on the web server task. Each SD delete is a busy
+                // SPI transfer, and a full history is two files per race, so
+                // without a yield 60 races starve the idle task past the task
+                // watchdog and the gate reboots part way through the clear.
+                vTaskDelay(pdMS_TO_TICKS(1));
             }
         }
     }
