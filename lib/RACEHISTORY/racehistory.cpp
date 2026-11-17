@@ -4,6 +4,7 @@
 #include <time.h>
 #include "debug.h"
 #include "freertos/semphr.h"
+#include <esp_task_wdt.h>
 
 namespace {
 SemaphoreHandle_t historyMutex = nullptr;
@@ -138,7 +139,12 @@ bool RaceHistory::writeRaceFile(const RaceSession& race) {
     String json;
     serializeJson(doc, json);
     String filepath = raceFilePathForTimestamp(race.timestamp);
-    return storage->writeFile(filepath, json);
+    const bool success = storage->writeFile(filepath, json);
+    // A backup import writes many records inside one watched HTTP request.
+    // Report each completed operation, just as clearAll does for deletion.
+    vTaskDelay(pdMS_TO_TICKS(1));
+    if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
+    return success;
 }
 
 void RaceHistory::deleteSidecar(const RaceSession& race) {
@@ -475,11 +481,12 @@ bool RaceHistory::clearAll() {
             if (filename.endsWith(".json") || filename.endsWith(".rssi")) {
                 String filepath = String(RACES_DIR) + "/" + filename;
                 storage->deleteFile(filepath);
-                // This runs on the web server task. Each SD delete is a busy
-                // SPI transfer, and a full history is two files per race, so
-                // without a yield 60 races starve the idle task past the task
-                // watchdog and the gate reboots part way through the clear.
+                // Keep idle tasks running during a long SD batch. AsyncTCP
+                // also subscribes its own task to the watchdog, so a yield
+                // alone is not enough: report progress after each operation.
+                // A stuck delete still times out before this reset is reached.
                 vTaskDelay(pdMS_TO_TICKS(1));
+                if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
             }
         }
     }
