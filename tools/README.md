@@ -1,6 +1,6 @@
 # FPVGate tools
 
-Run the examples from the repository root on `V1.9.0-alpha`.
+Run the examples from the repository root on `V1.9.0`.
 Tools include voice generation, packaging, device load tests and offline
 timing diagnostics. Use each tool's `--help` for its actual arguments.
 

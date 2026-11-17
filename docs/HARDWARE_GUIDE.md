@@ -1,6 +1,6 @@
 # FPVGate hardware guide
 
-This guide describes `V1.9.0-alpha` (currently `1.9.0-alpha-5`).
+This guide describes `V1.9.0` (currently `1.9.0-alpha-5`).
 Board wiring comes from `lib/CONFIG/config.h`; build capabilities come from
 `targets/*.ini` and `platformio.ini`. A source target is not a promise that a
 prebuilt alpha image exists.

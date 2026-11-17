@@ -6,7 +6,7 @@ already published binaries.
 
 ## Version and source
 
-The working alpha branch is `V1.9.0-alpha`. Set `lib/VERSION/version.h`:
+The working branch is `V1.9.0`. Set `lib/VERSION/version.h`:
 `FPVGATE_VERSION` is the base version and `FPVGATE_VERSION_STAGE` the suffix.
 The normal current label is `1.9.0-alpha-5`. Keep a nonempty alpha stage for
 pre-releases; only a final release uses an empty stage.
@@ -139,7 +139,7 @@ Create/tag the intended source revision, push the intended branch/tag, then
 create an explicit GitHub pre-release and attach the root downloads and
 instructions. Confirm the website's release metadata points to the branch,
 tag and paths that actually contain those files. Alpha source lives on
-`V1.9.0-alpha`; a URL hardcoded to `main` is not automatically an alpha URL.
+`V1.9.0`; a URL hardcoded to `main` is not automatically an alpha URL.
 
 The updater constructs `<site>/preRelease/<tag>/<BOARD>/firmware.bin` and
 `littlefs.bin` for pre-releases, or `/firmware/…` for stable releases.

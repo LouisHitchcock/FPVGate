@@ -1,6 +1,6 @@
 # FPVGate feature reference
 
-Current scope: `V1.9.0-alpha`, normal build label `1.9.0-alpha-5`.
+Current scope: `V1.9.0`, normal build label `1.9.0-alpha-5`.
 This page describes implemented behavior and its limits. It replaces older
 serial/Electron and pre-SD specifications. See [User guide](USER_GUIDE.md)
 for operating steps and [Hardware](HARDWARE_GUIDE.md) for board differences.
