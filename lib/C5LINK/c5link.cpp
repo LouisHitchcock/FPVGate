@@ -373,11 +373,11 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
     } else if (line[0] == 'S' && line[1] == ',') {
         unsigned freq = 0, gain = 0, firmware = 0;
         char status[12] = {};
-        char version[16] = {};
+        char version[32] = {};
         char board[12] = {};
         // Firmware 3 adds ,<version>,<board>.
         const int fields =
-            sscanf(line, "S,%u,%u,%11[^,],%u,%15[^,],%11[^,]", &freq, &gain, status, &firmware, version, board);
+            sscanf(line, "S,%u,%u,%11[^,],%u,%31[^,],%11[^,]", &freq, &gain, status, &firmware, version, board);
         if (fields >= 3) {
             reportedFrequency_ = (uint16_t)freq;
             reportedGain_ = (uint8_t)gain;
@@ -385,6 +385,15 @@ void C5Link::parseLine(char *line, uint32_t nowMs) {
             firmware_ = fields >= 4 ? (uint8_t)firmware : 1;
             strlcpy(version_, fields >= 6 ? version : "", sizeof(version_));
             strlcpy(board_, fields >= 6 ? board : "", sizeof(board_));
+            // C5MK 1.3.0 pre-releases for the C5MK AIO's D6/D7 (UART1) wiring
+            // ("...-d6d7") still said "xiaoc5", the legacy D4/D5 wiring. Report
+            // them as the AIO board so an update over the link fetches the
+            // c5mkaio image, not the legacy one. Checked on the full version:
+            // version_ keeps only 15 characters.
+            const size_t versionLength = strlen(version);
+            if (fields >= 6 && strcmp(board, "xiaoc5") == 0 && versionLength >= 5 &&
+                strcmp(version + versionLength - 5, "-d6d7") == 0)
+                strlcpy(board_, "c5mkaio", sizeof(board_));
             if (storagePauseSent_) {
                 storagePauseReady_ = freq == 0 && strcmp(status, "ERR_FREQ") == 0;
                 tuningReady_ = false;
