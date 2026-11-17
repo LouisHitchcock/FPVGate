@@ -94,6 +94,30 @@ def patch_dependency(build_env):
     print('patch_async_sse_modern: verified AsyncTCP accepted-byte accounting')
 
 
+def patch_web_object_memory(build_env):
+    from pathlib import Path
+    import re
+    header = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer/src/ESPAsyncWebServer.h'
+    support = (Path(build_env.subst('$PROJECT_DIR')) / 'scripts/support/web_object.h').as_posix()
+    text = header.read_text(encoding='utf-8')
+    text = re.sub(r'#include "[^"]*/scripts/support/web_object\.h"', '#include "' + support + '"', text)
+    marker = '#include <Arduino.h>'
+    if '// FPVGate external HTTP objects' not in text:
+        if text.count(marker) != 1:
+            raise RuntimeError('Web header layout changed; review object allocator')
+        text = text.replace(marker, marker + '\n#include "' + support + '" // FPVGate external HTTP objects', 1)
+    for name in ['AsyncWebServerRequest', 'AsyncWebServerResponse']:
+        before = 'class ' + name + ' {'
+        after = 'class ' + name + ' : public FpvWebObject {'
+        if text.count(before) == 1:
+            text = text.replace(before, after, 1)
+        elif text.count(after) != 1:
+            raise RuntimeError('Web object layout changed; review external allocation')
+    if text != header.read_text(encoding='utf-8'):
+        header.write_text(text, encoding='utf-8')
+    print('patch_async_sse_modern: verified external HTTP request/response objects')
+
+
 def patch_response_memory(build_env):
     from pathlib import Path
     src = Path(build_env.subst('$PROJECT_LIBDEPS_DIR')) / build_env.subst('$PIOENV') / 'ESPAsyncWebServer' / 'src'
@@ -246,6 +270,7 @@ if env is not None:
     def configure_with_sse_patch(build_env):
         builder = _configure_before_sse_patch()
         patch_dependency(build_env)
+        patch_web_object_memory(build_env)
         patch_response_memory(build_env)
         patch_file_admission(build_env)
         patch_json_request_memory(build_env)
