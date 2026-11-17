@@ -1,6 +1,6 @@
 # FPVGate user guide
 
-For `V1.9.0-alpha` / `1.9.0-alpha-5`. Start with
+For `V1.9.0` / `1.9.0-alpha-5`. Start with
 [Getting started](GETTING_STARTED.md) for wiring, flashing and SD preparation.
 This guide describes current behavior rather than older release procedures.
 

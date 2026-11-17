@@ -1,6 +1,6 @@
 # FPVGate development guide
 
-For the `V1.9.0-alpha` branch. The normal build label is
+For the `V1.9.0` branch. The normal build label is
 `1.9.0-alpha-5`; `FPVGateC5MKAIO_EMAProbe` is a diagnostic variant.
 Version strings come from `lib/VERSION/version.h`, not `platformio.ini`.
 
@@ -13,7 +13,7 @@ The PowerShell native script calls `g++` directly; the Jest config test also
 supports `CXX`.
 
 ```sh
-git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
+git clone --branch V1.9.0 https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
 python -m pip install platformio
 npm install --prefix tests

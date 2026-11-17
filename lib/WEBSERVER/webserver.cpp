@@ -823,6 +823,9 @@ void Webserver::handleWebUpdate(uint32_t currentTimeMs) {
                 // Start AP with max 4 connections to limit power draw.
                 // ELRS backpacks talk on channel 1.
                 if (WiFi.softAP(wifi_ap_ssid.c_str(), wifi_ap_password, elrsBackpack.enabled() ? 1 : 6, 0, 4)) {
+                    // 20 MHz channels are more robust than HT40 in a crowded 2.4 GHz field.
+                    const esp_err_t bandwidthResult = esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+                    DEBUG("WiFi AP 20 MHz setup: %d\n", (int)bandwidthResult);
                     elrsBackpack.afterApStarted();
                 }
 

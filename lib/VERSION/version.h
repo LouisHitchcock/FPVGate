@@ -6,7 +6,7 @@
 #ifdef C5_TIMING_DIAGNOSTIC_NO_S3_EMA
 #define FPVGATE_VERSION_STAGE "alpha-6-ema-probe"
 #else
-#define FPVGATE_VERSION_STAGE "alpha-6"
+#define FPVGATE_VERSION_STAGE ""  // empty for release
 #endif
 
 // Build version string helper

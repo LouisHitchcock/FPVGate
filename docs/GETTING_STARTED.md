@@ -1,6 +1,6 @@
 # Getting started with FPVGate alpha
 
-These instructions are for `V1.9.0-alpha`, currently reporting
+These instructions are for `V1.9.0`, currently reporting
 `1.9.0-alpha-5`. Alpha firmware is for evaluation; physical eight-pilot
 qualification and storage-failure testing are still incomplete.
 For day-to-day operation see the [user guide](USER_GUIDE.md).
@@ -73,7 +73,7 @@ Never mix these layouts.
 ### Method 3: Build from source
 
 ```sh
-git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
+git clone --branch V1.9.0 https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
 python -m pip install platformio
 pio run -e SeeedXIAOESP32S3

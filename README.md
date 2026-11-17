@@ -151,7 +151,7 @@ filesystem at `0x610000`; do not copy the 8 MB offset to that board.
 Or build with [PlatformIO](https://platformio.org/):
 
 ```bash
-git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
+git clone --branch V1.9.0 https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
 pio run -e ESP32S3 -t upload      # ESP32-S3-DevKitC-1 (8 MB)
 pio run -e ESP32S3 -t uploadfs
