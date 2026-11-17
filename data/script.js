@@ -11292,7 +11292,7 @@ function openSettingsModal() {
 // ---------------------------------------------------------------------------
 
 // The receiver release this gate release is paired with.
-const C5_PAIRED_VERSION = "1.2.5";
+const C5_PAIRED_VERSION = "1.3.0";
 const C5_CHECK_MS = 6000;
 
 // frames: c5Rssi messages collected over `seconds`; update: /api/c5/update;
