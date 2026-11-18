@@ -1,4 +1,4 @@
-﻿# FPVGate
+# FPVGate
 
 ![FPVGate: scalable FPV race timing, from solo practice to 8-pilot club events](images/banner.png)
 
@@ -23,10 +23,7 @@ single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
 events with heats and seeding, or a RotorHazard race. No transponders, no
 Raspberry Pi: open the gate in any browser and fly.
 
-This branch reports **1.9.0-alpha-6**. It is evaluation firmware; full
-six-board, independent multi-transmitter and storage-failure qualification is
-not complete. [Documentation index](docs/README.md) lists the current guides
-and separates historical notes from operating procedures.
+FPVGate **1.9.0** introduces ESP32-C5 multi-pilot timing, Event Director and the C5MK AIO. See the [release notes and downloads](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.9.0) and the [documentation index](docs/README.md).
 
 ## Why FPVGate
 
