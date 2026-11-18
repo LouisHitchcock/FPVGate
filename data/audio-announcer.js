@@ -43,6 +43,35 @@ class AudioAnnouncer {
         // Pre-recorded audio cache
         this.audioCache = new Map();
         this.preloadedAudios = new Set();
+        this.audioSources = new Map();
+        this.audioLoads = new Map();
+        this.audioControllers = new Set();
+        this.audioSourceBytes = 0;
+        this.audioSourceGeneration = 0;
+        this.maxAudioSourceBytes = 4 * 1024 * 1024;
+        this.maxAudioSources = 192;
+        this.decodedClips = new Map();
+        this.decodedLoads = new Map();
+        this.decodedBytes = 0;
+        this.maxDecodedBytes = 16 * 1024 * 1024;
+        this.lapPreload = null;
+        this.decodeContext = null;
+        this.lapPackReady = false;
+        this.racePackMode = null;
+        this.preloadTimer = null;
+        this.packDownloadActive = false;
+        this.packRestore = null;
+        this.userActivated = false;
+        if (typeof document !== 'undefined') {
+            const activate = () => {
+                if (this.userActivated) return;
+                this.userActivated = true;
+                if (this.audioEnabled) this.unlockAudioContextMobile();
+                this.requestAudioPreload();
+            };
+            document.addEventListener('pointerdown', activate, {once:true, passive:true});
+            document.addEventListener('keydown', activate, {once:true});
+        }
         
         // Single reusable Audio element for mobile compatibility
         // Mobile browsers restrict creating new Audio() without user gesture
@@ -136,25 +165,444 @@ class AudioAnnouncer {
      * Check if pre-recorded audio exists for this phrase
      */
     async hasPrerecordedAudio(audioPath) {
-        if (this.preloadedAudios.has(audioPath)) {
-            return true;
+        return !!(await this.loadAudioSource(audioPath));
+    }
+
+    // Consume each response before playing. A GET used only as an existence
+    // check left an unread download competing with the audio element's second
+    // GET for the gate's single file-transfer slot.
+    async loadAudioSource(audioPath) {
+        const cached = this.audioSources.get(audioPath);
+        if (cached) {
+            this.audioSources.delete(audioPath);
+            this.audioSources.set(audioPath, cached);
+            return cached.url;
         }
-        
-        try {
-            // Use GET instead of HEAD for better compatibility
-            const response = await fetch(audioPath, { method: 'GET', cache: 'no-cache' });
-            if (response.ok) {
+        if (this.audioLoads.has(audioPath)) return this.audioLoads.get(audioPath);
+        if (!this.packDownloadActive && typeof document !== 'undefined') return null;
+        const generation = this.audioSourceGeneration;
+        const controller = new AbortController();
+        this.audioControllers.add(controller);
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const pending = (async () => {
+            try {
+                const response = await fetch(audioPath, { signal: controller.signal });
+                if (!response.ok) {
+                    if (response.body) await response.body.cancel();
+                    return null;
+                }
+                const blob = await response.blob();
+                if (generation !== this.audioSourceGeneration || !blob.size || blob.size > this.maxAudioSourceBytes) return null;
+                while (this.audioSources.size >= this.maxAudioSources || this.audioSourceBytes + blob.size > this.maxAudioSourceBytes) {
+                    // Keep race confirmations warm throughout a long race.
+                    const oldest = [...this.audioSources.keys()].find(path => !/(?:^|\/)(gate_1|race_complete|race_stopped)\.mp3$/.test(path));
+                    if (!oldest) return null;
+                    const entry = this.audioSources.get(oldest);
+                    URL.revokeObjectURL(entry.url);
+                    this.audioSourceBytes -= entry.size;
+                    this.audioSources.delete(oldest);
+                    this.preloadedAudios.delete(oldest);
+                }
+                const url = URL.createObjectURL(blob);
+                this.audioSources.set(audioPath, { url, size: blob.size, blob });
+                this.audioSourceBytes += blob.size;
                 this.preloadedAudios.add(audioPath);
-                console.log('[AudioAnnouncer] Verified audio file exists:', audioPath);
-                return true;
-            } else {
-                console.warn('[AudioAnnouncer] Audio file not found (status ' + response.status + '):', audioPath);
+                return url;
+            } catch (error) {
+                console.warn('[AudioAnnouncer] Audio download failed:', audioPath, error);
+                return null;
+            } finally {
+                clearTimeout(timeout);
+                this.audioControllers.delete(controller);
             }
-        } catch (e) {
-            console.warn('[AudioAnnouncer] Error checking audio file:', audioPath, e);
+        })();
+        this.audioLoads.set(audioPath, pending);
+        try {
+            return await pending;
+        } finally {
+            if (this.audioLoads.get(audioPath) === pending) this.audioLoads.delete(audioPath);
         }
-        
+    }
+
+    requestAudioPreload() {
+        // Only restore local storage automatically. Network downloads require
+        // the Download voice pack button, including after page reloads.
+        if (this.getPrimaryVoiceDirectory() && !this.lapPackReady && !this.packDownloadActive) this.restoreSavedVoicePack();
+    }
+
+    packText(key, fallback, params = {}) {
+        return typeof i18n !== 'undefined' ? i18n.t('settings.tts.' + key, params) : fallback;
+    }
+
+    voiceStore(mode, action) {
+        return new Promise((resolve, reject) => {
+            if (!window.indexedDB) { reject(new Error('Browser storage unavailable')); return; }
+            const request = window.indexedDB.open('FPVGateVoicePacks', 1);
+            request.onupgradeneeded = () => request.result.createObjectStore('packs', {keyPath:'voice'});
+            request.onerror = () => reject(request.error);
+            request.onblocked = () => reject(new Error('Browser storage blocked'));
+            request.onsuccess = () => {
+                const db = request.result;
+                try {
+                    const tx = db.transaction('packs', mode), operation = action(tx.objectStore('packs'));
+                    let result;
+                    operation.onsuccess = () => { result = operation.result; };
+                    tx.oncomplete = () => { db.close(); resolve(result); };
+                    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error || new Error('Storage transaction failed')); };
+                } catch (error) { db.close(); reject(error); }
+            };
+        });
+    }
+
+    requiredLapFiles() {
+        return ['point.mp3', ...Array.from({length:100}, (_, n) => `num_${n}.mp3`), ...Array.from({length:50}, (_, n) => `lap_${n + 1}.mp3`)];
+    }
+
+    async restoreSavedVoicePack() {
+        if (this.packRestore) return this.packRestore;
+        const voice = this.selectedVoice, generation = this.audioSourceGeneration;
+        const pending = (async () => {
+            try {
+                const pack = await this.voiceStore('readonly', store => store.get(voice));
+                if (generation !== this.audioSourceGeneration || this.packDownloadActive) return false;
+                if (!pack || pack.schema !== 'pcm22k-v1' || pack.voice !== voice) {
+                    this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+                    return false;
+                }
+                const clips = new Map(); let bytes = 0;
+                for (const clip of pack.clips || []) {
+                    if (!/^[^./\\]+\.mp3$/.test(clip.file) || clip.sampleRate !== 22050 || !(clip.samples instanceof ArrayBuffer) || !clip.samples.byteLength || clip.samples.byteLength % 4) throw new Error('Invalid saved voice pack');
+                    bytes += clip.samples.byteLength;
+                    if (bytes > this.maxDecodedBytes || clips.size >= 192) throw new Error('Saved voice pack exceeds cache limit');
+                    clips.set(clip.file, {samples:new Float32Array(clip.samples), sampleRate:clip.sampleRate});
+                }
+                if (!this.requiredLapFiles().every(file => clips.has(file))) throw new Error('Incomplete saved voice pack');
+                const primary = this.getPrimaryVoiceDirectory();
+                for (const [file, clip] of clips) this.decodedClips.set(`${primary}/${file}`, clip);
+                this.decodedBytes = bytes;
+                for (const phrase of pack.phrases || []) {
+                    if (!/^[^./\\]+\.mp3$/.test(phrase.file) || !phrase.blob?.size || this.audioSourceBytes + phrase.blob.size > this.maxAudioSourceBytes) continue;
+                    const key = `${primary}/${phrase.file}`;
+                    const previous = this.audioSources.get(key);
+                    if (previous) { URL.revokeObjectURL(previous.url); this.audioSourceBytes -= previous.size; }
+                    this.audioSources.set(key, {blob:phrase.blob, size:phrase.blob.size, url:URL.createObjectURL(phrase.blob)});
+                    this.audioSourceBytes += phrase.blob.size;
+                }
+                this.lapPackReady = true;
+                this.updatePackStatus(this.packText('pack_saved_ready', 'Voice pack saved in this browser and ready.'));
+                return true;
+            } catch (error) {
+                console.warn('[AudioAnnouncer] Saved pack unavailable:', error);
+                if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+                return false;
+            }
+        })();
+        this.packRestore = pending;
+        try { return await pending; }
+        finally { if (this.packRestore === pending) this.packRestore = null; }
+    }
+
+    optionalPilotFiles() {
+        const names = new Set();
+        if (typeof c5RacePilotsNow === 'function') {
+            for (const racer of c5RacePilotsNow()) if (racer.spoken) names.add(racer.spoken);
+        }
+        if (typeof document !== 'undefined') {
+            const name = document.getElementById('pphonetic')?.value || document.getElementById('pname')?.value;
+            if (name) names.add(name);
+        }
+        return [...names].flatMap(name => {
+            const file = name.toLowerCase().trim().replace(/\s+/g, '_');
+            if (!file || file.length > 80 || /[./\\]/.test(file)) return [];
+            return [`${file}_lap.mp3`, `${file}_2laps.mp3`, `${file}_3laps.mp3`];
+        });
+    }
+
+    async downloadVoicePack() {
+        if (this.packDownloadActive || !this.getPrimaryVoiceDirectory() || (typeof raceRunning !== 'undefined' && raceRunning)) return;
+        this.clearAudioSources();
+        this.packDownloadActive = true;
+        const generation = this.audioSourceGeneration, voice = this.selectedVoice;
+        const resume = typeof pauseLiveForVoiceDownload === 'function' ? pauseLiveForVoiceDownload() : () => {};
+        this.resumeVoiceDownload = resume;
+        this.updatePackStatus(this.packText('pack_downloading', 'Downloading voice pack for this browser…'));
+        try {
+            const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (!Context) throw new Error('Audio decoding unavailable');
+            const primary = this.getPrimaryVoiceDirectory();
+            for (const file of ['gate_1.mp3','race_complete.mp3','race_stopped.mp3','arm_your_quad.mp3','starting_tone.mp3']) {
+                if (!await this.waitForAudioBudget(generation)) return;
+                await this.resolveAudioPath(`${primary}/${file}`);
+            }
+            await this.preloadLapAudio(generation);
+            if (generation !== this.audioSourceGeneration) return;
+            if (!this.lapPackReady) throw new Error('Some voice clips could not be downloaded');
+            // Pilot phrases are optional, but retain existing custom pack support.
+            for (const file of this.optionalPilotFiles()) {
+                if (!await this.waitForAudioBudget(generation)) return;
+                await this.decodeVoiceClip(file);
+                if (generation !== this.audioSourceGeneration) return;
+            }
+            if (!this.requiredLapFiles().every(file => this.decodedClips.has(`${primary}/${file}`))) throw new Error('Voice pack exceeds the browser audio cache budget');
+            const clips = [...this.decodedClips].map(([key, clip]) => ({file:key.substring(key.lastIndexOf('/')+1), sampleRate:clip.sampleRate, samples:clip.samples.buffer.slice(clip.samples.byteOffset, clip.samples.byteOffset+clip.samples.byteLength)}));
+            const phrases = [...this.audioSources].filter(([key]) => !/\/(?:num_\d+|lap_\d+|point)\.mp3$/.test(key)).map(([key, entry]) => ({file:key.substring(key.lastIndexOf('/')+1), blob:entry.blob}));
+            await this.voiceStore('readwrite', store => store.put({voice, schema:'pcm22k-v1', savedAt:Date.now(), clips, phrases}));
+            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText('pack_saved_ready', 'Voice pack saved in this browser and ready.'));
+        } catch (error) {
+            console.warn('[AudioAnnouncer] Voice download/save failed:', error);
+            if (generation === this.audioSourceGeneration) this.updatePackStatus(this.packText(error.code === 'memory-wait-timeout' ? 'pack_wait_timeout' : 'pack_save_failed', error.code === 'memory-wait-timeout' ? 'The gate has not freed enough memory. Close other gate pages and retry the download.' : 'Could not save the complete voice pack. Retry Download voice pack.'));
+        } finally {
+            if (generation === this.audioSourceGeneration) this.packDownloadActive = false;
+            resume();
+            if (this.resumeVoiceDownload === resume) this.resumeVoiceDownload = null;
+            this.syncPackButtons();
+        }
+    }
+
+    cancelVoicePackDownload() {
+        if (!this.packDownloadActive) return;
+        this.packDownloadActive = false;
+        this.clearAudioSources();
+        this.resumeVoiceDownload?.();
+        this.resumeVoiceDownload = null;
+        this.updatePackStatus(this.packText('pack_cancelled', 'Download cancelled. Previously saved packs are unchanged.'));
+    }
+
+    async removeSavedVoicePack() {
+        if (this.packDownloadActive || (typeof raceRunning !== 'undefined' && raceRunning)) return;
+        try {
+            await this.voiceStore('readwrite', store => store.delete(this.selectedVoice));
+            this.clearAudioSources();
+            this.updatePackStatus(this.packText('pack_not_saved', 'No voice pack saved in this browser. Use Download voice pack.'));
+        } catch (error) {
+            console.warn('[AudioAnnouncer] Could not remove saved pack:', error);
+            this.updatePackStatus(this.packText('pack_storage_failed', 'Browser storage is unavailable. Check site storage permissions.'));
+        }
+    }
+
+    syncPackButtons() {
+        if (typeof document === 'undefined') return;
+        const cancel = document.getElementById('cancelVoicePackButton');
+        if (cancel) { cancel.hidden = !this.packDownloadActive; cancel.style.display = this.packDownloadActive ? '' : 'none'; }
+        const selected = !!this.getPrimaryVoiceDirectory();
+        const voiceSelect = document.getElementById('voiceSelect');
+        if (voiceSelect) voiceSelect.disabled = this.packDownloadActive;
+        for (const id of ['downloadVoicePackButton', 'removeVoicePackButton']) {
+            const button = document.getElementById(id);
+            if (button) button.disabled = !selected || this.packDownloadActive || (typeof raceRunning !== 'undefined' && raceRunning);
+        }
+    }
+
+    async waitForAudioBudget(generation) {
+        const started = Date.now();
+        while ((this.audioEnabled || this.packDownloadActive) && generation === this.audioSourceGeneration) {
+            if (typeof c5RaceResync === 'function' && typeof c5ReceiverSelected === 'function' && c5ReceiverSelected()) await c5RaceResync();
+            let available = false;
+            let reason = 'pack_wait_race', freeKB = 0;
+            if (!(typeof raceRunning !== 'undefined' && raceRunning)) {
+                reason = 'pack_wait_connection';
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+                try {
+                    const response = await fetch('/api/system/info', {signal:controller.signal});
+                    if (response.ok) {
+                        const state = await response.json();
+                        // requestsNow includes persistent/SSE connections until
+                        // disconnect. It is not a count of active file transfers.
+                        // Explicit downloads suspend this page's SSE/polling. Reserve
+                        // 8 KB above the unchanged 40 KB qualification floor for
+                        // one bounded transfer; background callers remain stricter.
+                        const requiredFree = this.packDownloadActive ? 48000 : 55000;
+                        available = state.heapFree >= requiredFree && state.heapLargest >= 16000;
+                        reason = 'pack_wait_memory';
+                        freeKB = Math.round(state.heapFree / 1024);
+                    } else if (response.body) await response.body.cancel();
+                } catch (_) {}
+                finally { clearTimeout(timeout); }
+            }
+            if (generation !== this.audioSourceGeneration) return false;
+            if (available) return true;
+            if (this.packDownloadActive && Date.now() - started >= 30000) {
+                const error = new Error('Voice download admission timed out');
+                error.code = 'memory-wait-timeout';
+                throw error;
+            }
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.' + reason, { n: freeKB }) : reason === 'pack_wait_race' ? 'Voice preparation resumes after this race.' : reason === 'pack_wait_memory' ? `Voice preparation is waiting for memory on the gate (${freeKB} KB free). Browser voice remains available.` : 'Voice preparation is waiting for the gate to respond.');
+            await this.sleep(5000);
+        }
         return false;
+    }
+
+    async preloadRaceAudio() {
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return;
+        const generation = this.audioSourceGeneration;
+        // Sequential downloads avoid flooding the gate during page startup.
+        for (const file of ['gate_1.mp3', 'race_complete.mp3', 'race_stopped.mp3']) {
+            if (generation !== this.audioSourceGeneration) return;
+            if (typeof document !== 'undefined' && !await this.waitForAudioBudget(generation)) return;
+            await this.resolveAudioPath(`${primary}/${file}`);
+        }
+        if (!this.lapPreload && (window.OfflineAudioContext || window.webkitOfflineAudioContext)) {
+            this.lapPreload = this.preloadLapAudio(generation).finally(() => {
+                if (generation === this.audioSourceGeneration) this.lapPreload = null;
+            });
+        }
+    }
+
+    clearAudioSources() {
+        ++this.audioSourceGeneration;
+        for (const controller of this.audioControllers) controller.abort();
+        this.audioControllers.clear();
+        for (const entry of this.audioSources.values()) URL.revokeObjectURL(entry.url);
+        this.audioSources.clear();
+        this.audioLoads.clear();
+        this.audioSourceBytes = 0;
+        this.preloadedAudios.clear();
+        this.decodedClips.clear();
+        this.decodedLoads.clear();
+        this.decodedBytes = 0;
+        this.lapPackReady = false;
+        this.lapPreload = null;
+        if (this.preloadTimer) clearTimeout(this.preloadTimer);
+        this.preloadTimer = null;
+        this.packRestore = null;
+        this.updatePackStatus('');
+    }
+
+    updatePackStatus(text) {
+        this.syncPackButtons();
+        const element = typeof document !== 'undefined' && document.getElementById('voicePackStatus');
+        if (element) element.textContent = text;
+        const raceStatus = typeof document !== 'undefined' && document.getElementById('raceVoiceStatus');
+        if (raceStatus) raceStatus.textContent = this.racePackMode === false && this.getPrimaryVoiceDirectory()
+            ? (typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_race_fallback') : 'This race uses the browser voice because the recorded pack was not ready at the start.') : text;
+    }
+
+    // Convert to mono at a common rate, trimming only external silence. A small
+    // safety margin retains quiet consonants; silence inside a word is untouched.
+    async decodeVoiceClip(filename) {
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return null;
+        const key = `${primary}/${filename}`;
+        if (this.decodedClips.has(key)) return this.decodedClips.get(key);
+        if (this.decodedLoads.has(key)) return this.decodedLoads.get(key);
+        const generation = this.audioSourceGeneration;
+        const pending = (async () => {
+            const Context = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+            if (!Context) return null;
+            const path = await this.resolveAudioPath(key);
+            const entry = path && this.audioSources.get(path);
+            if (!entry || generation !== this.audioSourceGeneration) return null;
+            if (!this.decodeContext) this.decodeContext = new Context(1, 1, 22050);
+            const decoded = await this.decodeContext.decodeAudioData(await entry.blob.arrayBuffer());
+            const samples = new Float32Array(decoded.length);
+            for (let ch = 0; ch < decoded.numberOfChannels; ++ch) {
+                const data = decoded.getChannelData(ch);
+                for (let i = 0; i < samples.length; ++i) samples[i] += data[i] / decoded.numberOfChannels;
+            }
+            let first = 0, last = samples.length - 1;
+            const threshold = 0.003; // about -50 dBFS
+            while (first < last && Math.abs(samples[first]) < threshold) ++first;
+            while (last > first && Math.abs(samples[last]) < threshold) --last;
+            if (first === last) return null;
+            const margin = Math.round(decoded.sampleRate * 0.015);
+            const clip = { samples: samples.slice(Math.max(0, first - margin), Math.min(samples.length, last + margin + 1)), sampleRate: decoded.sampleRate };
+            if (generation !== this.audioSourceGeneration || clip.samples.byteLength > this.maxDecodedBytes) return null;
+            while (this.decodedBytes + clip.samples.byteLength > this.maxDecodedBytes || this.decodedClips.size >= 192) {
+                const oldest = this.decodedClips.keys().next().value;
+                this.decodedBytes -= this.decodedClips.get(oldest).samples.byteLength;
+                this.decodedClips.delete(oldest);
+            }
+            this.decodedClips.set(key, clip);
+            this.decodedBytes += clip.samples.byteLength;
+            return clip;
+        })().catch(error => { console.warn('[AudioAnnouncer] Clip preparation failed:', filename, error); return null; });
+        this.decodedLoads.set(key, pending);
+        try { return await pending; }
+        finally { if (this.decodedLoads.get(key) === pending) this.decodedLoads.delete(key); }
+    }
+
+    async preloadLapAudio(generation) {
+        // One gate transfer at a time. Prepare common words first; each complete
+        // phrase can use the pack as soon as its own words are ready.
+        const files = ['point.mp3', ...Array.from({length: 21}, (_, n) => `num_${n}.mp3`), ...Array.from({length: 10}, (_, n) => `lap_${n + 1}.mp3`), ...Array.from({length: 79}, (_, n) => `num_${n + 21}.mp3`), ...Array.from({length: 40}, (_, n) => `lap_${n + 11}.mp3`)];
+        for (let i = 0; i < files.length; ++i) {
+            if (generation !== this.audioSourceGeneration || (!this.audioEnabled && !this.packDownloadActive)) return;
+            if (!await this.waitForAudioBudget(generation)) return;
+            await this.decodeVoiceClip(files[i]);
+            if (generation !== this.audioSourceGeneration) return;
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_preparing', { n: Math.round((i + 1) * 100 / files.length) }) : `Preparing recorded lap audio: ${Math.round((i + 1) * 100 / files.length)}%. Browser voice is used until each phrase is ready.`);
+        }
+        const primary = this.getPrimaryVoiceDirectory();
+        this.lapPackReady = files.every(file => this.decodedClips.has(`${primary}/${file}`));
+        this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t(this.lapPackReady ? 'settings.tts.pack_ready' : 'settings.tts.pack_incomplete') : 'Recorded lap audio prepared. Missing clips use the browser voice.');
+    }
+
+    numberFiles(value) {
+        const text = String(value);
+        if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+        const [whole, decimal] = text.split('.');
+        const files = Number(whole) <= 99 ? [`num_${Number(whole)}.mp3`] : [...whole].map(n => `num_${n}.mp3`);
+        if (decimal) {
+            files.push('point.mp3');
+            if (decimal.length === 2 && decimal[0] !== '0') files.push(`num_${Number(decimal)}.mp3`);
+            else files.push(...[...decimal].map(n => `num_${n}.mp3`));
+        }
+        return files;
+    }
+
+    // Encode a complete utterance as one WAV for the existing mobile-unlocked
+    // Audio element. No network requests or media restarts occur between words.
+    sequenceWav(clips) {
+        const rate = clips[0].sampleRate;
+        if (clips.some(clip => clip.sampleRate !== rate)) throw new Error('Incompatible clip sample rates');
+        const length = clips.reduce((sum, clip) => sum + clip.samples.length, 0);
+        const bytes = new ArrayBuffer(44 + length * 2), view = new DataView(bytes);
+        const text = (at, value) => [...value].forEach((ch, n) => view.setUint8(at + n, ch.charCodeAt(0)));
+        text(0, 'RIFF'); view.setUint32(4, 36 + length * 2, true); text(8, 'WAVE'); text(12, 'fmt ');
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+        view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+        text(36, 'data'); view.setUint32(40, length * 2, true);
+        let offset = 44;
+        for (const clip of clips) for (const sample of clip.samples) {
+            const value = Math.max(-1, Math.min(1, sample));
+            view.setInt16(offset, value * (value < 0 ? 32768 : 32767), true); offset += 2;
+        }
+        return new Blob([bytes], {type: 'audio/wav'});
+    }
+
+    beginRacePlayback() {
+        if (this.racePackMode !== null) return;
+        this.racePackMode = this.lapPackReady;
+        this.syncPackButtons();
+        if (!this.racePackMode && this.getPrimaryVoiceDirectory()) {
+            this.updatePackStatus(typeof i18n !== 'undefined' ? i18n.t('settings.tts.pack_race_fallback') : 'This race uses the browser voice because the recorded pack was not ready at the start.');
+        }
+    }
+
+    endRacePlayback() { this.racePackMode = null; this.syncPackButtons(); }
+
+    async playVoiceSequence(files) {
+        if (!files || !this.audioEnabled || this.racePackMode === false) return false;
+        const primary = this.getPrimaryVoiceDirectory();
+        if (!primary) return false;
+        let clips = files.map(file => this.decodedClips.get(`${primary}/${file}`));
+        if (clips.some(clip => !clip)) {
+            if (this.webSpeechAvailable) return false; // one full TTS call while warming
+            clips = [];
+            const generation = this.audioSourceGeneration;
+            for (const file of files) {
+                const clip = await this.decodeVoiceClip(file);
+                if (!clip || !this.audioEnabled || generation !== this.audioSourceGeneration) return false;
+                clips.push(clip);
+            }
+        }
+        const url = URL.createObjectURL(this.sequenceWav(clips));
+        try { await this.playPrerecorded('assembled-lap', 0, url); }
+        catch (error) { console.warn('[AudioAnnouncer] Assembled playback failed:', error); return false; }
+        finally { URL.revokeObjectURL(url); }
+        return true;
     }
 
     /**
@@ -162,7 +610,9 @@ class AudioAnnouncer {
      * Uses reusable Audio element on mobile for better compatibility
      * @param {number} overlapMs - Milliseconds to resolve early for crossfade (default: 50ms)
      */
-    async playPrerecorded(audioPath, overlapMs = 50) {
+    async playPrerecorded(audioPath, overlapMs = 50, preparedSource = null) {
+        const source = preparedSource || await this.loadAudioSource(audioPath);
+        if (!source) throw new Error(`Audio unavailable: ${audioPath}`);
         return new Promise((resolve, reject) => {
             // Use reusable audio element if available (mobile compatibility)
             // This avoids creating new Audio() which can fail without user gesture
@@ -177,7 +627,7 @@ class AudioAnnouncer {
             audio.preload = 'auto';
             audio.playbackRate = this.rate;
             audio.volume = this.volume;
-            audio.preservesPitch = false;
+            audio.preservesPitch = true;
             
             let resolved = false;
             const overlapSeconds = overlapMs / 1000;
@@ -203,10 +653,14 @@ class AudioAnnouncer {
             };
             
             // Set source and play
-            audio.src = audioPath;
+            audio.src = source;
             
             // Play when ready
             const playAudio = () => {
+                audio.oncanplay = null;
+                // Loading a new source can reset playbackRate; apply it when ready.
+                audio.defaultPlaybackRate = this.rate;
+                audio.playbackRate = this.rate;
                 audio.play().then(() => {
                     console.log('[AudioAnnouncer] Playing:', audioPath);
                 }).catch((err) => {
@@ -391,7 +845,7 @@ class AudioAnnouncer {
             // Format 4: "time" only (e.g., "12.34")
             const timeOnlyMatch = cleanText.match(/^([\d.]+)$/);
             if (timeOnlyMatch) {
-                const lapTime = parseFloat(timeOnlyMatch[1]);
+                const lapTime = timeOnlyMatch[1];
                 console.log('[AudioAnnouncer] Detected time-only format:', lapTime);
                 await this.speakNumber(lapTime);
                 return;
@@ -519,21 +973,11 @@ class AudioAnnouncer {
         const phoneticName = (phoneticInput?.value || pilotNameInput?.value || pilot).toLowerCase().trim();
         const fileName = phoneticName.replace(/\s+/g, '_');
         
-        try {
-            // Try to use pre-recorded pilot name + lap
-            if (await this.playVoiceFile(`${fileName}_lap.mp3`)) {
-                console.log('[AudioAnnouncer] Using complex speech with pre-recorded chunks');
-                await this.speakNumber(lapNumber);
-                // No pause - immediate transition to lap time
-                await this.speakNumber(lapTime);
-                return;
-            } else {
-                console.log('[AudioAnnouncer] Pilot-specific audio not found, using fallback');
-            }
-        } catch (e) {
-            console.error('[AudioAnnouncer] Complex speech with pilot failed:', e);
-        }
-        
+        const number = this.numberFiles(lapTime.toFixed(2));
+        if (number && await this.playVoiceSequence([`${fileName}_lap.mp3`, ...this.numberFiles(lapNumber), ...number])) return;
+        // Pilot-specific phrases are optional; warm them for a later call.
+        if (this.audioEnabled) this.decodeVoiceClip(`${fileName}_lap.mp3`);
+
         // Fallback: Use Web Speech API
         const fullText = `${pilot} Lap ${lapNumber}, ${lapTime}`;
         console.log('[AudioAnnouncer] Using Web Speech fallback for:', fullText);
@@ -577,18 +1021,9 @@ class AudioAnnouncer {
         }
         
         // ElevenLabs voice - try pre-recorded files first
-        try {
-            // Check if we have pre-recorded "Lap X" file
-            if (lapNumber >= 1 && lapNumber <= 50 && await this.playVoiceFile(`lap_${lapNumber}.mp3`)) {
-                console.log('[AudioAnnouncer] Using pre-recorded lap number');
-                // No pause - immediate transition to lap time
-                await this.speakNumber(lapTime);
-                return;
-            }
-        } catch (e) {
-            console.error('[AudioAnnouncer] Lap+time speech failed:', e);
-        }
-        
+        const files = this.numberFiles(lapTime.toFixed(2));
+        if (files && lapNumber >= 1 && lapNumber <= 50 && await this.playVoiceSequence([`lap_${lapNumber}.mp3`, ...files])) return;
+
         // Fallback: Use Web Speech API
         const fullText = `Lap ${lapNumber}, ${lapTime}`;
         console.log('[AudioAnnouncer] Using Web Speech fallback for:', fullText);
@@ -618,79 +1053,8 @@ class AudioAnnouncer {
             }
             return;
         }
-        // ElevenLabs voice - try pre-recorded number files first
-        // Split into whole and decimal parts
-        const parts = numStr.split('.');
-        const wholePart = parseInt(parts[0]);
-        const decimalPart = parts[1];
-        
-        try {
-            // Speak whole number part (0-99 as words)
-            if (wholePart >= 0 && wholePart <= 99) {
-                if (!(await this.playVoiceFile(`num_${wholePart}.mp3`, 30))) {
-                    throw new Error(`Missing pre-recorded number file for ${wholePart}`);
-                }
-            } else {
-                // Fallback: spell out digit by digit for numbers >= 100
-                console.log('[AudioAnnouncer] Number >= 100, using digit-by-digit:', wholePart);
-                for (const char of parts[0]) {
-                    if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
-                        throw new Error(`Missing pre-recorded digit file for ${char}`);
-                    }
-                }
-            }
-            
-            // Speak decimal part if exists
-            if (decimalPart) {
-                if (!(await this.playVoiceFile('point.mp3', 20))) {
-                    throw new Error('Missing pre-recorded point file');
-                }
-                
-                // Handle decimals with leading zeros properly
-                // For lap times, we always want to preserve leading zeros (e.g., "01" = "zero one", not "one")
-                if (decimalPart.length === 2) {
-                    // Two-digit decimal: speak each digit separately to preserve leading zeros
-                    const firstDigit = parseInt(decimalPart[0]);
-                    const secondDigit = parseInt(decimalPart[1]);
-                    
-                    // If first digit is 0, we must say it
-                    if (firstDigit === 0) {
-                        if (!(await this.playVoiceFile('num_0.mp3', 30))) {
-                            throw new Error('Missing pre-recorded digit file for 0');
-                        }
-                        if (!(await this.playVoiceFile(`num_${secondDigit}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded digit file for ${secondDigit}`);
-                        }
-                    } else {
-                        // Parse as a two-digit number (e.g., "44" -> forty-four)
-                        const decimalNum = parseInt(decimalPart);
-                        if (!(await this.playVoiceFile(`num_${decimalNum}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded number file for ${decimalNum}`);
-                        }
-                    }
-                } else if (decimalPart.length === 1) {
-                    // Single digit decimal (e.g., "4.5")
-                    const digit = parseInt(decimalPart);
-                    if (!(await this.playVoiceFile(`num_${digit}.mp3`, 30))) {
-                        throw new Error(`Missing pre-recorded digit file for ${digit}`);
-                    }
-                } else {
-                    // More than 2 digits: spell out digit by digit
-                    console.log('[AudioAnnouncer] Decimal > 2 digits, using digit-by-digit:', decimalPart);
-                    for (const char of decimalPart) {
-                        if (!(await this.playVoiceFile(`num_${char}.mp3`, 30))) {
-                            throw new Error(`Missing pre-recorded digit file for ${char}`);
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('[AudioAnnouncer] Error speaking number, fallback to Web Speech:', num, e);
-            // Fallback to Web Speech API
-            if (this.webSpeechAvailable) {
-                await this.playWebSpeech(numStr);
-            }
-        }
+        if (await this.playVoiceSequence(this.numberFiles(numStr))) return;
+        if (this.webSpeechAvailable) await this.playWebSpeech(numStr);
     }
 
     /**
@@ -744,14 +1108,20 @@ class AudioAnnouncer {
      * Change voice and clear audio cache
      */
     setVoice(voice) {
+        if (this.packDownloadActive) return;
         const normalizedVoice = this.normalizeVoiceSelection(voice);
+        if (normalizedVoice === this.selectedVoice) {
+            localStorage.setItem('selectedVoice', normalizedVoice);
+            return; // Config polling must not throw away a warming/ready pack.
+        }
         console.log('[AudioAnnouncer] Changing voice to:', normalizedVoice);
         this.selectedVoice = normalizedVoice;
         localStorage.setItem('selectedVoice', normalizedVoice);
         
         // Clear audio cache so new voice files are loaded
         this.audioCache.clear();
-        this.preloadedAudios.clear();
+        this.clearAudioSources();
+        if (this.audioEnabled) this.requestAudioPreload();
         
         console.log('[AudioAnnouncer] Voice changed, cache cleared');
     }
@@ -762,9 +1132,14 @@ class AudioAnnouncer {
     async enable() {
         this.audioEnabled = true;
         console.log('[AudioAnnouncer] Audio enabled');
+        this.requestAudioPreload();
         
         // Mobile browsers require audio to be "unlocked" with user interaction
-        await this.unlockAudioContextMobile();
+        if (this.userActivated || (typeof navigator !== 'undefined' && navigator.userActivation?.isActive)) {
+            this.userActivated = true;
+            await this.unlockAudioContextMobile();
+            this.requestAudioPreload();
+        }
         
         // Start keepalive for desktop browsers to prevent cold-start delays
         this.startSpeechKeepalive();
@@ -893,6 +1268,8 @@ class AudioAnnouncer {
     disable() {
         this.audioEnabled = false;
         this.audioQueue = [];
+        if (this.preloadTimer) clearTimeout(this.preloadTimer);
+        this.preloadTimer = null;
         
         // Stop keepalive
         if (this.keepaliveInterval) {

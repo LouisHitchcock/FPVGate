@@ -35,6 +35,10 @@ class LapTimer {
     uint32_t getLapTime();
     bool isLapAvailable();
     void addManualLap(uint32_t lapTimeMs);  // For web/test lap injection
+    // A gate crossing found by another detector (the ESP32-C5 receiver), at
+    // millis() time crossingMs. Applies the same Gate 1 and minimum-lap rules
+    // as the RX5808 path; true if it made a lap.
+    bool recordCrossing(uint32_t crossingMs);
     
     // Timing methods for LCD display
     bool isRaceRunning();
@@ -69,8 +73,8 @@ class LapTimer {
     // Use this to pass an accurate timestamp to RotorHazard.
     uint32_t getLastCrossingRaceTimeMs();
 
-    // Returns the raw millis() value at the moment of the last gate crossing.
-    // Use getLastCrossingAbsoluteMs() + RHManager::clockOffsetMs for an RH-synced timestamp.
+    // Returns the raw millis() value at the moment of the last gate crossing
+    // (Webserver::queueRhPass turns it into the RotorHazard plugin's time).
     uint32_t getLastCrossingAbsoluteMs();
 
     // Returns the raw millis() value when the current race was started (0 if not running).

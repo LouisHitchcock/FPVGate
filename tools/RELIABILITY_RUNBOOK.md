@@ -1,16 +1,19 @@
 # Reliability check runbook
 
 Instructions for running an unattended reliability check against a FPVGate
-before a release. Follow these exactly. Everything you need to decide is decided
-by the script; your job is to start it, let it finish, and report what it says.
+before a release. The load phase reads device data; the initial `/api/selftest`
+performs temporary file/EEPROM writes and buzzer checks. Run between races.
+The script applies the criteria below; report its outcome and any limits of
+the actual transport/board coverage.
 
 ## What this proves, and what it does not
 
 It proves the gate stayed reachable and served correct responses under sustained
-load for the duration of the run, on every transport it could reach.
+load for the duration of the run, on every configured transport it could reach. This does not establish RF
+accuracy, gate-managed C5 completion or Event advancement.
 
 It does **not** prove the absence of the known intermittent RNDIS transmit
-stall. That fault has been measured at roughly **1 failure in 1350 requests**, so
+stall. That fault has been measured at roughly **1 failure in 1350 requests** in an earlier build/run, so
 a short clean run means very little. A four hour run is the minimum worth
 reporting; longer is better.
 
@@ -18,7 +21,11 @@ reporting; longer is better.
 
 1. The gate must be powered and already flashed with the firmware under test.
    **Do not flash anything.** If the firmware is wrong, stop and say so.
-2. Work out the addresses:
+2. Work out the addresses. USB needs an enabled shipping build; on S3-ETH
+   use the Ethernet address while its link is up. `--wifi` can probe that HTTP
+   address even though the argument name says Wi-Fi.
+   - **AP**: `192.168.4.1` when not using configured station credentials.
+   Then configure:
    - **WiFi**: shown in the gate's web UI, or in the self test under `WiFi`.
      Usually `192.168.0.x`.
    - **USB**: the gate is always `192.168.7.1`. That is the only address you
@@ -118,9 +125,9 @@ PASS requires all of:
 - **the device never restarts during the run**
 - free heap not trending down faster than `--max-heap-leak` bytes/hour (default 10240)
 
-### How a restart is detected
+### How this harness detects a restart
 
-There is no uptime or reset reason exposed over HTTP. A restart is inferred from
+The current harness infers a restart from
 min-heap-ever, which only falls while the device is running and resets on boot —
 so an **increase** means it restarted.
 
@@ -139,7 +146,7 @@ The `Content-Length` check matters more than it looks. The transmit stall
 presents as a body that stops partway with **HTTP 200 already sent**, so a
 status-only check would report success on exactly the fault being hunted.
 
-## Known-good reference figures
+## Historical reference figures
 
 From a healthy AIO on 1.8.0-dev, for comparison:
 
@@ -155,6 +162,6 @@ one is weighted far more heavily towards `/script.js`, which is 358 KB, so its
 bursts move roughly three times the data. **Do not compare a burst time from one
 script against the reference for the other.**
 
-USB bulk transfer running roughly 3x slower than WiFi is **expected** and not a
-failure. Worth reporting even on a PASS: a USB burst well over 90 s, a heap floor
+Those historical ratios are not present performance requirements; compressed
+assets, board memory and enabled receiver/network services change the result. Worth reporting even on a PASS: a USB burst well over 90 s, a heap floor
 below about 45 KB, or a heap trend more negative than a few KB/hour.

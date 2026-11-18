@@ -4,15 +4,20 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <memory>
 #include "storage.h"
 #include "race_rssi_recorder.h"
 
 #define MAX_RACES 50
 #define RACES_DIR "/races"
-#define MAX_PILOTS 6
+#define MAX_PILOTS 8   // an ESP32-C5 times up to 8 pilots
 
 // Pilot data for multi-pilot races
 struct PilotData {
+    int8_t slot = -1; // physical C5 slot; -1 for old/synchronized races
+    uint16_t frequency = 0;
+    uint8_t enter = 120;
+    uint8_t exit = 100;
     String name;
     String callsign;
     uint32_t color;  // RGB color as 0xRRGGBB
@@ -22,7 +27,9 @@ struct PilotData {
 };
 
 struct RaceSession {
+    uint32_t minLapMs = 2000;
     uint32_t timestamp;
+    uint32_t importedAt = 0; // Local import time; race timestamp remains unchanged.
     std::vector<uint32_t> lapTimes;  // Legacy: single pilot lap times
     uint32_t fastestLap;
     uint32_t medianLap;
@@ -40,7 +47,7 @@ struct RaceSession {
     float totalDistance;
     
     // Multi-pilot support
-    uint8_t syncMode;  // 0=personal, 1=master, 2=slave
+    uint8_t syncMode;  // 0=personal, 1=master, 2=slave, 3=C5 multi
     std::vector<PilotData> pilots;  // Empty for legacy single-pilot races
 
     // Marshal RSSI history metadata (samples live in sidecar .rssi file)
@@ -57,12 +64,17 @@ class RaceHistory {
     bool deleteRace(uint32_t timestamp);
     bool updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance = -1.0f, const String& notes = "");
     bool updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes);
+    bool updatePilotLaps(uint32_t timestamp, const std::vector<std::vector<uint32_t>>& laps);
     bool clearAll();
     String toJsonString();
+    bool tryToJsonString(String& output);
+    bool tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, uint32_t before = 0, bool paged = false);
     bool fromJsonString(const String& json);
+    bool fromJson(JsonVariant json);
     const std::vector<RaceSession>& getRaces();
     size_t getRaceCount() const { return races.size(); }
     bool getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const;
+    uint32_t latestTimestamp() const;
 
    private:
     std::vector<RaceSession> races;
@@ -70,6 +82,7 @@ class RaceHistory {
     RaceRssiRecorder* rssiRecorder;
 
     void writeRaceObject(JsonObject raceObj, const RaceSession& race) const;
+    void writeHistoryDocument(JsonDocument& doc) const;
     void readRssiMeta(JsonObject raceObj, RaceSession& race) const;
     bool writeRaceFile(const RaceSession& race);
     void deleteSidecar(const RaceSession& race);

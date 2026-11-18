@@ -1,4 +1,4 @@
-﻿# FPVGate
+# FPVGate
 
 ![FPVGate: scalable FPV race timing, from solo practice to 8-pilot club events](images/banner.png)
 
@@ -23,17 +23,7 @@ single gate, then grow to eight pilots from one ESP32-C5 receiver, full club
 events with heats and seeding, or a RotorHazard race. No transponders, no
 Raspberry Pi: open the gate in any browser and fly.
 
-> **Release status:** the latest stable release is
-> [**1.8.4**](https://github.com/LouisHitchcock/FPVGate/releases/latest). This
-> README describes **FPVGate 1.9.0**, currently a testing pre-release
-> ([1.9.0-alpha-6](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.9.0-alpha-6)).
-> ESP32-C5 multi-pilot timing, Event Mode and the other features under
-> [What's new in 1.9.0](#whats-new-in-190) need the pre-release: turn on
-> **Pre-Release Firmware** in the [web flasher](https://fpvgate.xyz/flasher.html).
-> Full six-board, independent multi-transmitter and storage-failure
-> qualification of 1.9.0 is not complete. The 1.9.0
-> [documentation index](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/README.md)
-> lists the current guides.
+FPVGate **1.9.0** introduces ESP32-C5 multi-pilot timing, Event Director and the C5MK AIO. See the [release notes and downloads](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.9.0) and the [documentation index](docs/README.md).
 
 ## Why FPVGate
 
@@ -106,7 +96,7 @@ To build your own:
 
 | Component | Required | Notes |
 |---|---|---|
-| ESP32-S3 timer board | Yes | [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) (recommended), ESP32-S3-DevKitC-1 (8 MB) or [Waveshare ESP32-S3-ETH](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/WAVESHARE_S3_ETH.md) |
+| ESP32-S3 timer board | Yes | [Seeed Studio XIAO ESP32S3](https://wiki.seeedstudio.com/xiao_esp32s3_getting_started/) (recommended), ESP32-S3-DevKitC-1 (8 MB) or [Waveshare ESP32-S3-ETH](docs/WAVESHARE_S3_ETH.md) |
 | Receiver | Yes | An RX5808 with the [SPI mod](https://sheaivey.github.io/rx5808-pro-diversity/docs/rx5808-spi-mod.html) for one pilot, or an ESP32-C5 board with a 5 GHz antenna for up to eight |
 | MicroSD card | Yes | FAT32, 1 GB or more, for voices and race data |
 | 5 V power | Yes | USB or any 5 V source |
@@ -115,7 +105,7 @@ To build your own:
 
 Wiring: [XIAO ESP32S3](docs/wiring/Seeed-XIAO-ESP32S3.md) ·
 [ESP32-S3-DevKitC-1](docs/wiring/ESP32-S3-DevKitC-1.md) ·
-[Waveshare ESP32-S3-ETH](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/WAVESHARE_S3_ETH.md) ·
+[Waveshare ESP32-S3-ETH](docs/WAVESHARE_S3_ETH.md) ·
 [ESP32-C5 receiver](https://fpvgate.xyz/c5.html#boards).
 The [hardware guide](docs/HARDWARE_GUIDE.md) covers components and troubleshooting.
 
@@ -158,7 +148,7 @@ filesystem at `0x610000`; do not copy the 8 MB offset to that board.
 Or build with [PlatformIO](https://platformio.org/):
 
 ```bash
-git clone --branch V1.9.0-alpha https://github.com/LouisHitchcock/FPVGate.git
+git clone --branch V1.9.0 https://github.com/LouisHitchcock/FPVGate.git
 cd FPVGate
 pio run -e ESP32S3 -t upload      # ESP32-S3-DevKitC-1 (8 MB)
 pio run -e ESP32S3 -t uploadfs
@@ -181,7 +171,7 @@ The [development guide](docs/DEVELOPMENT.md) lists every board target.
 
 The [getting started guide](docs/GETTING_STARTED.md),
 [user guide](docs/USER_GUIDE.md) and
-[multi-pilot guide](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/C5_MULTI_PILOT.md) go into detail.
+[multi-pilot guide](docs/C5_MULTI_PILOT.md) go into detail.
 
 ## How it works
 
@@ -301,22 +291,22 @@ RotorHazard integration.
 |---|---|
 | [Getting started](docs/GETTING_STARTED.md) | Hardware, wiring, flashing and first setup |
 | [User guide](docs/USER_GUIDE.md) | Connecting, calibrating, racing and every feature |
-| [Multi-pilot with an ESP32-C5](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/C5_MULTI_PILOT.md) | Wiring, setup and calibration for up to eight pilots |
-| [Gate race completion](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/GATE_RACE_COMPLETION.md) | How the gate finishes and saves multi-pilot races |
+| [Multi-pilot with an ESP32-C5](docs/C5_MULTI_PILOT.md) | Wiring, setup and calibration for up to eight pilots |
+| [Gate race completion](docs/GATE_RACE_COMPLETION.md) | How the gate finishes and saves multi-pilot races |
 | [Hardware guide](docs/HARDWARE_GUIDE.md) | Components, wiring diagrams, troubleshooting |
 | [Features](docs/FEATURES.md) | In-depth feature documentation |
 | [RotorHazard integration](docs/ROTORHAZARD_INTEGRATION.md) | Connecting FPVGate to RotorHazard |
 | [USB networking](docs/USB_NETWORKING.md) | The web UI over USB-C |
-| [Waveshare ESP32-S3-ETH](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/WAVESHARE_S3_ETH.md) | The wired Ethernet board |
+| [Waveshare ESP32-S3-ETH](docs/WAVESHARE_S3_ETH.md) | The wired Ethernet board |
 | [Voice generation](docs/VOICE_GENERATION_README.md), [multi-voice setup](docs/MULTI_VOICE_SETUP.md) | Custom and multiple voices |
 | [Development](docs/DEVELOPMENT.md) | Building from source and contributing |
-| [Repository layout](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/REPOSITORY_LAYOUT.md) | Source, build configuration, images and integrations |
+| [Repository layout](docs/REPOSITORY_LAYOUT.md) | Source, build configuration, images and integrations |
 | [Changelog](CHANGELOG.md) | Every release |
 
 For test evidence and its limits, see the
-[post-soak investigation](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/RH_POST_SOAK_INVESTIGATION.md).
+[post-soak investigation](docs/RH_POST_SOAK_INVESTIGATION.md).
 C5 race completion/saving runs on the gate. Unreleased alpha source adds
-[gate-managed Event results and next-heat loading](https://github.com/LouisHitchcock/FPVGate/blob/V1.9.0-alpha/docs/GATE_EVENT_PROGRESSION.md);
+[gate-managed Event results and next-heat loading](docs/GATE_EVENT_PROGRESSION.md);
 published Alpha 5 images still require a page for Event progression. Speech
 continues to need an open browser page. Physical qualification remains open.
 

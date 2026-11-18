@@ -7,6 +7,10 @@ extern "C" {
 #endif
 // Start the USB Ethernet netif after Arduino has initialized the network stack.
 esp_err_t usbnet_begin(void);
+// Stop serving the USB network (no DHCP, no traffic) or start again, e.g.
+// while Ethernet is connected. The USB device stays, so the host keeps the
+// adapter and the serial port.
+void usbnet_set_active(bool active);
 // Bench diagnostics; call from the application task.
 void usbnet_print_status(void);
 
@@ -49,6 +53,8 @@ void usbnet_usb_snapshot(usbnet_usb_snapshot_t *snapshot);
 // Traffic counters, safe to read from any task (no lwIP or USB calls).
 typedef struct {
     uint32_t rx, queued, sent, dropped, defer_lost, pool_low, pool_free;
+    uint32_t pool_bytes;
+    bool pool_external;
 } usbnet_counters_t;
 void usbnet_counters(usbnet_counters_t *counters);
 #ifdef __cplusplus

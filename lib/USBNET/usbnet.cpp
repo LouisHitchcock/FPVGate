@@ -9,6 +9,7 @@
 #include "esp_netif_net_stack.h"
 #include "lwip/netif.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -22,6 +23,7 @@
 extern "C" {
 uint8_t tud_network_mac_address[6] = {0x02, 0, 0, 0, 0, 1};
 esp_err_t usbnet_dhcp_start(struct netif *interface);
+void usbnet_dhcp_stop(struct netif *interface);
 }
 
 static esp_netif_t *netif;
@@ -173,7 +175,23 @@ static void sendOnUsbTask(void *arg) {
 // txPoolLow records how close the pool actually comes to empty, reported on
 // the [USB TX] status line.
 static constexpr size_t TX_POOL_FRAMES = 9;
-static Packet txPackets[TX_POOL_FRAMES];
+static constexpr size_t TX_EXTERNAL_POOL_FRAMES = 24;
+static size_t txPoolFrames = TX_POOL_FRAMES;
+// Packet data is copied by tud_network_xmit_cb into TinyUSB's own endpoint
+// buffer; it is CPU-owned staging, not a USB DMA buffer. PSRAM boards can
+// absorb opening bursts in 24 slots without taking packet RAM from lwIP.
+// The internal-memory fallback retains the measured nine-slot budget.
+static Packet* txPackets = nullptr;
+static bool txPoolExternal = false;
+static bool allocateTxPackets() {
+    if (txPackets) return true;
+    txPackets = static_cast<Packet*>(heap_caps_malloc(sizeof(Packet) * TX_EXTERNAL_POOL_FRAMES,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    txPoolExternal = txPackets != nullptr;
+    txPoolFrames = txPoolExternal ? TX_EXTERNAL_POOL_FRAMES : TX_POOL_FRAMES;
+    if (!txPackets) txPackets = static_cast<Packet*>(malloc(sizeof(Packet) * TX_POOL_FRAMES));
+    return txPackets != nullptr;
+}
 static SendAttempt txAttempt;
 
 static void txTask(void *) {
@@ -296,7 +314,7 @@ void usbnet_print_status(void) {
     Serial.printf("[USB TX] in_fail=%u in_done=%u defer_lost=%u pool=%u/%u low=%u\n",
         inXferFail.load(), inXferDone.load(), txDeferLost.load(),
         static_cast<unsigned>(uxQueueMessagesWaiting(txFreePackets)),
-        static_cast<unsigned>(TX_POOL_FRAMES), txPoolLow.load());
+        static_cast<unsigned>(txPoolFrames), txPoolLow.load());
     Serial.printf("[USB IN] busy=%u stalled=%u submit=%u complete=%u ctl=%08x int=%08x size=%08x fifo=%u config=%08x\n",
         inBusy.load(), inStalled.load(), inSubmitLen.load(), inCompleteLen.load(),
         inCtl.load(), inInt.load(), inSize.load(), inFifo.load(), inFifoConfig.load());
@@ -320,6 +338,8 @@ void usbnet_counters(usbnet_counters_t *counters) {
     counters->dropped = txDropped.load();
     counters->defer_lost = txDeferLost.load();
     counters->pool_low = txPoolLow.load();
+    counters->pool_bytes = txPackets ? sizeof(Packet) * txPoolFrames : 0;
+    counters->pool_external = txPoolExternal;
     counters->pool_free = txFreePackets ? static_cast<uint32_t>(uxQueueMessagesWaiting(txFreePackets)) : 0;
 }
 
@@ -335,9 +355,10 @@ esp_err_t usbnet_begin(void) {
     esp_netif_init();
     // One frame short of the pool: txTask holds a packet while it sends, so a
     // full queue plus the in-flight frame is exactly the pool.
-    txQueue = xQueueCreate(TX_POOL_FRAMES - 1, sizeof(Packet *));
-    txFreePackets = xQueueCreate(TX_POOL_FRAMES, sizeof(Packet *));
-    txPoolLow = TX_POOL_FRAMES;
+    if (!allocateTxPackets()) return ESP_ERR_NO_MEM;
+    txQueue = xQueueCreate(txPoolFrames - 1, sizeof(Packet *));
+    txFreePackets = xQueueCreate(txPoolFrames, sizeof(Packet *));
+    txPoolLow = txPoolFrames;
     txDone = xSemaphoreCreateBinary();
     if (!txQueue || !txFreePackets || !txDone) {
         if (txQueue) vQueueDelete(txQueue);
@@ -346,10 +367,11 @@ esp_err_t usbnet_begin(void) {
         txQueue = nullptr;
         txFreePackets = nullptr;
         txDone = nullptr;
+        free(txPackets); txPackets = nullptr; txPoolExternal = false;
         return ESP_ERR_NO_MEM;
     }
-    for (auto &packet : txPackets) {
-        Packet *entry = &packet;
+    for (size_t i = 0; i < txPoolFrames; ++i) {
+        Packet *entry = &txPackets[i];
         xQueueSend(txFreePackets, &entry, 0);
     }
     esp_netif_ip_info_t ip = {};
@@ -380,6 +402,7 @@ esp_err_t usbnet_begin(void) {
         txQueue = nullptr;
         txFreePackets = nullptr;
         txDone = nullptr;
+        free(txPackets); txPackets = nullptr; txPoolExternal = false;
         return ESP_ERR_NO_MEM;
     }
     netif = created;
@@ -389,5 +412,32 @@ esp_err_t usbnet_begin(void) {
     startupResult = esp_netif_tcpip_exec(startDhcp, esp_netif_get_netif_impl(netif));
     if (startupResult == ESP_OK) netifReady.store(true, std::memory_order_release);
     return startupResult;
+}
+
+static esp_err_t takeDown(void *arg) {
+    auto *interface = static_cast<struct netif *>(arg);
+    usbnet_dhcp_stop(interface);
+    netif_set_down(interface);
+    return ESP_OK;
+}
+
+static esp_err_t bringUp(void *arg) {
+    auto *interface = static_cast<struct netif *>(arg);
+    netif_set_up(interface);
+    return usbnet_dhcp_start(interface);
+}
+
+void usbnet_set_active(bool active) {
+    if (!netif || startupResult != ESP_OK) return;
+    if (active == netifReady.load(std::memory_order_acquire)) return;
+    if (!active) {
+        // Stop handing received frames to lwIP before the netif goes down.
+        netifReady.store(false, std::memory_order_release);
+        esp_netif_tcpip_exec(takeDown, esp_netif_get_netif_impl(netif));
+        Serial.println("[USB] networking off");
+    } else if (esp_netif_tcpip_exec(bringUp, esp_netif_get_netif_impl(netif)) == ESP_OK) {
+        netifReady.store(true, std::memory_order_release);
+        Serial.println("[USB] networking on");
+    }
 }
 #endif

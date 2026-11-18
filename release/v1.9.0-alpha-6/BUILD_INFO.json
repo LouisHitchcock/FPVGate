@@ -1,0 +1,75 @@
+{
+  "release": "v1.9.0-alpha-6",
+  "sourceCommit": "c0f39b881badab4380479edf0dc31a2bfd0aae2a",
+  "rcBaseCommit": "41a0ca9ea4561bec11baf03572a8d82626ccb8ce",
+  "workflowRun": "https://github.com/LouisHitchcock/FPVGate/actions/runs/43129664568",
+  "buildConclusion": "success",
+  "boards": [
+    {
+      "board": "ESP32S3",
+      "firmwareBytes": 1496624,
+      "filesystemOffset": "0x410000",
+      "filesystemBytes": 4063232
+    },
+    {
+      "board": "FPVGateAIO",
+      "firmwareBytes": 1495296,
+      "filesystemOffset": "0x410000",
+      "filesystemBytes": 4063232
+    },
+    {
+      "board": "FPVGateC5MKAIO",
+      "firmwareBytes": 1496160,
+      "filesystemOffset": "0x410000",
+      "filesystemBytes": 4063232
+    },
+    {
+      "board": "FPVGateSolo",
+      "firmwareBytes": 1496208,
+      "filesystemOffset": "0x410000",
+      "filesystemBytes": 4063232
+    },
+    {
+      "board": "SeeedXIAOESP32S3",
+      "firmwareBytes": 1495824,
+      "filesystemOffset": "0x410000",
+      "filesystemBytes": 4063232
+    },
+    {
+      "board": "WaveshareS3ETH",
+      "firmwareBytes": 1533824,
+      "filesystemOffset": "0x610000",
+      "filesystemBytes": 2097152
+    }
+  ],
+  "hardwareValidation": {
+    "board": "FPVGateC5MKAIO",
+    "exactImagesBooted": true,
+    "settingsRetained": true,
+    "c5FirmwareUnchanged": "1.3.0-rc.1",
+    "wifiAssets": {
+      "passed": 12,
+      "total": 12,
+      "seconds": 8.7,
+      "minimumFreeInternalHeap": 39504
+    },
+    "limits": [
+      "One board and one Windows Wi-Fi client",
+      "No long network soak",
+      "Repeated cancellation/reconnection recovery not qualified",
+      "Other boards build and packaging checked only",
+      "RF accuracy and the separate C5 USB soak remain unqualified"
+    ]
+  },
+  "automatedChecks": {
+    "jestSuites": 19,
+    "jestTests": 191,
+    "websiteTests": 24,
+    "nativeChecks": [
+      "file-transfer admission/cancellation: 80000 concurrent transfers",
+      "all eight clock-mapped C5 slots",
+      "race-control harness",
+      "event-director harness"
+    ]
+  }
+}

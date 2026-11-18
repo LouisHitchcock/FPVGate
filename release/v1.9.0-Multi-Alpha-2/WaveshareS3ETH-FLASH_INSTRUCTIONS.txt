@@ -1,0 +1,25 @@
+FPVGate v1.9.0-Multi-Alpha-2 - Waveshare ESP32-S3-ETH (16MB, Ethernet)
+
+*** UNTESTED: this build has never been run on the board. It may not boot,
+*** Ethernet may not work, and pins may change. Flash it only if you are
+*** happy to test; wiring is in docs/WAVESHARE_S3_ETH.md.
+
+Flash all four files in one command. The filesystem offset differs per board,
+so use the value below rather than one from another board's instructions.
+
+esptool.py --chip esp32s3 --port <PORT> --baud 460800 write_flash -z \
+  0x0      WaveshareS3ETH-bootloader.bin \
+  0x8000   WaveshareS3ETH-partitions.bin \
+  0x10000  WaveshareS3ETH-firmware.bin \
+  0x610000  WaveshareS3ETH-littlefs.bin
+
+Notes
+-----
+* Upgrading from 1.7.x MUST be a full wired flash like the one above. An
+  over-the-air update replaces the application only and leaves the old
+  partition table in place, which a 1.8 or newer filesystem image will not fit.
+* The easier route is the web flasher at https://fpvgate.xyz, which does all
+  of this from a browser.
+* After flashing, the gate is reachable over USB-C at http://192.168.7.1 as
+  well as over WiFi. USB networking works on Windows and Linux; macOS is not
+  supported, because Apple removed RNDIS.

@@ -1,0 +1,10 @@
+{
+  "version": "1.9.0-alpha-5",
+  "build": "integrated-six-board-refresh",
+  "sourceCommit": "9f030b126825ad253b47869c35bc51fb3a61d7c3",
+  "replacesTagCommit": "3b5b03548f0ed3f1741db8c5e4e784918e98cfce",
+  "boards": ["SeeedXIAOESP32S3", "WaveshareS3ETH", "ESP32S3", "FPVGateAIO", "FPVGateSolo", "FPVGateC5MKAIO"],
+  "changes": ["consecutive-lap-announcements", "c5-gate-race-completion-and-history", "rh-peak-timing", "c5mk-aio"],
+  "hardwareQualified": false,
+  "upgrade": "Reflash both firmware and filesystem, including from an earlier Alpha 5 build."
+}

@@ -59,6 +59,10 @@ DEFAULT_ASSETS = [
     "/audio-announcer.js",
     "/smoothie.js",
     "/script.js",
+    "/race-trace.js",
+    "/c5-multipilot.js",
+    "/event-director-ui.js",
+    "/event.js",
     "/locales/en.json",
 ]
 

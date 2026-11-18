@@ -143,13 +143,15 @@ void LapTimer::start() {
     }
 
     if (rssiRecorder) {
-        rssiRecorder->beginRace();
+        rssiRecorder->beginRace(conf->getReceiverRadio() == 2 ? 8 : 1, getRaceStartMs());
     }
 }
 
 void LapTimer::stop() {
     DEBUG("LapTimer stopped\n");
-    // Finalize RSSI capture before clearing race state so save paths can attach sidecar
+    // Stop C5 detection before draining SD writes; storage may take seconds.
+    state = STOPPED;
+    // Finalize capture before returning to the save endpoint.
     if (rssiRecorder) {
         rssiRecorder->endRace();
     }
@@ -185,6 +187,10 @@ void LapTimer::stop() {
 }
 
 void LapTimer::handleLapTimerUpdate(uint32_t currentTimeMs) {
+    // C5 mode supplies per-pilot RSSI through C5Link; never touch the
+    // RX5808 ADC path while its GPIOs are the C5 UART.
+    if (conf->getReceiverRadio() == 2) return;
+
     // Check if receiver type changed and update Kalman tuning
     uint8_t currentRadio = conf->getReceiverRadio();
     if (currentRadio != activeReceiverRadio) {
@@ -661,6 +667,20 @@ uint32_t LapTimer::getLapTime() {
 
 bool LapTimer::isLapAvailable() {
     return lapAvailable;
+}
+
+bool LapTimer::recordCrossing(uint32_t crossingMs) {
+    if (state != RUNNING) return false;
+    if ((int32_t)(crossingMs - raceStartTimeMs) < 0) return false;   // from before the start
+    const bool isGate1 = (lapCount == 0 && !lapCountWraparound);
+    if (!isGate1 && (int32_t)(crossingMs - startTimeMs) <= (int32_t)conf->getMinLapMs()) {
+        DEBUG("[C5] crossing %u ms into the lap ignored (min lap %u)\n", crossingMs - startTimeMs, conf->getMinLapMs());
+        return false;
+    }
+    rssiPeakTimeMs = crossingMs;
+    finishLap();
+    startLap();
+    return true;
 }
 
 void LapTimer::addManualLap(uint32_t lapTimeMs) {

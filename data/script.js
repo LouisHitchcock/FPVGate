@@ -126,8 +126,7 @@ var trackLapLength = 0.0; // Length of one lap (meters)
 
 // Race sync state
 var timerNumber = 0; // LEGACY: Timer number (no longer used for hostname)
-var raceSyncMode = 0; // 0=disabled, 1=master, 2=slave
-var rhEnabled = 0;   // 1=RotorHazard mode enabled
+var raceSyncMode = 0; // 0=personal, 1=master, 2=slave, 3=C5 multi
 var syncedTimers = []; // Array of synced timer hostnames (for master mode)
 var masterHostname = ""; // Master hostname for slave mode
 var configLoaded = false; // Flag to prevent saving before initial config load
@@ -281,9 +280,6 @@ async function loadInitialSyncState() {
       if (config.raceSyncMode !== undefined) {
         raceSyncMode = config.raceSyncMode;
       }
-      if (config.rhEnabled !== undefined) {
-        rhEnabled = config.rhEnabled;
-      }
       if (config.syncedTimers && Array.isArray(config.syncedTimers)) {
         syncedTimers = config.syncedTimers.slice();
       }
@@ -308,6 +304,11 @@ async function loadInitialSyncState() {
 // ready. A skeleton that never clears is worse than no skeleton at all, so this
 // is deliberately hard to get stuck: it runs on DOMContentLoaded, again on
 // window load, and behind a timeout, and any one of them is enough.
+function onAppReady(callback) {
+  if (window.whenFPVGateReady) window.whenFPVGateReady(callback);
+  else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", callback, { once: true });
+  else callback();
+}
 let skeletonCleared = false;
 
 // The theme lives on the device and arrives with /config, so the page used to
@@ -359,13 +360,13 @@ function hideAppSkeleton() {
   setTimeout(() => el.remove(), 300);
 }
 
-document.addEventListener("DOMContentLoaded", hideAppSkeleton);
+onAppReady( hideAppSkeleton);
 window.addEventListener("load", hideAppSkeleton);
 // Backstop: if an init step throws before either listener fires, the user still
 // gets a usable page rather than staring at a shimmer.
 setTimeout(hideAppSkeleton, 8000);
 
-document.addEventListener("DOMContentLoaded", () => {
+onAppReady( () => {
   // Fetch version on page load
   fetchVersion();
   
@@ -455,7 +456,22 @@ async function initializeTransport() {
   updateConnectionStatus("WiFi", true);
 }
 
+function pauseLiveForVoiceDownload() {
+  window.voicePackTransferPaused = true;
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  if (eventSourceReconnectTimer) { clearTimeout(eventSourceReconnectTimer); eventSourceReconnectTimer = null; }
+  if (connectionStatusUpdateInterval) { clearInterval(connectionStatusUpdateInterval); connectionStatusUpdateInterval = null; }
+  let resumed = false;
+  return () => {
+    if (resumed) return;
+    resumed = true;
+    window.voicePackTransferPaused = false;
+    setupWiFiEvents();
+  };
+}
+
 function setupWiFiEvents() {
+  if (window.voicePackTransferPaused) return;
   // Clear any pending reconnect timer
   if (eventSourceReconnectTimer) {
     clearTimeout(eventSourceReconnectTimer);
@@ -480,6 +496,7 @@ function setupWiFiEvents() {
       function (e) {
         console.log("[SSE] Connection OPEN - readyState:", eventSource.readyState);
         eventSourceReconnectAttempts = 0; // Reset counter on successful connect
+        if (c5ReceiverSelected()) c5RaceResync();
         updateConnectionStatus("WiFi", true);
         window.lastSSEEvent = Date.now();
 
@@ -544,6 +561,27 @@ function setupWiFiEvents() {
       false
     );
 
+    // ESP32-C5 multi-pilot: live RSSI and laps (data/c5-multipilot.js).
+    eventSource.addEventListener("c5Rssi", function (e) {
+      const data = JSON.parse(e.data);
+      // The C5 wire value is 10-bit (0..1023); keep the public/UI calibration
+      // scale at 0..255 with quarter-step resolution.
+      window.c5PilotRssi = (data.rssi || []).map(v => Number(v) / 4);
+      if (typeof C5UI !== "undefined") C5UI.onRssi(data);
+      // A multi-pilot race already running when this page opened.
+      if (data.race && !c5Race.active && c5RacePilotsNow().length >= 1) {
+        c5RaceReset(true);
+        c5RaceResync();
+      }
+    }, false);
+
+    eventSource.addEventListener("c5Lap", function (e) {
+      const data = JSON.parse(e.data);
+      if (typeof C5UI !== "undefined") C5UI.onLap(data);
+      handleC5RaceLap(data);
+      console.log(`[C5] Pilot ${Number(data.pilot) + 1} ${+data.lap === 0 ? "Gate 1" : "lap " + data.lap}: ${(data.lapTimeMs / 1000).toFixed(2)}s`);
+    }, false);
+
 
     eventSource.addEventListener(
       "lap",
@@ -551,7 +589,7 @@ function setupWiFiEvents() {
         window.lastSSEEvent = Date.now();
         var lap = (parseFloat(e.data) / 1000).toFixed(2);
         console.log("[SSE] LAP EVENT RECEIVED - raw:", e.data, "formatted:", lap);
-        addLap(lap);
+        if (!c5ReceiverSelected()) addLap(lap);
       },
       false
     );
@@ -586,27 +624,67 @@ function setupWiFiEvents() {
         window.lastSSEEvent = Date.now();
         console.log("[SSE] configUpdated event - refreshing config from device");
         refreshConfigFromDevice();
+        if (typeof RaceEvent !== "undefined" && c5EventManaged && !raceRunning) RaceEvent.reload();
       },
       false
     );
   }
 }
 
+// A local stop is echoed by the gate's stopped event. Announce the transition
+// once, without clearing speech queued after the first announcement.
+var raceStopAnnouncementQueued = false;
+function announceRaceStoppedOnce() {
+  if (raceStopAnnouncementQueued) return;
+  raceStopAnnouncementQueued = true;
+  if (audioAnnouncer) audioAnnouncer.clearQueue();
+  queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
+}
+
 // Handle race state changes from SSE (for slave mode sync)
 function handleRaceStateEvent(state) {
   console.log("[Sync] Handling race state:", state);
+  if (state === "starting") {
+    raceStopAnnouncementQueued = false;
+    // ELRS starts the device-side countdown.  Mirror only its speech here;
+    // do not call startRace() or send a second /timer/start command.
+    window.elrsRemoteStarting = true;
+    queueSpeak(`<p>${i18n.t("settings.tts.arm_quad")}</p>`);
+    if (raceCountdownMode === 0) {
+      queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
+    } else {
+      setTimeout(() => queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`), 5000);
+    }
+    return;
+  }
   
   if (state === "started") {
+    raceStopAnnouncementQueued = false;
+    if (window.elrsRemoteStarting) {
+      window.elrsRemoteStarting = false;
+      beep(1, 1, "square");
+      beep(500, 880, "square");
+      if (navigator.vibrate) navigator.vibrate(500);
+    }
+    currentRaceSessionTimestamp = null;
     // Race started (from master or local)
     raceRunning = true;
+    if (!c5Race.active || c5HasRaceLaps()) {
+      c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
+      renderUnifiedRaceView();
+    }
+    if (audioAnnouncer?.beginRacePlayback) audioAnnouncer.beginRacePlayback();
+    c5RaceLabel = typeof RaceEvent !== "undefined" ? RaceEvent.raceLabel(c5Race.racers) : {};
     lapTimerStartMs = Date.now();
     startRaceTimer();
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race started via SSE");
+    if (c5ReceiverSelected()) c5RaceResync().then((d) => { if (d && d.timestamp) c5ObservedTimestamp = d.timestamp; });
   } else if (state === "stopped") {
-    // Race stopped (e.g. from LCD) – stop timer and reset displays like stopRace()
+    // Race stopped (e.g. from LCD) â€“ stop timer and reset displays like stopRace()
     raceRunning = false;
+    if (audioAnnouncer?.endRacePlayback) audioAnnouncer.endRacePlayback();
     stopRaceTimer();
     timer.innerHTML = i18n.t("race.timer_default");
     currentLapStartMs = 0;
@@ -616,13 +694,20 @@ function handleRaceStateEvent(state) {
     updateRaceButtons();
     clearRaceLeader();
     console.log("[Sync] Race stopped via SSE");
+    announceRaceStoppedOnce();
+    if (c5ReceiverSelected()) {
+      completeC5RaceInBrowser().catch((err) => { console.error("[C5] Save status:", err); alert(err.message); });
+    }
   } else if (state === "cleared") {
     // Laps cleared - reset UI
     raceRunning = false;
+    if (audioAnnouncer?.endRacePlayback) audioAnnouncer.endRacePlayback();
     stopRaceTimer();
     resetLapDisplay();
     updateRaceButtons();
     console.log("[Sync] Laps cleared via SSE");
+  } else if (state === "startFailed" && c5ReceiverSelected()) {
+    c5RaceResync().then((d) => { if (d && d.error) alert(d.error); });
   }
 }
 
@@ -646,12 +731,13 @@ function resetLapDisplay() {
   // Clear race analysis
   const raceAnalysisContent = document.getElementById("raceAnalysisContent");
   if (raceAnalysisContent) {
-    raceAnalysisContent.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
+    raceAnalysisContent.innerHTML = `<p class="no-data">${i18n.t("analysis.race_no_tab")}</p>`;
   }
   
   // Clear remote pilots data
   remotePilots = {};
-  
+  c5RaceReset(false);
+
   // Re-render unified view (will show empty state)
   renderUnifiedRaceView();
 }
@@ -765,10 +851,304 @@ function getLocalPilotInfo() {
   return { pilotName, pilotColor, lapTimes: lapTimes.slice(), lapNo: lapNo };
 }
 
+// ============================================
+// ESP32-C5 multi-pilot races (one C5 timing several pilots)
+// ============================================
+//
+// The C5 slots with Race on (Calibration tab, C5UI.getRacePilots()) are the
+// pilots. Two or more racers make a multi-pilot race: the firmware times
+// every racer (Gate 1 from the start, then pass to pass, minimum lap) and
+// sends "c5Lap" { pilot, lap, lapTimeMs, racer }; GET /api/c5/race returns
+// the race so far. One racer stays a single-pilot race through LapTimer and
+// the normal "lap" event.
+
+// racers: the C5UI.getRacePilots() list when the race started.
+// laps[slot]: seconds, [0] = Gate 1. finished: slots past max laps.
+let c5Race = { active: false, racers: [], laps: {}, finished: {} };
+let c5RaceResyncing = false;
+let c5RaceRequest = null;
+let c5GateManaged = false;
+let c5EventManaged = false;
+let c5ObservedTimestamp = 0;
+let c5CompletedTimestamp = 0;
+let c5CompletionPromise = null;
+let c5RaceLabel = {};
+let c5StopReason = "";
+
+function c5ReceiverSelected() {
+  const sel = document.getElementById("receiverRadio");
+  return !!sel && sel.value === "2" && typeof C5UI !== "undefined";
+}
+
+function c5MultiMode() {
+  return c5ReceiverSelected() || raceSyncMode === 3;
+}
+
+// Race director Event tab (event.js), off unless "Event mode" is on.
+function applyEventMode(on) {
+  const link = document.getElementById("nav-link-event");
+  if (link) link.parentElement.style.display = on ? "" : "none";
+  const tab = document.getElementById("raceEvent");
+  if (!on && tab && tab.style.display !== "none") document.getElementById("nav-link-race").click();
+  if (typeof RaceEvent !== "undefined") RaceEvent.setEnabled(on);
+}
+
+function loadEventMode(value) {
+  const box = document.getElementById("eventMode");
+  if (value === undefined || !box) return;
+  if (box.checked !== !!+value) box.checked = !!+value;
+  applyEventMode(box.checked);
+}
+
+function c5RacePilotsNow() {
+  return c5ReceiverSelected() ? C5UI.getRacePilots() : [];
+}
+
+// A multi-pilot C5 race is running, or would be if one started now.
+function c5MultiRaceView() {
+  return c5Race.active || c5MultiMode();
+}
+
+function c5RaceRacers() {
+  return c5Race.active ? c5Race.racers : c5RacePilotsNow();
+}
+
+function c5ColorInt(hex) {
+  return parseInt(String(hex || "#0080ff").replace("#", ""), 16);
+}
+
+function c5RaceReset(active) {
+  c5Race = { active: !!active, racers: active ? c5RacePilotsNow() : [], laps: {}, finished: {} };
+}
+
+function c5HasRaceLaps() {
+  return Object.values(c5Race.laps).some((l) => l && l.length > 0);
+}
+
+// Laps in the race table and history, whichever kind of race this is.
+function hasRaceLaps() {
+  return lapTimes.length > 0 || c5HasRaceLaps();
+}
+
+// The racer with most laps, then the shortest total time: the race's
+// legacy single-pilot fields in history are theirs.
+function c5RaceLeader() {
+  let best = null;
+  for (const r of c5Race.racers) {
+    const laps = c5Race.laps[r.slot] || [];
+    const total = laps.reduce((s, t) => s + t, 0);
+    if (!best || laps.length > best.laps.length || (laps.length === best.laps.length && total < best.total)) {
+      best = { racer: r, laps, total };
+    }
+  }
+  return best;
+}
+
+// Rebuild the laps from the device (page opened mid-race, or a lap event
+// arrived out of order).
+function c5RaceResync() {
+  if (c5RaceResyncing) return c5RaceRequest;
+  c5RaceResyncing = true;
+  const targetRace = c5Race;
+  c5RaceRequest = fetch("/api/c5/race")
+    .then((r) => r.json())
+    .then((d) => {
+      if (c5Race !== targetRace || !c5ReceiverSelected()) return d;
+      c5GateManaged = d.gateManaged === true;
+      c5EventManaged = d.eventManaged === true;
+      if (!c5Race.active) c5RaceReset(true);
+      if (d.timestamp && (d.pilots || []).some((p) => typeof p.name === "string")) {
+        // The device may already have loaded the next heat into config. The
+        // current race still belongs to its frozen roster, including on reload.
+        c5Race.racers = d.pilots.filter((p) => (d.racers >> p.slot) & 1).map((p) => ({
+          slot: p.slot, name: p.name, label: p.name || `Pilot ${p.slot + 1}`,
+          spoken: p.phonetic || p.name || `Pilot ${p.slot + 1}`,
+          color: `#${(p.color >>> 0).toString(16).padStart(6, "0")}`, freq: p.frequency,
+          channel: typeof C5UI !== "undefined" ? C5UI.channelName(p.frequency) : String(p.frequency),
+        }));
+      }
+      for (const p of d.pilots || []) {
+        if (!((d.racers >> p.slot) & 1)) continue;
+        c5Race.laps[p.slot] = (p.laps || []).map((ms) => ms / 1000);
+      }
+      if (c5GateManaged) {
+        currentRaceSessionTimestamp = d.savedTimestamp || null;
+        c5StopReason = d.stopReason || "";
+        const wasRunning = raceRunning;
+        raceRunning = !!d.running;
+        if (d.running) c5ObservedTimestamp = d.timestamp;
+        if (raceRunning && !wasRunning) {
+          startRaceTimer();
+          if (typeof audioAnnouncer !== 'undefined' && audioAnnouncer.beginRacePlayback) audioAnnouncer.beginRacePlayback();
+        }
+        if (!raceRunning && wasRunning && typeof audioAnnouncer !== 'undefined' && audioAnnouncer.endRacePlayback) audioAnnouncer.endRacePlayback();
+        if (!raceRunning) stopRaceTimer();
+        updateRaceButtons();
+        if (d.busy || d.saveFailed) {
+          startRaceButton.disabled = true;
+          stopRaceButton.disabled = !d.saveFailed;
+        }
+        if (!raceRunning) {
+          timer.innerHTML = i18n.t("race.timer_default");
+          currentLapStartMs = 0;
+          stopDistancePolling();
+        }
+      }
+      // The manual-lap buttons must render from the newly confirmed state.
+      renderUnifiedRaceView();
+      updateAnalysisSectionVisibility();
+      return d;
+    })
+    .catch((e) => console.warn("[C5] race resync failed", e))
+    .finally(() => { c5RaceResyncing = false; c5RaceRequest = null; });
+  return c5RaceRequest;
+}
+
+async function waitForC5RaceSave() {
+  // A stop is queued to loop(); SD writes can outlive the HTTP response.
+  for (let attempt = 0; attempt < 100; ++attempt) {
+    const state = await c5RaceResync();
+    if (!state) throw new Error("Cannot read C5 race status");
+    if (!state.gateManaged) return null; // older firmware keeps browser saving
+    if (!state.busy && !state.running) {
+      if (state.saveFailed) throw new Error(state.error || "Gate could not save race; press Stop to retry before starting another race");
+      return state.savedTimestamp || null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Gate is still finishing the race; refresh to check saved history");
+}
+
+function completeC5RaceInBrowser() {
+  if (c5CompletionPromise) return c5CompletionPromise;
+  c5CompletionPromise = (async () => {
+    const timestamp = await waitForC5RaceSave();
+    if (!timestamp || timestamp === c5CompletedTimestamp) return timestamp;
+    const races = await loadRaceHistory();
+    const saved = (races || []).find((r) => r.timestamp === timestamp);
+    if (!saved) throw new Error("Race is saved on the gate, but history could not be loaded. Retry Stop to refresh it.");
+    // Older firmware still uses browser Events. New firmware binds and saves
+    // the heat itself; browser notes must not overwrite that frozen label.
+    if (saved && timestamp === c5ObservedTimestamp) {
+      const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
+      if (notes || c5RaceLabel.name || c5RaceLabel.tag) {
+        const form = new URLSearchParams({ timestamp: String(timestamp),
+          name: c5EventManaged ? saved.name || "" : c5RaceLabel.name || saved.name || "",
+          tag: c5EventManaged ? saved.tag || "" : c5RaceLabel.tag || saved.tag || "", notes: notes || saved.notes || "" });
+        const response = await fetch("/races/update", { method: "POST", body: form });
+        const result = await response.json();
+        if (!response.ok || result.status !== "OK") throw new Error("Could not update race notes");
+        await loadRaceHistory();
+      }
+      if (typeof RaceEvent !== "undefined" && !c5EventManaged) RaceEvent.recordRace(saved);
+    }
+    if (c5EventManaged && typeof RaceEvent !== "undefined" && typeof RaceEvent.reload === "function") {
+      await RaceEvent.reload();
+      if (typeof refreshConfigFromDevice === "function") await refreshConfigFromDevice();
+    }
+    c5CompletedTimestamp = timestamp;
+    if (timestamp === c5ObservedTimestamp && (c5StopReason === "maxLaps" || c5StopReason === "heatTime"))
+      queueSpeak(`<p>${i18n.t("settings.tts.race_complete")}</p>`);
+    if (openRaceNotesOnRaceEnd && timestamp === c5ObservedTimestamp) openRaceNotesModal();
+    return timestamp;
+  })().finally(() => { c5CompletionPromise = null; });
+  return c5CompletionPromise;
+}
+
+function handleC5RaceLap(d) {
+  if (!d.racer) return;
+  if (!c5Race.active) {
+    // A race we didn't see start (another client, the LCD, a reload).
+    if (!raceRunning || c5RacePilotsNow().length < (c5MultiMode() ? 1 : 2)) return;
+    c5RaceReset(true);
+    c5RaceResync();
+    return;
+  }
+  const racer = c5Race.racers.find((r) => r.slot === +d.pilot);
+  if (!racer) return;   // Race switched on after the start
+  const laps = c5Race.laps[racer.slot] || (c5Race.laps[racer.slot] = []);
+  const idx = +d.lap;
+  if (idx > laps.length) {   // missed an event
+    c5RaceResync();
+    return;
+  }
+  laps[idx] = d.lapTimeMs / 1000;
+  renderUnifiedRaceView();
+  updateAnalysisSectionVisibility();
+  updateRaceLeader(racer.color);
+  announceC5RaceLap(racer, idx, laps[idx]);
+
+  // Max laps: each racer finishes on their own; the race stops when all have.
+  if (maxLaps > 0 && idx >= maxLaps && !c5Race.finished[racer.slot]) {
+    c5Race.finished[racer.slot] = true;
+    queueSpeak(`<p>${racer.spoken} finished</p>`);
+    if (!c5GateManaged && c5Race.racers.every((r) => c5Race.finished[r.slot])) {
+      setTimeout(function () {
+        if (!stopRaceButton.disabled) {
+          stopRace();
+          queueSpeak(`<p>${i18n.t("settings.tts.race_complete")}</p>`);
+        }
+      }, 500);
+    }
+  }
+}
+
+// A missed pass, added by hand: the gate times it now and sends it back as
+// a normal "c5Lap" event, so the tables, callouts and saved race all see it.
+function addC5ManualLap(slot, button) {
+  if (button) button.disabled = true;
+  fetch(`/api/c5/addLap?pilot=${slot}`, { method: "POST" })
+    .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+    .catch((e) => console.warn("[C5] manual lap failed", e))
+    .finally(() => { if (button) setTimeout(() => { button.disabled = !raceRunning; }, 400); });
+}
+
+// C5 heat announcements honor the selected lap format.
+function announceC5RaceLap(racer, idx, seconds) {
+  const mode = announcerSelect.options[announcerSelect.selectedIndex].value;
+  const extras = announcerExtras();
+  if (extras.beepEveryLap && mode !== "beep") beep(100, 330, "square");
+  if (mode === "beep") {
+    beep(100, 330, "square");
+    return;
+  }
+  if (mode === "none" || mode === "") return;
+  const t = seconds.toFixed(2);
+  if (idx === 0) {
+    if (extras.gate1Beep) {
+      if (!extras.beepEveryLap) beep(100, 330, "square");
+      return;
+    }
+    queueSpeak(`<p>${racer.spoken} ${i18n.t("settings.tts.gate1", { n: t })}</p>`);
+    return;
+  }
+  // 2- and 3-lap modes: this pilot's last 2 or 3 laps, once they have that many.
+  const count = mode === "2lap" ? 2 : mode === "3lap" ? 3 : 0;
+  if (count) {
+    const total = lastLapsTotal((c5Race.laps[racer.slot] || []).slice(0, idx + 1), count);
+    const parts = extras.withLapTime ? [t] : [];
+    if (total) parts.push(`${count} laps ${total}`);
+    if (parts.length) queueSpeak(`<p>${racer.spoken} ${parts.join(", ")}</p>`);
+    return;
+  }
+  const lap = i18n.t("race.lap_counter", { n: idx });
+  const text = lapFormat === "timeonly" ? t
+    : lapFormat === "laptime" ? `${lap}, ${t}`
+    : `${racer.spoken} ${lap}, ${t}`;
+  queueSpeak(`<p>${text}</p>`);
+}
+
 // Render the race view - switches between personal (single) and multi-pilot view
 function renderUnifiedRaceView() {
+  const multi = c5MultiRaceView();
+  document.getElementById("lapCounter").style.display = multi ? "none" : "";
+  document.getElementById("addLapButton").style.display = c5ReceiverSelected() ? "none" : "";
+  if (c5MultiRaceView()) {
+    renderMultiPilotRaceView();
+    return;
+  }
   // Use personal (single-pilot) view when sync is disabled
-  if (raceSyncMode === 0) {
+  if (raceSyncMode === 0 && !c5MultiMode()) {
     renderPersonalRaceView();
     return;
   }
@@ -779,6 +1159,8 @@ function renderUnifiedRaceView() {
 
 // Render classic single-pilot race view (Personal mode)
 function renderPersonalRaceView() {
+  const summary = document.getElementById("multiPilotRaceSummary");
+  if (summary) summary.innerHTML = "";
   const thead = document.getElementById("lapTableHead");
   const tbody = document.getElementById("lapTableBody");
   if (!thead || !tbody) return;
@@ -849,7 +1231,15 @@ function renderMultiPilotRaceView() {
   
   // Collect all pilots
   const pilots = [];
-  
+
+  if (c5MultiRaceView()) {
+    // One column per C5 racer.
+    for (const r of c5RaceRacers()) {
+      const laps = c5Race.laps[r.slot] || [];
+      pilots.push({ id: 'c5-' + r.slot, name: r.label, color: c5ColorInt(r.color), lapTimes: laps,
+                    lapNo: laps.length - 1, isLocal: false });
+    }
+  } else {
   // Add local pilot first
   const localPilot = getLocalPilotInfo();
   pilots.push({
@@ -860,9 +1250,10 @@ function renderMultiPilotRaceView() {
     lapNo: localPilot.lapNo,
     isLocal: true
   });
-  
+  }
+
   // Add remote pilots
-  for (const hostname of Object.keys(remotePilots)) {
+  for (const hostname of (c5MultiRaceView() ? [] : Object.keys(remotePilots))) {
     const pilot = remotePilots[hostname];
     pilots.push({
       id: hostname,
@@ -880,6 +1271,46 @@ function renderMultiPilotRaceView() {
     if (pilot.lapTimes.length > maxLapCount) {
       maxLapCount = pilot.lapTimes.length;
     }
+  }
+
+  const summaryHost = document.getElementById("multiPilotRaceSummary");
+  if (summaryHost) {
+    const ranked = pilots.slice().sort((a, b) => b.lapTimes.length - a.lapTimes.length ||
+      a.lapTimes.reduce((s, v) => s + v, 0) - b.lapTimes.reduce((s, v) => s + v, 0));
+    const rows = ranked.map(pilot => {
+      const valid = pilot.lapTimes.slice(1).filter(t => Number.isFinite(t) && t > 0);
+      return { pilot, valid, total: pilot.lapTimes.reduce((a, b) => a + b, 0), best: valid.length ? Math.min(...valid) : null };
+    });
+    const leader = rows.find(r => r.pilot.lapTimes.length);
+    const overallBest = Math.min(...rows.map(r => r.best ?? Infinity));
+    const manual = c5MultiRaceView();   // C5 racers can be given a lap by hand
+    summaryHost.innerHTML = `<table class="multi-pilot-standings-table">
+      <thead><tr><th>Pos</th><th class="mps-pilot">Pilot</th><th>Laps</th><th>Last</th><th>Best</th><th>Total</th><th>Gap</th><th>Status</th>${manual ? "<th></th>" : ""}</tr></thead>
+      <tbody>${rows.map((r, i) => {
+        const started = r.pilot.lapTimes.length > 0;
+        const colorHex = '#' + ((r.pilot.color || 0) >>> 0).toString(16).padStart(6, '0');
+        const last = r.valid.length ? r.valid[r.valid.length - 1].toFixed(3) + "s" : "--";
+        let gap = "--";
+        if (started && r === leader) gap = "Leader";
+        else if (started && leader) {
+          const lapsDown = leader.pilot.lapTimes.length - r.pilot.lapTimes.length;
+          gap = lapsDown > 0 ? `+${lapsDown} lap${lapsDown === 1 ? "" : "s"}` : `+${(r.total - leader.total).toFixed(3)}s`;
+        }
+        const [status, statusClass] = maxLaps > 0 && r.valid.length >= maxLaps ? ["Finished", "finished"]
+          : started ? (raceRunning ? ["Racing", "racing"] : ["Stopped", ""]) : ["Awaiting Gate 1", ""];
+        return `<tr>
+          <td class="mps-pos">${started ? i + 1 : "-"}</td>
+          <td class="mps-pilot"><span class="mps-name"><span class="multi-pilot-dot" style="--pilot-color:${colorHex}"></span>${escapeHtml(r.pilot.name || `Pilot ${i + 1}`)}</span></td>
+          <td>${r.valid.length}</td>
+          <td>${last}</td>
+          <td${r.best !== null && r.best === overallBest ? ' class="mps-fastest"' : ""}>${r.best !== null ? r.best.toFixed(3) + "s" : "--"}</td>
+          <td>${started ? r.total.toFixed(3) + "s" : "--"}</td>
+          <td class="mps-gap">${gap}</td>
+          <td><span class="multi-pilot-status ${statusClass}">${status}</span></td>
+          ${manual ? `<td><button class="mps-add-lap" onclick="addC5ManualLap(${r.pilot.id.slice(3)}, this)"${raceRunning ? "" : " disabled"}
+            title="Give ${escapeHtml(r.pilot.name || "this pilot")} a lap now">+ Lap</button></td>` : ""}
+        </tr>`;
+      }).join("")}</tbody></table>`;
   }
   
   // Find fastest lap for each pilot (excluding gate 1 / lap 0)
@@ -900,8 +1331,8 @@ function renderMultiPilotRaceView() {
   let headerHtml = '<tr><th class="lap-header">' + (i18n.t("race.table.lap_no") || "Lap") + '</th>';
   for (const pilot of pilots) {
     const colorHex = '#' + (pilot.color).toString(16).padStart(6, '0');
-    const localBadge = pilot.isLocal ? ' ★' : '';
-    headerHtml += `<th class="pilot-header" style="background-color: ${colorHex}; color: white;">${pilot.name}${localBadge}</th>`;
+    const localBadge = pilot.isLocal ? ' â˜…' : '';
+    headerHtml += `<th class="pilot-header" style="border-top: 4px solid ${colorHex};">${escapeHtml(pilot.name)}${localBadge}</th>`;
   }
   headerHtml += '</tr>';
   thead.innerHTML = headerHtml;
@@ -922,7 +1353,7 @@ function renderMultiPilotRaceView() {
         
         // Calculate gap from previous lap
         let gapHtml = '';
-        if (lapIdx > 0 && lapIdx < pilot.lapTimes.length) {
+        if (lapIdx > 1 && lapIdx < pilot.lapTimes.length) {
           const prevTime = pilot.lapTimes[lapIdx - 1];
           const diff = (lapTime - prevTime).toFixed(2);
           const gapClass = diff > 0 ? 'positive' : (diff < 0 ? 'negative' : '');
@@ -931,7 +1362,7 @@ function renderMultiPilotRaceView() {
         
         bodyHtml += `
           <td class="pilot-lap${isFastest ? ' fastest' : ''}" style="border-left: 3px solid ${colorHex};">
-            <div class="lap-time">${lapTime.toFixed(2)}s</div>
+            <div class="lap-time">${lapTime.toFixed(3)}s</div>
             ${gapHtml}
           </td>
         `;
@@ -1011,6 +1442,8 @@ function stopRaceTimer() {
 
 // Update race control buttons based on race state
 function updateRaceButtons() {
+  document.querySelectorAll(".mps-add-lap").forEach((b) => { b.disabled = !raceRunning; });
+  if (typeof RaceEvent !== "undefined") RaceEvent.refreshRaceTab();   // Next Heat button
   if (raceRunning) {
     startRaceButton.disabled = true;
     stopRaceButton.disabled = false;
@@ -1063,6 +1496,17 @@ async function updateConnectionStatus(mode, connected) {
             const signalQuality = wifiData.rssi > -50 ? i18n.t("messages.wifi_excellent") : wifiData.rssi > -60 ? i18n.t("messages.wifi_good") : wifiData.rssi > -70 ? i18n.t("messages.wifi_fair") : i18n.t("messages.wifi_weak");
             details = i18n.t("race.wifi_sta_details", { ssid: wifiData.ssid, ip: wifiData.ip, quality: signalQuality, rssi: wifiData.rssi });
           }
+          // Ethernet boards: the wired connection first, Wi-Fi below it.
+          const eth = wifiData.ethernet;
+          if (eth && eth.link) {
+            if (modeEl) modeEl.textContent = i18n.t("race.connected", { mode: "Ethernet" });
+            const ethDetails = eth.ip
+              ? i18n.t("race.eth_details", { ip: eth.ip, how: eth.fixed ? i18n.t("race.eth_fixed") : "DHCP" })
+              : i18n.t("race.eth_no_ip");
+            details = details ? ethDetails + "<br><br>" + details : ethDetails;
+          } else if (eth) {
+            details = i18n.t("race.eth_unplugged") + (details ? "<br><br>" + details : "");
+          }
         }
       } catch (err) {
         console.error("Failed to fetch WiFi info:", err);
@@ -1080,10 +1524,12 @@ async function updateConnectionStatus(mode, connected) {
   }
 }
 
-onload = async function (e) {
+async function initializeApp(e) {
   // Load dark mode preference
   loadDarkMode();
   syncOpenRaceNotesOnRaceEndToggle();
+  applyRaceNotesButton();
+  applyHistoryAdvancedFilters();
   syncRaceAnalyticsToggleUI();
 
   config.style.display = "none";
@@ -1115,6 +1561,18 @@ onload = async function (e) {
     // Set defaults if config fetch fails
     configData = {};
   }
+
+  // Wait for the catalogue before hydrating translated labels, but keep the
+  // wait bounded: a stalled request must not freeze the whole interface. The
+  // chart, transport and /config request above are already running.
+  let localeReady = !i18n.ready;
+  if (i18n.ready) {
+    localeReady = await Promise.race([
+      i18n.ready.then(() => true).catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+  }
+
   // Apply the authoritative slices of config to the UI FIRST, before the big
   // config-apply block below. Keeps hydration bulletproof - any later failure
   // in this handler can't leave these fields stuck at their HTML defaults.
@@ -1368,6 +1826,10 @@ onload = async function (e) {
     if (receiverRadioSelect && configData.receiverRadio !== undefined) {
       receiverRadioSelect.value = configData.receiverRadio;
     }
+    loadEventMode(configData.eventMode);
+    loadC5Profiles(configData.c5Pilots || [], configData.c5Gain);
+    if (c5ReceiverSelected()) c5RaceResync();
+    toggleNovaFilterSection();
 
     // Load Novacore filter settings
     const filterFields = [
@@ -1393,20 +1855,6 @@ onload = async function (e) {
     });
     toggleNovaFilterSection();
 
-    // Load RotorHazard integration settings
-    if (configData.rhEnabled !== undefined) {
-      rhEnabled = configData.rhEnabled;
-    }
-    const rhHostIPInput = document.getElementById("rhHostIP");
-    const rhNodeIndexSelect = document.getElementById("rhNodeIndex");
-    if (rhHostIPInput && configData.rhHostIP !== undefined) {
-      rhHostIPInput.value = configData.rhHostIP;
-    }
-    if (rhNodeIndexSelect && configData.rhNodeIndex !== undefined) {
-      rhNodeIndexSelect.value = configData.rhNodeIndex;
-    }
-
-    // Update banner now that rhEnabled is known
     updateSlaveModelUI();
 
     // Mark config as loaded so saves from calibration tab work
@@ -1420,7 +1868,27 @@ onload = async function (e) {
   } finally {
     _refreshingFromDevice = false;
   }
-};
+
+  // If the catalogue arrived after the bounded wait, refresh the labels that
+  // were built while it was still loading.
+  if (!localeReady && i18n.ready) {
+    i18n.ready.then(() => {
+      const wasRefreshing = _refreshingFromDevice;
+      _refreshingFromDevice = true;
+      try {
+        updateLapCounter();
+        updateSlaveModelUI();
+        if (maxLapsInput) updateMaxLaps(maxLapsInput, maxLapsInput.value);
+        if (maxHeatTimeInput) updateMaxHeatTime(maxHeatTimeInput, maxHeatTimeInput.value);
+        if (minLapInput) updateMinLap(minLapInput, minLapInput.value);
+        renderSyncDevicesList();
+      } finally {
+        _refreshingFromDevice = wasRefreshing;
+      }
+    }).catch(() => {});
+  }
+}
+onAppReady(initializeApp);
 
 let batteryVoltageInterval = null;
 let batteryAlarmActive = false;
@@ -1556,6 +2024,9 @@ function triggerBatteryAlarm(voltageText) {
   const alarmVoltageEl = document.getElementById("batteryAlarmVoltage");
   
   if (alarmModal && alarmVoltageEl) {
+    // The modal starts with a translated placeholder; once a real reading is
+    // written, drop the binding so a later translatePage() cannot replace it.
+    alarmVoltageEl.removeAttribute("data-i18n");
     alarmVoltageEl.textContent = voltageText;
     alarmModal.style.display = "flex";
     
@@ -1566,7 +2037,7 @@ function triggerBatteryAlarm(voltageText) {
     
     // Audio announcement
     if (audioEnabled && audioAnnouncer) {
-      audioAnnouncer.speak("BATTERY CRITICAL");
+      audioAnnouncer.speak(i18n.t("battery_alarm.critical"));
     }
   }
 }
@@ -1721,10 +2192,51 @@ function toggleNovaFilterSection() {
   var section = document.getElementById("novaFilterSection");
   if (!sel || !section) return;
   section.style.display = sel.value === "1" ? "block" : "none";
+  var c5 = document.getElementById("c5PilotSection");
+  if (c5) c5.style.display = sel.value === "2" ? "block" : "none";
+  var c5Calib = document.getElementById("c5CalibrationSection");
+  if (c5Calib) c5Calib.style.display = sel.value === "2" ? "block" : "none";
+  if (sel.value === "2") {
+    updateRaceSyncMode(3, true);
+    if (typeof initSyncDevicesFromConfig === "function") initSyncDevicesFromConfig();
+    if (typeof renderSyncDevicesList === "function") renderSyncDevicesList();
+  } else if (raceSyncMode === 3) {
+    updateRaceSyncMode(0, true);
+    initSyncDevicesFromConfig();
+    renderSyncDevicesList();
+  }
+  var legacyChannel = document.getElementById("legacyCalibrationChannelCard");
+  if (legacyChannel) legacyChannel.style.display = sel.value === "2" ? "none" : "block";
+  var legacyThresholds = document.getElementById("legacyCalibrationThresholdCard");
+  if (legacyThresholds) legacyThresholds.style.display = sel.value === "2" ? "none" : "block";
+  var legacyGraph = document.getElementById("legacyCalibrationGraphCard");
+  if (legacyGraph) legacyGraph.style.display = sel.value === "2" ? "none" : "block";
+  if (typeof C5UI !== "undefined") C5UI.setVisible(sel.value === "2");
+  updateDebugOverlay();   // the overlay's chart depends on the receiver
   // Sync slider visibility with toggle state
   toggleNovaFilterSlider("kalman");
   toggleNovaFilterSlider("ema");
   toggleNovaFilterSlider("step");
+}
+
+// ESP32-C5 pilots, gain and thresholds live in data/c5-multipilot.js (the
+// Calibration tab); these keep the rest of script.js unaware of its layout.
+function loadC5Profiles(profiles, gain) {
+  if (typeof C5UI !== "undefined") C5UI.load(profiles || [], gain);
+}
+
+function getC5ProfilesForSave() {
+  return typeof C5UI !== "undefined" ? C5UI.getProfilesForSave() : undefined;
+}
+
+function getC5GainForSave() {
+  return typeof C5UI !== "undefined" ? C5UI.getGain() : undefined;
+}
+
+function openC5Calibration() {
+  if (typeof closeSettingsModal === "function") closeSettingsModal();
+  const link = document.getElementById("nav-link-calib");
+  if (link) link.click();
 }
 
 function restoreDefaultNovaFilters() {
@@ -1770,6 +2282,12 @@ function updateDebugOverlay() {
   var overlay = document.getElementById("debugRssiOverlay");
   if (!overlay) return;
   var raceVisible = race.style.display != "none";
+  // The C5 sends no single-channel RSSI; its overlay is the 8-pilot chart.
+  var c5 = c5ReceiverSelected();
+  document.getElementById("debugRssiChart").style.display = c5 ? "none" : "block";
+  document.getElementById("debugC5Chart").style.display = c5 ? "block" : "none";
+  overlay.style.width = c5 ? "460px" : "320px";
+  overlay.style.height = c5 ? "220px" : "120px";
   if (debugMode && raceVisible) {
     overlay.style.display = "block";
     // Restore saved position (only if it's a valid, in-viewport numeric pair)
@@ -1797,7 +2315,7 @@ function updateDebugOverlay() {
         localStorage.removeItem('debugRssiPos');
       }
     }
-    if (debugRssiChart) debugRssiChart.start();
+    if (debugRssiChart && !c5) debugRssiChart.start();
     // Ensure RSSI streaming is active
     if (!rssiSending) startRssiStreaming();
   } else {
@@ -1933,6 +2451,20 @@ function toggleOpenRaceNotesOnRaceEnd(enabled) {
   syncOpenRaceNotesOnRaceEndToggle();
 }
 
+// Race Notes button on the Race tab, shown unless turned off on this device.
+function toggleShowRaceNotesButton(show) {
+  localStorage.setItem("showRaceNotesButton", show ? "1" : "0");
+  applyRaceNotesButton();
+}
+
+function applyRaceNotesButton() {
+  const show = localStorage.getItem("showRaceNotesButton") !== "0";
+  const btn = document.getElementById("raceNotesButton");
+  if (btn) btn.style.display = show ? "" : "none";
+  const toggle = document.getElementById("showRaceNotesButton");
+  if (toggle) toggle.checked = show;
+}
+
 function updateSavedRaceNotes(timestamp, notes) {
   const existingRace = raceHistoryData.find((race) => race.timestamp === timestamp) || {};
   const formData = new URLSearchParams();
@@ -2061,6 +2593,10 @@ function openTab(evt, tabName) {
     closeRaceNotesModal();
   }
 
+  if (tabName === "raceEvent" && typeof RaceEvent !== "undefined") {
+    RaceEvent.show();
+  }
+
   // Load race history when opening history tab
   if (tabName === "history") {
     // Close any open race details to ensure clean state
@@ -2101,7 +2637,7 @@ function autoSaveConfig() {
   if (_refreshingFromDevice) return; // Suppress saves during device-initiated refresh
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    saveConfig();
+    saveConfig().catch(error => console.error("Configuration save failed:", error));
   }, 1000); // Wait 1 second after last change before saving
 }
 
@@ -2109,7 +2645,7 @@ async function saveConfig() {
   // Don't save until initial config has been loaded from device
   if (!configLoaded) {
     console.log("[Config] Skipping save - config not yet loaded from device");
-    return;
+    throw new Error("Configuration has not loaded yet");
   }
   
   // Get pilot settings
@@ -2164,7 +2700,7 @@ async function saveConfig() {
       if (devCfg.freq !== undefined) frequency = devCfg.freq;
     } catch (e) {
       console.error("[Config] Failed to fetch device config, skipping save");
-      return;
+      throw e;
     }
   }
   
@@ -2195,6 +2731,9 @@ async function saveConfig() {
     maxLaps: maxLaps,
     maxHeatTime30s: maxHeatTime30s,
     receiverRadio: receiverRadioSelect ? parseInt(receiverRadioSelect.value) : 0,
+    eventMode: document.getElementById("eventMode")?.checked ? 1 : 0,
+    c5Gain: getC5GainForSave(),
+    c5Pilots: getC5ProfilesForSave(),
     novaFilterKalman: document.getElementById("novaFilterKalman") ? (document.getElementById("novaFilterKalman").checked ? 1 : 0) : 1,
     novaFilterMedian: document.getElementById("novaFilterMedian") ? (document.getElementById("novaFilterMedian").checked ? 1 : 0) : 0,
     novaFilterMA: document.getElementById("novaFilterMA") ? (document.getElementById("novaFilterMA").checked ? 1 : 0) : 0,
@@ -2227,9 +2766,6 @@ async function saveConfig() {
     syncedTimers: syncedTimers,
     masterHostname: masterHostname,
     speakerEnabled: document.getElementById("speakerEnabled") ? (document.getElementById("speakerEnabled").checked ? 1 : 0) : 1,
-    rhEnabled: (syncDevices.find(d => d.isThisDevice) || {}).role === 'rotorhazard' ? 1 : 0,
-    rhHostIP: document.getElementById("rhHostIP") ? document.getElementById("rhHostIP").value : "",
-    rhNodeIndex: document.getElementById("rhNodeIndex") ? parseInt(document.getElementById("rhNodeIndex").value) : 0,
     raceCountdownMode: (function() {
       var el = document.getElementById("raceCountdownMode");
       if (!el) return raceCountdownMode;
@@ -2238,7 +2774,7 @@ async function saveConfig() {
     })(),
   };
 
-  fetch("/config", {
+  return fetch("/config", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -2246,8 +2782,11 @@ async function saveConfig() {
     },
     body: JSON.stringify(configData),
   })
-    .then((response) => response.json())
-    .then((response) => console.log("/config:" + JSON.stringify(response)));
+    .then(async response => {
+      const data = await response.json();
+      if (!response.ok || data.status === "ERROR") throw new Error(data.message || "Configuration save failed");
+      return data;
+    });
 }
 
 // Populate band selector based on selected system
@@ -2483,6 +3022,18 @@ async function refreshConfigFromDevice() {
     // into the UI. Any local drag that hasn't been saved is expected to be
     // overwritten - user must click Save Thresholds to make their change win.
     applyThresholdsToUI(configData);
+    // Receiver type and the C5 pilots, so a page that stays open shows what
+    // the device has (the C5 panel keeps its own edits until they're saved).
+    const receiverRadioSelect = document.getElementById("receiverRadio");
+    if (receiverRadioSelect && configData.receiverRadio !== undefined &&
+        String(configData.receiverRadio) !== receiverRadioSelect.value) {
+      receiverRadioSelect.value = configData.receiverRadio;
+      toggleNovaFilterSection();
+    }
+    loadEventMode(configData.eventMode);
+    if (configData.c5Pilots && typeof C5UI !== "undefined" && !/^(pending|saving)$/.test(C5UI.saveState())) {
+      loadC5Profiles(configData.c5Pilots, configData.c5Gain);
+    }
     if (configData.raceCountdownMode !== undefined) {
       raceCountdownMode = parseInt(configData.raceCountdownMode) === 0 ? 0 : 1;
       const rcEl = document.getElementById("raceCountdownMode");
@@ -2508,6 +3059,20 @@ async function refreshConfigFromDevice() {
 // Add auto-save listeners for other inputs
 if (announcerSelect) {
   announcerSelect.addEventListener("change", autoSaveConfig);
+}
+["announcerBeepEveryLap", "announcerWithLapTime", "announcerGate1Beep"].forEach((id) => {
+  const box = document.getElementById(id);
+  if (!box) return;
+  box.checked = localStorage.getItem(id) === "1";
+  box.addEventListener("change", () => localStorage.setItem(id, box.checked ? "1" : "0"));
+});
+const browserBeepStyleSelect = document.getElementById("browserBeepStyle");
+if (browserBeepStyleSelect) {
+  const saved = localStorage.getItem("browserBeepStyle") || "classic";
+  browserBeepStyleSelect.value = ["classic", "soft", "high", "low", "double"].includes(saved) ? saved : "classic";
+  browserBeepStyleSelect.addEventListener("change", () => {
+    localStorage.setItem("browserBeepStyle", browserBeepStyleSelect.value);
+  });
 }
 if (pilotNameInput) {
   pilotNameInput.addEventListener("input", autoSaveConfig);
@@ -2603,6 +3168,30 @@ function updateMaxHeatTime(obj, value) {
 // Shared AudioContext for beeps (reused to avoid iOS issues)
 var beepAudioContext = null;
 var beepGainNode = null;
+var browserAudioUnlocked = false;
+
+// Browser policy requires Web Audio to be created/resumed from a user gesture.
+// ELRS start events arrive via SSE, so unlock the shared beep context on the
+// first interaction with the race page; later remote starts can then play the
+// tone without attempting an autoplay-violating AudioContext start.
+function unlockBrowserBeepAudio() {
+  if (browserAudioUnlocked) return;
+  try {
+    if (!beepAudioContext) {
+      beepAudioContext = new AudioContext();
+      beepGainNode = beepAudioContext.createGain();
+      beepGainNode.gain.value = beepVolume;
+      beepGainNode.connect(beepAudioContext.destination);
+    }
+    const resume = beepAudioContext.resume ? beepAudioContext.resume() : Promise.resolve();
+    Promise.resolve(resume).then(() => {
+      browserAudioUnlocked = beepAudioContext.state === "running";
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+document.addEventListener("pointerdown", unlockBrowserBeepAudio, { once: true, passive: true });
+document.addEventListener("keydown", unlockBrowserBeepAudio, { once: true, passive: true });
 var beepVolume = 1.0;  // 0.0 to 1.0
 
 function setBeepVolume(volume) {
@@ -2618,6 +3207,7 @@ function setBeepVolume(volume) {
 }
 
 function beep(duration, frequency, type) {
+  if (typeof navigator !== "undefined" && navigator.userActivation && !navigator.userActivation.isActive && !browserAudioUnlocked) return;
   // Create or reuse AudioContext
   if (!beepAudioContext) {
     beepAudioContext = new AudioContext();
@@ -2642,17 +3232,52 @@ function beep(duration, frequency, type) {
   }
 }
 
+// Only crossing beeps use this browser preference; start and warning tones keep
+// their existing sound. Schedule double tones on the audio clock, not timers.
+function browserBeepPattern(duration, frequency, type) {
+  const original = [[duration, frequency, type, 0]];
+  if (duration !== 100 || frequency !== 330 || type !== "square") return original;
+  switch (localStorage.getItem("browserBeepStyle")) {
+    case "soft": return [[120, 660, "sine", 0]];
+    case "high": return [[90, 1100, "sine", 0]];
+    case "low": return [[140, 220, "triangle", 0]];
+    case "double": return [[65, 660, "sine", 0], [65, 880, "sine", 110]];
+    default: return original;
+  }
+}
+
 function playBeepTone(duration, frequency, type) {
-  var oscillator = beepAudioContext.createOscillator();
-  oscillator.type = type;
-  oscillator.frequency.value = frequency;
-  // Connect through gain node for volume control
-  oscillator.connect(beepGainNode);
-  oscillator.start();
-  // Beep for specified duration
-  setTimeout(function () {
-    oscillator.stop();
-  }, duration);
+  const now = beepAudioContext.currentTime;
+  for (const [length, pitch, waveform, delay] of browserBeepPattern(duration, frequency, type)) {
+    const oscillator = beepAudioContext.createOscillator();
+    oscillator.type = waveform;
+    oscillator.frequency.value = pitch;
+    oscillator.connect(beepGainNode);
+    oscillator.onended = () => oscillator.disconnect();
+    const start = now + delay / 1000;
+    oscillator.start(start);
+    oscillator.stop(start + length / 1000);
+  }
+}
+
+// The total of the last `count` laps, Gate 1 ([0]) excluded, to 2 decimals;
+// "" until there are that many. laps: seconds, [0] = Gate 1.
+function lastLapsTotal(laps, count) {
+  const real = laps.slice(1);
+  if (real.length < count) return "";
+  return real.slice(-count).reduce((sum, t) => sum + t, 0).toFixed(2);
+}
+
+// Per-browser additions to the announcer. The gate stores only the mode
+// (anType 0-4), so these live in localStorage like the beep volume: a beep on
+// every lap alongside the chosen mode, and the lap time spoken with the 2- and
+// 3-lap totals.
+function announcerExtras() {
+  return {
+    beepEveryLap: localStorage.getItem("announcerBeepEveryLap") === "1",
+    withLapTime: localStorage.getItem("announcerWithLapTime") === "1",
+    gate1Beep: localStorage.getItem("announcerGate1Beep") === "1",
+  };
 }
 
 function addLap(lapStr) {
@@ -2663,6 +3288,11 @@ function addLap(lapStr) {
   const newLap = parseFloat(lapStr);
   lapNo += 1;
   lapTimes.push(newLap);
+  // For the 2- and 3-lap announcers. Their declarations went with the old lap
+  // table in v1.1.0, so reading them threw and ended addLap: no announcement,
+  // and no max-laps stop, after Gate 1.
+  const last2lapStr = lastLapsTotal(lapTimes, 2);
+  const last3lapStr = lastLapsTotal(lapTimes, 3);
 
   // Track lap timing for distance estimation
   lastCompletedLapTime = newLap * 1000; // Convert to milliseconds
@@ -2676,10 +3306,15 @@ function addLap(lapStr) {
   // Render unified multi-pilot view
   renderUnifiedRaceView();
 
-  // Determine effective lap format - force "Pilot + Time" in sync modes
-  const effectiveLapFormat = (raceSyncMode === 1 || raceSyncMode === 2) ? 'full' : lapFormat;
+  // Respect the selected lap format in synchronized races too.
+  const effectiveLapFormat = lapFormat;
   
-  switch (announcerSelect.options[announcerSelect.selectedIndex].value) {
+  const announceMode = announcerSelect.options[announcerSelect.selectedIndex].value;
+  const extras = announcerExtras();
+  if (extras.beepEveryLap && announceMode !== "beep") beep(100, 330, "square");
+  const gate1Beep = lapNo === 0 && extras.gate1Beep && ["1lap", "2lap", "3lap"].includes(announceMode);
+  if (gate1Beep && !extras.beepEveryLap) beep(100, 330, "square");
+  switch (gate1Beep ? "none" : announceMode) {
     case "beep":
       beep(100, 330, "square");
       break;
@@ -2695,7 +3330,7 @@ function addLap(lapStr) {
         let text;
         switch (effectiveLapFormat) {
           case "full":
-            text = `<p>${pilotName}, ${lapStr}</p>`;
+            text = `<p>${pilotName} ${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
             break;
           case "laptime":
             text = `<p>${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
@@ -2704,7 +3339,7 @@ function addLap(lapStr) {
             text = `<p>${lapStr}</p>`;
             break;
           default:
-            text = `<p>${pilotName}, ${lapStr}</p>`;
+            text = `<p>${pilotName} ${i18n.t("race.lap_counter", { n: lapNo })}, ${lapStr}</p>`;
         }
         queueSpeak(text);
       }
@@ -2712,25 +3347,27 @@ function addLap(lapStr) {
     case "2lap":
       if (lapNo == 0) {
         if (raceSyncMode === 1 || raceSyncMode === 2) {
-          queueSpeak(`<p>${pilotName} Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${pilotName} ${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         } else {
-          queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         }
-      } else if (last2lapStr != "") {
-        const text2 = "<p>" + pilotName + " 2 laps " + last2lapStr + "</p>";
-        queueSpeak(text2);
+      } else if (last2lapStr != "" || extras.withLapTime) {
+        const parts = extras.withLapTime ? [lapStr] : [];
+        if (last2lapStr != "") parts.push(i18n.t("settings.tts.laps_2", { n: "", time: last2lapStr }).trim());
+        queueSpeak("<p>" + pilotName + " " + parts.join(", ") + "</p>");
       }
       break;
     case "3lap":
       if (lapNo == 0) {
         if (raceSyncMode === 1 || raceSyncMode === 2) {
-          queueSpeak(`<p>${pilotName} Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${pilotName} ${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         } else {
-          queueSpeak(`<p>Gate 1 ${lapStr}</p>`);
+          queueSpeak(`<p>${i18n.t("settings.tts.gate1", { n: lapStr })}</p>`);
         }
-      } else if (last3lapStr != "") {
-        const text3 = "<p>" + pilotName + " 3 laps " + last3lapStr + "</p>";
-        queueSpeak(text3);
+      } else if (last3lapStr != "" || extras.withLapTime) {
+        const parts = extras.withLapTime ? [lapStr] : [];
+        if (last3lapStr != "") parts.push(i18n.t("settings.tts.laps_3", { n: "", time: last3lapStr }).trim());
+        queueSpeak("<p>" + pilotName + " " + parts.join(", ") + "</p>");
       }
       break;
     default:
@@ -2758,7 +3395,26 @@ function addLap(lapStr) {
   }
 }
 
+async function startC5RaceTimer() {
+  const response = await fetch("/timer/start?timestamp=" + Math.floor(Date.now() / 1000), {
+    method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
+  });
+  if (!response.ok) throw new Error("Race start rejected by gate");
+  await response.json();
+  // HTTP 202 means queued, not armed. Config/SD preparation must finish before
+  // the local GO cue, otherwise an immediate first crossing is lost.
+  for (let attempt = 0; attempt < 150; ++attempt) {
+    const state = await c5RaceResync();
+    if (!state) throw new Error("Cannot confirm that the gate has started");
+    if (state.running) return state;
+    if (!state.busy) throw new Error(state.error || "Gate could not start the race");
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error("Gate is still preparing the race; check its status before starting again");
+}
+
 function startTimer() {
+  if (c5ReceiverSelected() && c5GateManaged) return startC5RaceTimer();
   var millis = 0;
   var seconds = 0;
   var minutes = 0;
@@ -2791,14 +3447,17 @@ function startTimer() {
     updateCurrentLapTimer();
   }, 10);
 
-  fetch("/timer/start", {
+  return fetch("/timer/start?timestamp=" + Math.floor(Date.now() / 1000), {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
     },
   })
-    .then((response) => response.json())
+    .then((response) => {
+      if (!response.ok) throw new Error("Race start rejected by gate");
+      return response.json();
+    })
     .then((response) => console.log("/timer/start:" + JSON.stringify(response)));
 }
 
@@ -3151,7 +3810,7 @@ function generateAudio() {
 
   const pilotName = pilotNameInput.value;
   const phoneticName = document.getElementById("pphonetic")?.value || pilotName;
-  queueSpeak(`<div>Testing sound for pilot ${phoneticName}</div>`);
+  queueSpeak(`<div>${i18n.t("settings.tts.testing_sound", { name: phoneticName })}</div>`);
   for (let i = 1; i <= 3; i++) {
     queueSpeak("<div>" + i + "</div>");
   }
@@ -3260,11 +3919,41 @@ function openRssiDebugPopout(event) {
 }
 
 async function startRace() {
+  if (audioAnnouncer?.packDownloadActive) {
+    alert(i18n.t("settings.tts.pack_finish_download"));
+    return;
+  }
+  if (typeof RaceEvent !== "undefined" && RaceEvent.pendingReview?.()) {
+    alert("Confirm the saved Event results before starting another race.");
+    document.getElementById("nav-link-event")?.click();
+    return;
+  }
+  if (c5CompletionPromise) {
+    try { await c5CompletionPromise; }
+    catch (err) { alert(err.message); return; }
+  }
+  if (c5ReceiverSelected() && (!c5RacePilotsNow().length || /^(pending|saving|error)$/.test(C5UI.saveState()))) {
+    alert("Enable at least one pilot for Race and wait for the calibration settings to save.");
+    return;
+  }
+  if (c5ReceiverSelected()) {
+    if (typeof RaceEvent !== "undefined" && typeof RaceEvent.flush === "function") {
+      try { await RaceEvent.flush(); }
+      catch (err) { alert(err.message); return; }
+    }
+    const state = await c5RaceResync();
+    if (!state || state.busy || state.running || state.saveFailed) {
+      alert("The gate is busy or has an unsaved race. Stop/retry the save before starting another race.");
+      return;
+    }
+  }
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
     return;
   }
+
+  raceStopAnnouncementQueued = false;
 
   // Always read the current dropdown value at start, so a just-changed mode
   // applies immediately even before autoSaveConfig() has synced to the device.
@@ -3283,6 +3972,9 @@ async function startRace() {
   currentRaceSessionTimestamp = null;
   startRaceButton.disabled = true;
   startRaceButton.classList.add("active");
+  // C5 racers are fixed for the race at the start.
+  c5RaceReset(c5MultiMode() ? c5RacePilotsNow().length >= 1 : c5RacePilotsNow().length >= 2);
+  renderUnifiedRaceView();
 
   // Fire countdown immediately so device LCD + I2S start right away.
   // Backend picks the right flow (visible 10s overlay vs. classic "less than 5"
@@ -3299,6 +3991,7 @@ async function startRace() {
     audioAnnouncer.unlockAudioContextMobile().catch(() => {});
   }
 
+  const gateOwnsStart = c5ReceiverSelected() && c5GateManaged;
   // Branch on countdown mode
   if (raceCountdownMode === 0) {
     // Classic "Less than 5": queue TTS, wait for announcements, then random 1-5s delay
@@ -3327,25 +4020,37 @@ async function startRace() {
         if (s === 5) queueSpeak(`<p>${i18n.t("settings.tts.starting_soon")}</p>`);
         await new Promise((r) => setTimeout(r, 1000));
       }
-      raceCountdownNumberEl.textContent = "GO!";
-      raceCountdownNumberEl.classList.add("go");
+      raceCountdownNumberEl.textContent = gateOwnsStart ? i18n.t("race.preparing_start") : "GO!";
+      if (!gateOwnsStart) raceCountdownNumberEl.classList.add("go");
       await new Promise((r) => setTimeout(r, 500));
-      raceCountdownEl.style.display = "none";
+      if (!gateOwnsStart) raceCountdownEl.style.display = "none";
     } else {
       await new Promise((r) => setTimeout(r, RACE_COUNTDOWN_SECONDS * 1000 + 500));
     }
   }
 
-  // Play start beep and begin race (synced with device)
-  beep(1, 1, "square"); // needed for some reason to make sure we fire the first beep
-  beep(500, 880, "square");
+  const announceGo = () => {
+    beep(500, 880, "square");
+    if (navigator.vibrate) navigator.vibrate(500);
+    if (raceCountdownEl && raceCountdownNumberEl && raceCountdownMode !== 0) {
+      raceCountdownNumberEl.textContent = "GO!";
+      raceCountdownNumberEl.classList.add("go");
+      setTimeout(() => { raceCountdownEl.style.display = "none"; }, 500);
+    }
+  };
+  if (!gateOwnsStart) announceGo();
 
-  // Vibrate for mobile devices (works even in silent mode on iOS)
-  if (navigator.vibrate) {
-    navigator.vibrate(500); // 500ms vibration
+  try {
+    await startTimer();
+    if (gateOwnsStart) announceGo();
+  } catch (err) {
+    clearInterval(timerInterval);
+    if (raceCountdownEl) raceCountdownEl.style.display = "none";
+    handleRaceStateEvent("stopped");
+    startRaceButton.classList.remove("active");
+    alert(err.message);
+    return;
   }
-
-  startTimer();
   startRaceButton.classList.remove("active");
   stopRaceButton.disabled = false;
   addLapButton.disabled = false;
@@ -3365,7 +4070,7 @@ async function startRace() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  if (maxHeatTime30s > 0) {
+  if (maxHeatTime30s > 0 && (!c5ReceiverSelected() || !c5GateManaged)) {
     const heatMs = maxHeatTime30s * 30 * 1000;
     console.log(`[Race] Heat time limit ${maxHeatTime30s * 30}s - scheduling auto-stop in ${heatMs} ms`);
     heatTimeoutId = setTimeout(function () {
@@ -3392,11 +4097,7 @@ function stopRace() {
     clearTimeout(heatTimeoutId);
     heatTimeoutId = null;
   }
-  // Clear any queued audio to prevent race start sounds
-  if (audioAnnouncer) {
-    audioAnnouncer.clearQueue();
-  }
-  queueSpeak(`<p>${i18n.t("settings.tts.race_stopped")}</p>`);
+  announceRaceStoppedOnce();
   clearInterval(timerInterval);
   timer.innerHTML = i18n.t("race.timer_default");
   
@@ -3413,10 +4114,15 @@ function stopRace() {
   stopDistancePolling();
 
   const shouldOpenRaceNotes = openRaceNotesOnRaceEnd;
-  const afterStop = () => {
+  const afterStop = async () => {
+    if (c5ReceiverSelected()) await c5RaceResync();
+    if (c5ReceiverSelected() && c5GateManaged) {
+      currentRaceSessionTimestamp = await completeC5RaceInBrowser();
+      return;
+    }
     // Auto-save after stop so the device can finalize its RSSI capture before
     // saveCurrentRace attaches the sidecar to the race.
-    if (lapTimes.length > 0) {
+    if (hasRaceLaps()) {
       return saveCurrentRace().then(() => {
         if (shouldOpenRaceNotes) {
           openRaceNotesModal();
@@ -3429,7 +4135,7 @@ function stopRace() {
     return Promise.resolve();
   };
 
-  fetch("/timer/stop", {
+  return fetch("/timer/stop", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -3443,7 +4149,8 @@ function stopRace() {
     })
     .catch((err) => {
       console.error("Failed to stop timer:", err);
-      return afterStop();
+      if (c5ReceiverSelected()) c5RaceResync();
+      alert(err.message);
     });
 
   // Don't clear lapNo or lapTimes here - keep them visible until user clicks "Clear Laps"
@@ -3458,7 +4165,14 @@ function stopRace() {
   // Note: Sync commands now sent by master device directly (device-to-device)
 }
 
-function clearLaps() {
+async function clearLaps() {
+  if (c5ReceiverSelected()) {
+    const state = await c5RaceResync();
+    if (!state || (state.gateManaged && (state.running || state.busy || state.saveFailed))) {
+      alert("Stop and save the race before clearing laps.");
+      return;
+    }
+  }
   // If slave mode, don't allow local race control
   if (raceSyncMode === 2) {
     console.log("[Race] Slave mode - race control disabled");
@@ -3470,9 +4184,12 @@ function clearLaps() {
     heatTimeoutId = null;
   }
   // Auto-save race if there are laps before clearing (only if it wasn't already saved on stopRace)
-  if (lapTimes.length > 0 && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+  if (hasRaceLaps() && !currentRaceSessionTimestamp && !pendingRaceSavePromise) {
+    // Builds the race from the current state before its fetch, so the C5
+    // race can be reset straight after.
     saveCurrentRace({ setAsCurrentSession: false });
   }
+  c5RaceReset(false);
 
   var tableHeaderRowCount = 1;
   var rowCount = lapTable.rows.length;
@@ -3502,7 +4219,8 @@ function clearLaps() {
   document.getElementById("statMedian").textContent = "--";
   document.getElementById("statBest3").textContent = "--";
   document.getElementById("statBest3Laps").textContent = "";
-  
+  renderUnifiedRaceView();
+
   // Broadcast clearLaps event to OSD and other clients
   fetch("/timer/clearLaps", {
     method: "POST",
@@ -3571,6 +4289,8 @@ function updateTimerNumber() {
 
 // Update race sync mode
 function updateRaceSyncMode(mode, skipSave = false) {
+  if (c5ReceiverSelected()) mode = 3;
+  else if (mode === 3) mode = 0;
   raceSyncMode = mode;
   console.log("[Sync] Race sync mode set to:", mode);
   
@@ -3594,22 +4314,29 @@ function updateRaceSyncMode(mode, skipSave = false) {
   }
 }
 
-// Update race buttons and banner for slave/master/personal/rotorhazard mode
+// Update race buttons and banner for slave/master/personal mode
 function updateSlaveModelUI() {
   const personalBanner = document.getElementById("personalModeRaceBanner");
   const slaveBanner = document.getElementById("slaveModeRaceBanner");
   const masterBanner = document.getElementById("masterModeRaceBanner");
-  const rotorhazardBanner = document.getElementById("rotorhazardModeRaceBanner");
+  const multiBanner = document.getElementById("multiModeRaceBanner");
   const startBtn = document.getElementById("startRaceButton");
   const stopBtn = document.getElementById("stopRaceButton");
   const clearBtn = document.getElementById("clearLapsButton");
   
-  if (raceSyncMode === 2) {
+  if (raceSyncMode === 3) {
+    if (personalBanner) personalBanner.style.display = "none";
+    if (slaveBanner) slaveBanner.style.display = "none";
+    if (masterBanner) masterBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "block";
+    if (startBtn) { startBtn.disabled = false; startBtn.style.opacity = "1"; }
+    if (clearBtn) { clearBtn.disabled = false; clearBtn.style.opacity = "1"; }
+  } else if (raceSyncMode === 2) {
     // Slave mode - disable buttons and show slave banner
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "block";
     if (masterBanner) masterBanner.style.display = "none";
-    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = true;
       startBtn.style.opacity = "0.5";
@@ -3623,7 +4350,7 @@ function updateSlaveModelUI() {
     if (personalBanner) personalBanner.style.display = "none";
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "block";
-    if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
+    if (multiBanner) multiBanner.style.display = "none";
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.style.opacity = "1";
@@ -3633,18 +4360,11 @@ function updateSlaveModelUI() {
       clearBtn.style.opacity = "1";
     }
   } else {
-    // Personal or RotorHazard mode - enable buttons
+    // Personal mode - enable buttons
     if (slaveBanner) slaveBanner.style.display = "none";
     if (masterBanner) masterBanner.style.display = "none";
-    if (rhEnabled === 1) {
-      // RotorHazard mode - show RH banner instead of personal
-      if (personalBanner) personalBanner.style.display = "none";
-      if (rotorhazardBanner) rotorhazardBanner.style.display = "block";
-    } else {
-      // Personal mode
-      if (personalBanner) personalBanner.style.display = "block";
-      if (rotorhazardBanner) rotorhazardBanner.style.display = "none";
-    }
+    if (multiBanner) multiBanner.style.display = "none";
+    if (personalBanner) personalBanner.style.display = "block";
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.style.opacity = "1";
@@ -3707,7 +4427,7 @@ function removeSyncedTimer(hostname) {
 async function testSyncedTimer(hostname) {
   const statusSpan = document.getElementById(`status-${hostname.replace(/\./g, '-')}`);
   if (statusSpan) {
-    statusSpan.textContent = "Testing...";
+    statusSpan.textContent = i18n.t("messages.status_testing");
     statusSpan.style.color = "var(--secondary-color)";
   }
   
@@ -3725,13 +4445,13 @@ async function testSyncedTimer(hostname) {
     if (response.ok) {
       const data = await response.json();
       if (statusSpan) {
-        statusSpan.textContent = `Online (${data.hostname || 'connected'})`;
+        statusSpan.textContent = i18n.t("messages.status_online_host", { host: data.hostname || i18n.t("messages.status_online") });
         statusSpan.style.color = "#2ecc71";
       }
       console.log(`[Sync] Ping OK: ${hostname}`, data);
     } else {
       if (statusSpan) {
-        statusSpan.textContent = "Error: " + response.status;
+        statusSpan.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
         statusSpan.style.color = "#e74c3c";
       }
     }
@@ -3739,9 +4459,9 @@ async function testSyncedTimer(hostname) {
     console.warn(`[Sync] Ping failed for ${hostname}:`, err.message);
     if (statusSpan) {
       if (err.name === 'AbortError') {
-        statusSpan.textContent = "Timeout (5s)";
+        statusSpan.textContent = i18n.t("messages.status_timeout_5s");
       } else {
-        statusSpan.textContent = "Unreachable";
+        statusSpan.textContent = i18n.t("messages.status_unreachable");
       }
       statusSpan.style.color = "#e74c3c";
     }
@@ -3781,7 +4501,7 @@ async function testMasterConnection() {
   statusDiv.style.display = "block";
   statusDiv.style.backgroundColor = "rgba(52, 152, 219, 0.2)";
   statusDiv.style.color = "#3498db";
-  statusDiv.textContent = "Step 1: Testing connection to master...";
+  statusDiv.textContent = i18n.t("messages.sync_step1");
   
   try {
     // Step 1: Test direct connection to master via browser fetch
@@ -3800,7 +4520,7 @@ async function testMasterConnection() {
       console.log("[Slave] Master ping OK:", data);
       
       // Step 2: Test slave-to-master connection via backend
-      statusDiv.textContent = "Step 2: Testing slave firmware -> master...";
+      statusDiv.textContent = i18n.t("messages.sync_step2");
       
       try {
         const backendResponse = await fetch("/timer/testSlaveToMaster", { method: "POST" });
@@ -3809,17 +4529,17 @@ async function testMasterConnection() {
         
         statusDiv.style.backgroundColor = "rgba(46, 204, 113, 0.2)";
         statusDiv.style.color = "#2ecc71";
-        statusDiv.innerHTML = `<div>Browser -> Master: OK (${data.hostname})</div><div>Firmware -> Master: Sent test lap (check master console)</div>`;
+        statusDiv.innerHTML = `<div>${i18n.t("messages.sync_browser_master_ok", { host: data.hostname })}</div><div>${i18n.t("messages.sync_firmware_sent")}</div>`;
       } catch (backendErr) {
         console.warn("[Slave] Backend test failed:", backendErr.message);
         statusDiv.style.backgroundColor = "rgba(241, 196, 15, 0.2)";
         statusDiv.style.color = "#f1c40f";
-        statusDiv.innerHTML = `<div>Browser -> Master: OK</div><div>Firmware -> Master: Error - ${backendErr.message}</div>`;
+        statusDiv.innerHTML = `<div>${i18n.t("messages.sync_browser_master_ok_plain")}</div><div>${i18n.t("messages.sync_firmware_error", { msg: backendErr.message })}</div>`;
       }
     } else {
       statusDiv.style.backgroundColor = "rgba(231, 76, 60, 0.2)";
       statusDiv.style.color = "#e74c3c";
-      statusDiv.textContent = (i18n.t("messages.master_error") || "Error") + ": HTTP " + response.status;
+      statusDiv.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
     }
   } catch (err) {
     console.warn("[Slave] Master ping failed:", err.message);
@@ -3863,8 +4583,9 @@ function initSyncDevicesFromConfig() {
   
   // Add "This Device" first
   let thisDeviceRole = 'personal';
-  if (rhEnabled === 1) {
-    thisDeviceRole = 'rotorhazard';
+  if (c5ReceiverSelected()) {
+    thisDeviceRole = 'multi';
+    raceSyncMode = 3;
   } else if (raceSyncMode === 1) {
     thisDeviceRole = 'master';
   } else if (raceSyncMode === 2) {
@@ -3878,7 +4599,7 @@ function initSyncDevicesFromConfig() {
   });
   
   // Add synced timers (from master config) as slaves
-  if (syncedTimers && syncedTimers.length > 0) {
+  if (!c5ReceiverSelected() && syncedTimers && syncedTimers.length > 0) {
     syncedTimers.forEach(timer => {
       syncDevices.push({
         address: timer,
@@ -3909,18 +4630,14 @@ function mapSyncDevicesToConfig() {
   // Find this device's role
   const thisDevice = syncDevices.find(d => d.isThisDevice);
   if (thisDevice) {
-    if (thisDevice.role === 'rotorhazard') {
-      raceSyncMode = 0;
-      rhEnabled = 1;
+    if (thisDevice.role === 'multi') {
+      raceSyncMode = 3;
     } else if (thisDevice.role === 'master') {
       raceSyncMode = 1;
-      rhEnabled = 0;
     } else if (thisDevice.role === 'slave') {
       raceSyncMode = 2;
-      rhEnabled = 0;
     } else {
       raceSyncMode = 0;
-      rhEnabled = 0;
     }
   }
   
@@ -3961,6 +4678,7 @@ function renderSyncDevicesList() {
     
     // Check if there's already a master (other than this device if it's master)
     const hasMaster = syncDevices.some(d => d.role === 'master');
+    const c5Locked = c5ReceiverSelected() && isThisDevice;
     const canBeMaster = !hasMaster || device.role === 'master';
     
     html += `
@@ -3971,16 +4689,16 @@ function renderSyncDevicesList() {
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
           <select onchange="updateDeviceRole(${index}, this.value)" style="padding: 4px 8px; font-size: 13px; min-width: 110px;">
-            <option value="personal" ${device.role === 'personal' ? 'selected' : ''}>${i18n.t("settings.sync.role_personal") || "Personal"}</option>
-            <option value="master" ${device.role === 'master' ? 'selected' : ''} ${!canBeMaster ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
-            <option value="slave" ${device.role === 'slave' ? 'selected' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
-            ${isThisDevice ? `<option value="rotorhazard" ${device.role === 'rotorhazard' ? 'selected' : ''}>RotorHazard</option>` : ''}
+            <option value="personal" ${device.role === 'personal' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>${i18n.t("settings.sync.role_personal") || "Personal"}</option>
+            <option value="master" ${device.role === 'master' ? 'selected' : ''} ${(!canBeMaster || c5Locked) ? 'disabled' : ''}>${i18n.t("settings.sync.role_master") || "Master"}</option>
+            <option value="slave" ${device.role === 'slave' ? 'selected' : ''} ${c5Locked ? 'disabled' : ''}>${i18n.t("settings.sync.role_slave") || "Slave"}</option>
+            ${isThisDevice ? `<option value="multi" ${device.role === 'multi' ? 'selected' : ''} ${c5Locked ? '' : 'disabled'}>Multi (C5)</option>` : ''}
           </select>
           ${!isThisDevice ? `
-            <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="Test connection">
+            <button onclick="testSyncDevice(${index})" style="padding: 4px 8px; background-color: var(--accent-color); font-size: 12px;" title="${i18n.t("settings.sync.test_connection")}">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             </button>
-            <button onclick="removeSyncDevice(${index})" style="padding: 4px 8px; background-color: #e74c3c; font-size: 12px;" title="Remove device">X</button>
+            <button onclick="removeSyncDevice(${index})" style="padding: 4px 8px; background-color: #e74c3c; font-size: 12px;" title="${i18n.t("settings.sync.remove_device")}">X</button>
           ` : ''}
         </div>
       </div>
@@ -3989,13 +4707,9 @@ function renderSyncDevicesList() {
   
   container.innerHTML = html;
   
-  // Show/hide RH config panel vs add-device panel based on role
   const thisDeviceNode = syncDevices.find(d => d.isThisDevice);
-  const isRHMode = thisDeviceNode && thisDeviceNode.role === 'rotorhazard';
-  const rhPanel = document.getElementById('rhConfigPanel');
   const addPanel = document.getElementById('syncAddDevicePanel');
-  if (rhPanel) rhPanel.style.display = isRHMode ? 'block' : 'none';
-  if (addPanel) addPanel.style.display = isRHMode ? 'none' : 'block';
+  if (addPanel) addPanel.style.display = c5ReceiverSelected() ? 'none' : 'block';
 
   // Update slave mode indicator
   const slaveIndicator = document.getElementById('slaveModeIndicator');
@@ -4006,6 +4720,7 @@ function renderSyncDevicesList() {
 
 // Add a new sync device
 function addSyncDevice() {
+  if (c5ReceiverSelected()) return;
   const input = document.getElementById('addSyncDeviceInput');
   if (!input) return;
   
@@ -4062,6 +4777,7 @@ function updateDeviceRole(index, newRole) {
   if (index < 0 || index >= syncDevices.length) return;
   
   const device = syncDevices[index];
+  if (c5ReceiverSelected() && device.isThisDevice && newRole !== 'multi') newRole = 'multi';
   const oldRole = device.role;
   
   // If setting to master, clear any other master
@@ -4090,7 +4806,7 @@ async function testSyncDevice(index) {
   const statusSpan = document.getElementById(`status-${safeId}`);
   
   if (statusSpan) {
-    statusSpan.textContent = 'Testing...';
+    statusSpan.textContent = i18n.t("messages.status_testing");
     statusSpan.style.color = 'var(--secondary-color)';
   }
   
@@ -4108,13 +4824,13 @@ async function testSyncDevice(index) {
     if (response.ok) {
       const data = await response.json();
       if (statusSpan) {
-        statusSpan.textContent = `Online`;
+        statusSpan.textContent = i18n.t("messages.status_online");
         statusSpan.style.color = '#2ecc71';
       }
       console.log(`[Sync] Ping OK: ${device.address}`, data);
     } else {
       if (statusSpan) {
-        statusSpan.textContent = 'Error: ' + response.status;
+        statusSpan.textContent = i18n.t("messages.status_error", { msg: "HTTP " + response.status });
         statusSpan.style.color = '#e74c3c';
       }
     }
@@ -4122,9 +4838,9 @@ async function testSyncDevice(index) {
     console.warn(`[Sync] Ping failed for ${device.address}:`, err.message);
     if (statusSpan) {
       if (err.name === 'AbortError') {
-        statusSpan.textContent = 'Timeout';
+        statusSpan.textContent = i18n.t("messages.status_timeout");
       } else {
-        statusSpan.textContent = 'Unreachable';
+        statusSpan.textContent = i18n.t("messages.status_unreachable");
       }
       statusSpan.style.color = '#e74c3c';
     }
@@ -4488,7 +5204,7 @@ function renderLapHistory() {
   html += "</div>";
 
   if (validLaps.length > 10) {
-    html += `<p style="text-align: center; margin-top: 16px; color: var(--secondary-color); font-size: 14px;">Showing last 10 of ${validLaps.length} laps</p>`;
+    html += `<p style="text-align: center; margin-top: 16px; color: var(--secondary-color); font-size: 14px;">${i18n.t("analysis.showing_last_10", { n: validLaps.length })}</p>`;
   }
 
   document.getElementById("analysisContent").innerHTML = html;
@@ -4544,49 +5260,47 @@ function createBarItemWithColor(label, time, maxTime, displayTime, colorIndex) {
     </div>
   `;
 }
-function renderFastest3ConsecPanel(stats) {
-  if (!stats || stats.fastest3ConsecValue == null) {
-    return '<p class="no-data">Complete at least 3 laps to see fastest 3 consecutive</p>';
-  }
-  return `
-    <div class="stats-boxes" style="max-width: 420px; margin: 0 auto;">
-      <div class="stat-box">
-        <div class="stat-label">Fastest 3 Consecutive</div>
-        <div class="stat-value">${stats.fastest3ConsecValue.toFixed(2)}s</div>
-        <div class="stat-sublabel">${stats.fastest3ConsecLaps}</div>
-      </div>
-    </div>
-  `;
+function setRaceStatBox(id, seconds, sublabel) {
+  const valueEl = document.getElementById(id);
+  const subEl = document.getElementById(id + "Sub");
+  if (valueEl) valueEl.textContent = seconds == null ? "--" : `${seconds.toFixed(2)}s`;
+  if (subEl) subEl.textContent = seconds == null ? "" : sublabel;
 }
 
-function renderAlwaysOnRaceStats(stats) {
-  const best3El = document.getElementById("raceAlwaysBest3");
-  const medianEl = document.getElementById("raceAlwaysMedian");
-  if (!best3El || !medianEl) return;
-
-  if (!stats) {
-    best3El.textContent = "--";
-    medianEl.textContent = "--";
-    return;
+// The four boxes above the charts. stats: the single-pilot race's, or a C5
+// race leader's. pilots: a C5 race's per-pilot stats (computeC5PilotStats),
+// where fastest lap and fastest 3 consecutive are the best of any pilot.
+function renderAlwaysOnRaceStats(stats, pilots, leaderName) {
+  let fastest = stats ? { s: stats, name: "" } : null;
+  let consec = stats && stats.fastest3ConsecValue != null ? fastest : null;
+  if (pilots) {
+    fastest = consec = null;
+    for (const p of pilots) {
+      if (!fastest || p.stats.fastest < fastest.s.fastest) fastest = { s: p.stats, name: p.name };
+      if (p.stats.fastest3ConsecValue != null && (!consec || p.stats.fastest3ConsecValue < consec.s.fastest3ConsecValue)) {
+        consec = { s: p.stats, name: p.name };
+      }
+    }
   }
-
-  best3El.textContent = stats.best3Value == null ? "--" : `${stats.best3Value.toFixed(2)}s`;
-  medianEl.textContent = `${stats.median.toFixed(2)}s`;
+  const who = (name, detail) => (name ? `${name} \u00b7 ${detail}` : detail);
+  setRaceStatBox("raceAlwaysFastest", fastest && fastest.s.fastest, fastest && who(fastest.name, `Lap ${fastest.s.fastestIndex}`));
+  setRaceStatBox("raceAlwaysFastest3Consec", consec && consec.s.fastest3ConsecValue, consec && who(consec.name, consec.s.fastest3ConsecLaps));
+  setRaceStatBox("raceAlwaysBest3", stats && stats.best3Value, stats && who(leaderName, stats.best3Laps));
+  setRaceStatBox("raceAlwaysMedian", stats && stats.median, leaderName || "");
 }
 
 // ============================================
 // Race Analysis (Multi-Pilot + Personal Tabbed Analytics)
 // ============================================
-const MAX_ENABLED_RACE_ANALYTICS = 3;
-const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsDisplaySettings";
+// A new key: the old one ("raceAnalyticsDisplaySettings") stored Consistency
+// off for anyone who had changed a panel, and it now opens first.
+const RACE_ANALYTICS_STORAGE_KEY = "raceAnalyticsCharts";
 const RACE_ANALYTICS_DEFAULTS = {
-  fastestLap: true,
-  fastest3Consec: true,
+  consistency: true,
   lapTimes: true,
-  consistency: false,
 };
 let raceAnalyticsDisplaySettings = loadRaceAnalyticsDisplaySettings();
-let currentRaceAnalyticsTab = "fastestLap";
+let currentRaceAnalyticsTab = "consistency";
 
 // Pilot color palette for charts
 const pilotColors = [
@@ -4600,10 +5314,8 @@ function loadRaceAnalyticsDisplaySettings() {
     if (!raw) return { ...RACE_ANALYTICS_DEFAULTS };
     const parsed = JSON.parse(raw);
     return {
-      fastestLap: parsed.fastestLap !== false,
-      fastest3Consec: parsed.fastest3Consec !== false,
-      lapTimes: parsed.lapTimes !== false,
       consistency: parsed.consistency !== false,
+      lapTimes: parsed.lapTimes !== false,
     };
   } catch (err) {
     console.warn("[RaceAnalysis] Failed to parse display settings, using defaults:", err);
@@ -4615,28 +5327,18 @@ function saveRaceAnalyticsDisplaySettings() {
   localStorage.setItem(RACE_ANALYTICS_STORAGE_KEY, JSON.stringify(raceAnalyticsDisplaySettings));
 }
 
-function getEnabledRaceAnalyticsCount() {
-  return Object.values(raceAnalyticsDisplaySettings).filter(Boolean).length;
-}
-
 function getEnabledRaceAnalyticsTabs() {
-  const order = ["fastestLap", "fastest3Consec", "lapTimes", "consistency"];
+  const order = ["consistency", "lapTimes"];
   return order.filter((key) => !!raceAnalyticsDisplaySettings[key]);
 }
 
 function getRaceAnalyticsTabLabel(tabKey) {
-  if (tabKey === "fastestLap") return "Fastest Lap";
-  if (tabKey === "fastest3Consec") return "Fastest 3 Consecutive";
-  if (tabKey === "lapTimes") return "Lap Times";
-  if (tabKey === "consistency") return "Consistency";
+  if (tabKey === "lapTimes") return i18n.t("analysis.panel_lap_times");
+  if (tabKey === "consistency") return i18n.t("analysis.panel_consistency");
   return tabKey;
 }
 
 function syncRaceAnalyticsToggleUI() {
-  const fastestLapToggle = document.getElementById("raceAnalyticsToggleFastestLap");
-  if (fastestLapToggle) fastestLapToggle.checked = !!raceAnalyticsDisplaySettings.fastestLap;
-  const fastest3ConsecToggle = document.getElementById("raceAnalyticsToggleFastest3Consec");
-  if (fastest3ConsecToggle) fastest3ConsecToggle.checked = !!raceAnalyticsDisplaySettings.fastest3Consec;
   const lapToggle = document.getElementById("raceAnalyticsToggleLapTimes");
   if (lapToggle) lapToggle.checked = !!raceAnalyticsDisplaySettings.lapTimes;
   const consistencyToggle = document.getElementById("raceAnalyticsToggleConsistency");
@@ -4646,17 +5348,10 @@ function syncRaceAnalyticsToggleUI() {
 function toggleRaceAnalyticsPanel(panelKey, enabled) {
   if (!(panelKey in RACE_ANALYTICS_DEFAULTS)) return;
 
-  const alreadyEnabled = !!raceAnalyticsDisplaySettings[panelKey];
-  if (enabled && !alreadyEnabled && getEnabledRaceAnalyticsCount() >= MAX_ENABLED_RACE_ANALYTICS) {
-    alert(`You can enable up to ${MAX_ENABLED_RACE_ANALYTICS} analytics panels at once.`);
-    syncRaceAnalyticsToggleUI();
-    return;
-  }
-
   raceAnalyticsDisplaySettings[panelKey] = enabled;
   if (!raceAnalyticsDisplaySettings[currentRaceAnalyticsTab]) {
     const fallback = getEnabledRaceAnalyticsTabs()[0];
-    currentRaceAnalyticsTab = fallback || "fastestLap";
+    currentRaceAnalyticsTab = fallback || "consistency";
   }
   saveRaceAnalyticsDisplaySettings();
   syncRaceAnalyticsToggleUI();
@@ -4669,8 +5364,9 @@ function switchRaceAnalyticsTab(tabKey) {
   currentRaceAnalyticsTab = tabKey;
   updateRaceAnalysisView();
 }
-function computeRaceStats() {
-  const validLaps = lapTimes.slice(1);
+// laps: seconds, [0] = Gate 1. The single-pilot race's by default.
+function computeRaceStats(laps = lapTimes) {
+  const validLaps = laps.slice(1);
   if (validLaps.length === 0) {
     return null;
   }
@@ -4719,18 +5415,13 @@ function computeRaceStats() {
   };
 }
 
-function renderFastestLapPanel(stats) {
-  if (!stats) return '<p class="no-data">Complete at least 1 lap to see fastest lap</p>';
-
-  return `
-    <div class="stats-boxes" style="max-width: 360px; margin: 0 auto;">
-      <div class="stat-box">
-        <div class="stat-label">Fastest Lap</div>
-        <div class="stat-value">${stats.fastest.toFixed(2)}s</div>
-        <div class="stat-sublabel">Lap ${stats.fastestIndex}</div>
-      </div>
-    </div>
-  `;
+// A C5 multi-pilot race's stats, one entry per racer with a lap; null
+// otherwise. Its laps are in c5Race, so the global lapTimes stays empty.
+function computeC5PilotStats() {
+  if (!c5MultiRaceView()) return null;
+  return collectAllPilotsData()
+    .map((p) => ({ name: p.name, color: p.color, stats: computeRaceStats(p.lapTimes) }))
+    .filter((p) => p.stats);
 }
 
 function updateRaceAnalysisView() {
@@ -4738,16 +5429,21 @@ function updateRaceAnalysisView() {
   const contentContainer = document.getElementById("raceAnalysisContent");
   const emptyMessage = document.getElementById("raceAnalysisEmptyMessage");
   const enabledTabs = getEnabledRaceAnalyticsTabs();
-  const stats = computeRaceStats();
+  const pilotStats = computeC5PilotStats();
+  // Best 3 and median follow the leader in a C5 race, as its history entry does.
+  const leader = pilotStats && c5Race.active ? c5RaceLeader() : null;
+  const stats = pilotStats ? (leader ? computeRaceStats(leader.laps) : null) : computeRaceStats();
+  // Name the leader only when there is more than one pilot to tell apart.
+  const leaderName = leader && pilotStats.length > 1 ? leader.racer.label : "";
 
-  renderAlwaysOnRaceStats(stats);
+  renderAlwaysOnRaceStats(stats, pilotStats, leaderName);
 
   if (emptyMessage) emptyMessage.style.display = enabledTabs.length > 0 ? "none" : "block";
   if (!tabsContainer || !contentContainer) return;
 
+  contentContainer.style.display = enabledTabs.length ? "" : "none";
   if (enabledTabs.length === 0) {
     tabsContainer.innerHTML = "";
-    contentContainer.innerHTML = '<p class="no-data">Enable an analytics tab to display race analytics</p>';
     return;
   }
 
@@ -4758,14 +5454,6 @@ function updateRaceAnalysisView() {
   tabsContainer.innerHTML = enabledTabs
     .map((tabKey) => `<button class="analysis-tab ${tabKey === currentRaceAnalyticsTab ? "active" : ""}" onclick="switchRaceAnalyticsTab('${tabKey}')">${getRaceAnalyticsTabLabel(tabKey)}</button>`)
     .join("");
-  if (currentRaceAnalyticsTab === "fastestLap") {
-    contentContainer.innerHTML = renderFastestLapPanel(stats);
-    return;
-  }
-  if (currentRaceAnalyticsTab === "fastest3Consec") {
-    contentContainer.innerHTML = renderFastest3ConsecPanel(stats);
-    return;
-  }
 
   const pilots = collectAllPilotsData();
   if (currentRaceAnalyticsTab === "lapTimes") {
@@ -4779,7 +5467,14 @@ function updateRaceAnalysisView() {
 
 function collectAllPilotsData() {
   const pilots = [];
-  
+
+  if (c5MultiRaceView()) {
+    for (const r of c5RaceRacers()) {
+      pilots.push({ name: r.label, color: r.color, lapTimes: (c5Race.laps[r.slot] || []).slice(), isLocal: false });
+    }
+    return pilots;
+  }
+
   // Add local pilot
   const localPilotInfo = getLocalPilotInfo();
   const localColorHex = document.getElementById("pilotColor")?.value || "#0080FF";
@@ -4826,7 +5521,7 @@ function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
   });
   
   if (maxLaps < 1) {
-    container.innerHTML = '<p class="no-data">Complete at least 1 lap to see chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_lap_chart")}</p>`;
     return;
   }
   
@@ -4872,7 +5567,7 @@ function renderLapTimesChart(pilots, containerId = "raceAnalysisContent") {
     const x = padding.left + (chartWidth / maxLaps) * (i - 0.5);
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">L${i}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap</text>`;
+  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap")}</text>`;
   svg += '</g>';
   
   // Draw lines and points for each pilot
@@ -4953,7 +5648,7 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
   }).filter(s => s !== null);
   
   if (pilotStats.length === 0) {
-    container.innerHTML = '<p class="no-data">Complete at least 2 laps to see consistency chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_consistency_chart")}</p>`;
     return;
   }
   
@@ -4994,7 +5689,7 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
     const time = globalMin + ((globalMax - globalMin) / 10) * i;
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">${time.toFixed(1)}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap Time (s)</text>`;
+  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap_time")}</text>`;
   svg += '</g>';
   
   // Draw box plots for each pilot
@@ -5055,26 +5750,16 @@ function renderConsistencyChart(pilots, containerId = "raceAnalysisContent") {
 function updateAnalysisSectionVisibility() {
   const lapAnalysis = document.getElementById("lapAnalysis");
   const raceAnalysis = document.getElementById("raceAnalysis");
-  const anyAnalyticsEnabled =
-    !!raceAnalyticsDisplaySettings.fastestLap ||
-    !!raceAnalyticsDisplaySettings.fastest3Consec ||
-    !!raceAnalyticsDisplaySettings.lapTimes ||
-    !!raceAnalyticsDisplaySettings.consistency;
-
-  if (anyAnalyticsEnabled) {
-    // Show Race Analysis panels selected via toggles in both personal and sync modes.
-    if (lapAnalysis) lapAnalysis.style.display = "none";
-    if (raceAnalysis) raceAnalysis.style.display = "block";
-    updateRaceAnalysisView();
-  } else {
-    // All toggles off => no analytics content shown.
-    if (lapAnalysis) lapAnalysis.style.display = "none";
-    if (raceAnalysis) raceAnalysis.style.display = "none";
-  }
+  // Race Analysis in every mode: its stat boxes always show, and the chart
+  // tabs say how to turn them on when both are off.
+  if (lapAnalysis) lapAnalysis.style.display = "none";
+  if (raceAnalysis) raceAnalysis.style.display = "block";
+  updateRaceAnalysisView();
 }
 
 // Race History Functions
 let raceHistoryData = [];
+let historyLoadGeneration = 0;
 let currentDetailRace = null;
 
 function escapeHtml(input) {
@@ -5088,12 +5773,23 @@ function escapeHtml(input) {
 
 function saveCurrentRace(options = {}) {
   const { setAsCurrentSession = true } = options;
-  if (lapTimes.length === 0) return Promise.resolve(null);
+  if (c5ReceiverSelected() && c5GateManaged) {
+    return waitForC5RaceSave().then((timestamp) => {
+      if (setAsCurrentSession) currentRaceSessionTimestamp = timestamp;
+      return timestamp;
+    });
+  }
+  // A C5 multi-pilot race saves every racer in pilots[]; the legacy
+  // single-pilot fields hold the leader's laps.
+  const c5Multi = c5Race.active && c5HasRaceLaps();
+  const c5Leader = c5Multi ? c5RaceLeader() : null;
+  const baseLaps = c5Multi ? c5Leader.laps : lapTimes;
+  if (baseLaps.length === 0) return Promise.resolve(null);
   if (currentRaceSessionTimestamp && setAsCurrentSession) return Promise.resolve(currentRaceSessionTimestamp);
   if (pendingRaceSavePromise) return pendingRaceSavePromise;
 
   // Calculate stats (excluding Gate 1)
-  const validLaps = lapTimes.slice(1);
+  const validLaps = baseLaps.slice(1);
   const fastest = validLaps.length > 0 ? Math.min(...validLaps) : 0;
   const sorted = [...validLaps].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -5111,27 +5807,27 @@ function saveCurrentRace(options = {}) {
   const channelValue = parseInt(channelSelect.options[channelSelect.selectedIndex].value);
   const notes = raceNotesInput ? raceNotesInput.value.trim() : "";
 
-  // Calculate total race distance: track length per lap × number of laps
+  // Calculate total race distance: track length per lap Ã— number of laps
   let totalRaceDistance = 0;
   console.log(`DEBUG: trackLapLength=${trackLapLength}, currentTrackId=${currentTrackId}, currentTrackName='${currentTrackName}'`);
-  if (trackLapLength > 0 && lapTimes.length > 0) {
-    totalRaceDistance = trackLapLength * lapTimes.length;
-    console.log(`Saving race: trackLapLength=${trackLapLength}m, lapCount=${lapTimes.length}, totalDistance=${totalRaceDistance}m`);
+  if (trackLapLength > 0 && baseLaps.length > 0) {
+    totalRaceDistance = trackLapLength * baseLaps.length;
+    console.log(`Saving race: trackLapLength=${trackLapLength}m, lapCount=${baseLaps.length}, totalDistance=${totalRaceDistance}m`);
   } else {
-    console.warn(`WARNING: No track distance to save! trackLapLength=${trackLapLength}, lapCount=${lapTimes.length}`);
+    console.warn(`WARNING: No track distance to save! trackLapLength=${trackLapLength}, lapCount=${baseLaps.length}`);
     console.warn(`Did you select a track before starting the race? currentTrackId=${currentTrackId}`);
   }
 
   const raceTimestamp = Math.floor(Date.now() / 1000);
   const raceData = {
     timestamp: raceTimestamp,
-    lapTimes: lapTimes.map((t) => Math.round(t * 1000)), // Convert to milliseconds
+    lapTimes: baseLaps.map((t) => Math.round(t * 1000)), // Convert to milliseconds
     fastestLap: Math.round(fastest * 1000),
     medianLap: Math.round(median * 1000),
     best3LapsTotal: Math.round(best3Total * 1000),
-    pilotName: pilotNameInput.value || "",
-    pilotCallsign: pilotCallsign,
-    frequency: frequency,
+    pilotName: c5Multi ? c5Leader.racer.label : (pilotNameInput.value || ""),
+    pilotCallsign: c5Multi ? "" : pilotCallsign,
+    frequency: c5Multi ? c5Leader.racer.freq : frequency,
     band: bandValue,
     channel: channelValue,
     notes: notes,
@@ -5139,10 +5835,32 @@ function saveCurrentRace(options = {}) {
     trackName: currentTrackName || "",
     totalDistance: totalRaceDistance,
     syncMode: raceSyncMode,
+    minLapMs: Math.round(Number(minLapInput.value) * 1000),
   };
   
+  if (c5Multi) {
+    raceData.pilots = c5Race.racers.map((r) => {
+      const laps = c5Race.laps[r.slot] || [];
+      const valid = laps.slice(1);
+      return {
+        name: r.label,
+        slot: r.slot,
+        frequency: r.freq,
+        enter: getC5ProfilesForSave()[r.slot].enterRssi,
+        exit: getC5ProfilesForSave()[r.slot].exitRssi,
+        callsign: r.spoken,
+        color: c5ColorInt(r.color),
+        lapTimes: laps.map((t) => Math.round(t * 1000)),
+        fastestLap: Math.round((valid.length ? Math.min(...valid) : 0) * 1000),
+        isLocal: false,
+      };
+    });
+    console.log(`[Race] Saving C5 multi-pilot race with ${raceData.pilots.length} pilots`);
+    // Race director: named after the loaded heat and round (event.js).
+    if (typeof RaceEvent !== "undefined") Object.assign(raceData, RaceEvent.raceLabel(c5Race.racers));
+  }
   // Build pilots array for multi-pilot races (sync mode active)
-  if (raceSyncMode === 1 || raceSyncMode === 2) {
+  else if (raceSyncMode === 1 || raceSyncMode === 2) {
     const pilots = [];
     
     // Add local pilot
@@ -5200,6 +5918,7 @@ function saveCurrentRace(options = {}) {
       if (setAsCurrentSession) {
         currentRaceSessionTimestamp = raceTimestamp;
       }
+      if (c5Multi && typeof RaceEvent !== "undefined") RaceEvent.recordRace(raceData);
       loadRaceHistory();
       return raceTimestamp;
     })
@@ -5214,36 +5933,49 @@ function saveCurrentRace(options = {}) {
   return pendingRaceSavePromise;
 }
 
-function loadRaceHistory(onLoaded) {
-  return fetch("/races")
-    .then((response) => response.json())
-    .then((data) => {
-      raceHistoryData = data.races || [];
-      renderRaceHistory();
-      if (typeof onLoaded === "function") onLoaded(raceHistoryData);
-      return raceHistoryData;
-    })
-    .catch((error) => {
-      console.error("Error loading races:", error);
-      return null;
-    });
+async function loadRaceHistory(onLoaded) {
+  const generation = ++historyLoadGeneration;
+  const status = document.getElementById("historyFilterStatus");
+  if (status) status.textContent = i18n.t("history.loading");
+  try {
+    const races = [], seen = new Set();
+    let before = 0;
+    while (true) {
+      const response = await fetch("/races?page=1" + (before ? "&before=" + before : ""));
+      if (!response.ok) throw new Error(`History request failed: HTTP ${response.status}`);
+      const page = await response.json();
+      if (generation !== historyLoadGeneration) return null;
+      if (!Array.isArray(page.races)) throw new Error("Invalid history response");
+      for (const race of page.races) if (!seen.has(race.timestamp)) { seen.add(race.timestamp); races.push(race); }
+      if (!page.hasMore) break;
+      const next = Number(page.nextBefore);
+      if (!Number.isInteger(next) || next <= 0 || before && next >= before) throw new Error("Invalid history cursor");
+      before = next;
+    }
+    raceHistoryData = races;
+    renderRaceHistory();
+    if (typeof onLoaded === "function") onLoaded(raceHistoryData);
+    return raceHistoryData;
+  } catch (error) {
+    console.error("Error loading races:", error);
+    if (status && generation === historyLoadGeneration) status.textContent = i18n.t("history.load_error");
+    return null;
+  }
 }
 
 function renderRaceHistory() {
   const listContainer = document.getElementById("raceHistoryList");
 
-  if (raceHistoryData.length === 0) {
-    listContainer.innerHTML = `<p class="no-data">${i18n.t("history.no_data")}</p>`;
-    return;
-  }
-
-  let html = "";
-  raceHistoryData.forEach((race, index) => {
+  const visible = filterHistoryRows(raceHistoryData, readHistoryFilters());
+  const status = document.getElementById("historyFilterStatus");
+  if (status) status.textContent = i18n.t("history.matching", { n: visible.length, total: raceHistoryData.length });
+  let html = visible.length ? "" : `<p class="no-data">${i18n.t(raceHistoryData.length ? "history.no_matches" : "history.no_data")}</p>`;
+  visible.forEach(({race, index}) => {
     const date = new Date(race.timestamp * 1000);
     const dateStr = date.toLocaleDateString() + " " + date.toLocaleTimeString();
     const fastestLap = (race.fastestLap / 1000).toFixed(2);
     // Lap count should exclude Gate 1 (first entry)
-    const actualLapCount = race.lapTimes.length > 0 ? race.lapTimes.length - 1 : 0;
+    const actualLapCount = historyRaceLaps(race);
     // Calculate total race time (sum of all times)
     const totalTime = race.lapTimes.reduce((sum, t) => sum + t, 0) / 1000;
     const name = race.name || "";
@@ -5258,13 +5990,13 @@ function renderRaceHistory() {
     // Multi-pilot race detection
     const isMultiPilot = race.pilots && race.pilots.length > 1;
     const pilotCount = race.pilots ? race.pilots.length : 1;
-    const syncModeLabel = race.syncMode === 1 ? "MASTER" : race.syncMode === 2 ? "SLAVE" : "";
+    const syncModeLabel = race.syncMode === 3 ? "MULTI" : race.syncMode === 1 ? "MASTER" : race.syncMode === 2 ? "SLAVE" : "";
     
     // Build pilots display for multi-pilot races
     let pilotsDisplay = "";
     if (isMultiPilot) {
-      const pilotNames = race.pilots.map(p => p.name || p.callsign || "Unknown").join(", ");
-      pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;"><strong>${pilotCount} Pilots:</strong> ${pilotNames}</div>`;
+      const pilotNames = race.pilots.map(p => p.name || p.callsign || i18n.t("history.unknown_pilot")).join(", ");
+      pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;"><strong>${i18n.t("history.pilot_count", { n: pilotCount })}</strong> ${pilotNames}</div>`;
     } else if (pilotCallsign) {
       pilotsDisplay = `<div style="font-size: 14px; color: var(--secondary-color); margin-top: 4px;">${i18n.t("history.item_pilot", { n: pilotCallsign })}</div>`;
     }
@@ -5280,8 +6012,9 @@ function renderRaceHistory() {
           <div>
             ${tag ? '<span class="race-tag">' + tag + "</span>" : ""}
             ${syncModeLabel ? '<span class="race-tag" style="background-color: var(--primary-color); margin-left: 4px;">' + syncModeLabel + "</span>" : ""}
-            ${isMultiPilot ? '<span class="race-tag" style="background-color: var(--accent-color); margin-left: 4px;">' + pilotCount + ' PILOTS</span>' : ""}
+            ${isMultiPilot ? '<span class="race-tag" style="background-color: var(--accent-color); margin-left: 4px;">' + i18n.t("history.pilot_count_badge", { n: pilotCount }) + '</span>' : ""}
             <div class="race-date">${dateStr}</div>
+            ${race.importedAt ? `<div class="race-import-date">${i18n.t("history.imported_on", { date: new Date(race.importedAt * 1000).toLocaleString() })}</div>` : ""}
             ${name ? '<div class="race-name">' + name + "</div>" : ""}
             ${pilotsDisplay}
             ${freqDisplay ? '<div style="font-size: 14px; color: var(--secondary-color);">' + i18n.t("history.item_channel", { n: freqDisplay }) + "</div>" : ""}
@@ -5328,7 +6061,7 @@ function renderRaceHistory() {
       // Its race is gone, or nothing was open. Park it at the end, hidden.
       existingRaceDetails.style.display = "none";
       listContainer.appendChild(existingRaceDetails);
-      if (wasOpen) currentDetailRace = null;
+      if (wasOpen) closeRaceDetails();
     }
   }
   
@@ -5524,7 +6257,7 @@ function renderRaceTimeline(race) {
       // Regular laps
       events.push({
         type: "lap",
-        label: `Lap ${index}`,
+        label: i18n.t("race.lap_counter", { n: index }),
         time: cumulativeTime,
         percentage: percentage,
       });
@@ -5820,9 +6553,9 @@ function updateRaceDetailTabs() {
   
   if (isMultiPilot) {
     tabsContainer.innerHTML = `
-      <button class="analysis-tab active" onclick="switchDetailMode('history')">Lap Table</button>
-      <button class="analysis-tab" onclick="switchDetailMode('lapTimesChart')">Lap Times</button>
-      <button class="analysis-tab" onclick="switchDetailMode('consistencyChart')">Consistency</button>
+      <button class="analysis-tab active" onclick="switchDetailMode('history')">${i18n.t("analysis.lap_table")}</button>
+      <button class="analysis-tab" onclick="switchDetailMode('lapTimesChart')">${i18n.t("analysis.panel_lap_times")}</button>
+      <button class="analysis-tab" onclick="switchDetailMode('consistencyChart')">${i18n.t("analysis.panel_consistency")}</button>
     `;
   } else {
     tabsContainer.innerHTML = `
@@ -5842,7 +6575,7 @@ function renderHistoryLapTimesChart() {
   
   // Convert pilots data for chart rendering
   const pilots = currentDetailRace.pilots.map((pilot, idx) => ({
-    name: pilot.name || pilot.callsign || 'Unknown',
+    name: pilot.name || pilot.callsign || i18n.t("history.unknown_pilot"),
     color: '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0'),
     lapTimes: (pilot.lapTimes || []).map(t => t / 1000), // Convert ms to seconds
     isLocal: pilot.isLocal || false
@@ -5863,7 +6596,7 @@ function renderHistoryLapTimesChart() {
   });
   
   if (maxLaps < 1) {
-    container.innerHTML = '<p class="no-data">Not enough laps to display chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.not_enough_chart")}</p>`;
     return;
   }
   
@@ -5909,7 +6642,7 @@ function renderHistoryLapTimesChart() {
     const x = padding.left + (chartWidth / maxLaps) * (i - 0.5);
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">L${i}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap</text>`;
+  svg += `<text x="${width / 2}" y="${height - 5}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap")}</text>`;
   svg += '</g>';
   
   // Draw lines and points for each pilot
@@ -5979,7 +6712,7 @@ function renderHistoryConsistencyChart() {
   
   // Convert pilots data
   const pilots = currentDetailRace.pilots.map((pilot, idx) => ({
-    name: pilot.name || pilot.callsign || 'Unknown',
+    name: pilot.name || pilot.callsign || i18n.t("history.unknown_pilot"),
     color: '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0'),
     lapTimes: (pilot.lapTimes || []).map(t => t / 1000),
     isLocal: pilot.isLocal || false
@@ -6015,7 +6748,7 @@ function renderHistoryConsistencyChart() {
   }).filter(s => s !== null);
   
   if (pilotStats.length === 0) {
-    container.innerHTML = '<p class="no-data">Complete at least 2 laps to see consistency chart</p>';
+    container.innerHTML = `<p class="no-data">${i18n.t("analysis.no_consistency_chart")}</p>`;
     return;
   }
   
@@ -6056,7 +6789,7 @@ function renderHistoryConsistencyChart() {
     const time = globalMin + ((globalMax - globalMin) / 10) * i;
     svg += `<text x="${x}" y="${height - padding.bottom + 20}" text-anchor="middle">${time.toFixed(1)}</text>`;
   }
-  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">Lap Time (s)</text>`;
+  svg += `<text x="${width / 2}" y="${height - 10}" text-anchor="middle" font-size="12" fill="var(--secondary-color)">${i18n.t("analysis.axis_lap_time")}</text>`;
   svg += '</g>';
   
   // Draw box plots for each pilot
@@ -6159,7 +6892,7 @@ function renderMultiPilotDetailHistory() {
   for (const pilot of pilots) {
     const colorHex = '#' + (pilot.color || 0x0080FF).toString(16).padStart(6, '0');
     const localBadge = pilot.isLocal ? ' *' : '';
-    html += `<th style="background-color: ${colorHex}; color: white;">${pilot.name || pilot.callsign || 'Unknown'}${localBadge}</th>`;
+    html += `<th style="background-color: ${colorHex}; color: white;">${pilot.name || pilot.callsign || i18n.t("history.unknown_pilot")}${localBadge}</th>`;
   }
   html += '</tr></thead><tbody>';
   
@@ -6194,9 +6927,9 @@ function renderMultiPilotDetailHistory() {
     const totalTime = pilot.lapTimes ? (pilot.lapTimes.reduce((a, b) => a + b, 0) / 1000).toFixed(2) : '-';
     html += `
       <div style="padding: 12px; background-color: var(--bg-secondary); border-radius: 8px; border-left: 4px solid ${colorHex}; min-width: 150px;">
-        <div style="font-weight: bold; margin-bottom: 8px;">${pilot.name || 'Unknown'}${pilot.isLocal ? ' *' : ''}</div>
-        <div style="font-size: 13px; color: var(--secondary-color);">Fastest: <strong style="color: var(--primary-color);">${fastest}s</strong></div>
-        <div style="font-size: 13px; color: var(--secondary-color);">Total: <strong>${totalTime}s</strong></div>
+        <div style="font-weight: bold; margin-bottom: 8px;">${pilot.name || i18n.t("history.unknown_pilot")}${pilot.isLocal ? ' *' : ''}</div>
+        <div style="font-size: 13px; color: var(--secondary-color);">${i18n.t("history.fastest_label")} <strong style="color: var(--primary-color);">${fastest}s</strong></div>
+        <div style="font-size: 13px; color: var(--secondary-color);">${i18n.t("history.total_label")} <strong>${totalTime}s</strong></div>
       </div>
     `;
   }
@@ -6244,8 +6977,18 @@ function renderDetailFastestRound() {
   document.getElementById("detailContent").innerHTML = html;
 }
 
-function downloadRaces() {
-  window.open("/races/download", "_blank");
+async function downloadRaces() {
+  const races = await loadRaceHistory();
+  if (!races) return;
+  // Assemble the full backup in the browser, keeping every gate response bounded.
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ races })], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "races.json";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function downloadSingleRace(timestamp) {
@@ -6254,38 +6997,50 @@ function downloadSingleRace(timestamp) {
 
 function importRaces(input) {
   const file = input.files[0];
-  if (!file) return;
-
+  if (!file || input.disabled) return;
+  input.disabled = true;
   const reader = new FileReader();
-  reader.onload = function (e) {
+  reader.onload = async function (e) {
+    let validFile = false;
+    let imported = 0;
     try {
       const json = JSON.parse(e.target.result);
-
-      fetch("/races/upload", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(json),
-      })
-        .then((response) => response.json())
-        .then((data) => {
-          console.log("Races imported:", data);
-          loadRaceHistory();
-          alert(i18n.t("messages.race_import_success"));
-        })
-        .catch((error) => {
-          console.error("Error importing races:", error);
-          alert(i18n.t("messages.race_import_error"));
+      if (!json || !Array.isArray(json.races) || json.races.some(race =>
+        !race || !Number.isInteger(race.timestamp) || race.timestamp <= 0 || race.timestamp > 0xffffffff)) {
+        throw new Error("Expected a race backup containing timestamped races");
+      }
+      validFile = true;
+      // Keep a large backup from becoming one oversized request. Preserve each
+      // complete race (including every pilot) and stop at the first failure.
+      const importedAt = Math.floor(Date.now() / 1000);
+      for (const race of json.races) {
+        const response = await fetch("/races/upload", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ races: [race], importedAt }),
         });
+        if (!response.ok) throw new Error(`Race import rejected: HTTP ${response.status}`);
+        const result = await response.json();
+        if (result.status !== "OK") throw new Error("The gate could not import the race");
+        imported++;
+      }
+      alert(i18n.t("messages.race_import_success"));
     } catch (error) {
-      console.error("Error parsing JSON:", error);
-      alert(i18n.t("messages.race_invalid_json"));
+      console.error("Error importing races:", error);
+      alert(i18n.t(validFile ? "messages.race_import_error" : "messages.race_invalid_json"));
+    } finally {
+      // A partial import is visible even when a later race was refused.
+      if (imported) loadRaceHistory();
+      input.disabled = false;
+      input.value = "";
     }
   };
+  reader.onerror = function () {
+    alert(i18n.t("messages.race_import_error"));
+    input.disabled = false;
+    input.value = "";
+  };
   reader.readAsText(file);
-  input.value = ""; // Reset file input
 }
 
 function deleteRace(timestamp) {
@@ -6314,6 +7069,83 @@ function deleteRace(timestamp) {
 
 // ---- Visual Marshal (RH-style RSSI history) ----
 let marshalState = null;
+
+function marshalStorePilot() {
+  if (!marshalState || !marshalState.pilots.length) return true;
+  let laps;
+  if (marshalState.hasHistory) laps = absPassesToSegments(marshalState.absPasses);
+  else {
+    const rows = readLapEditInputs();
+    rows.forEach(row => row.input.classList.toggle("is-invalid", !row.valid));
+    if (rows.some(row => !row.valid)) return false;
+    laps = rows.map(row => row.ms);
+  }
+  const p = marshalState.pilots[marshalState.pilotIndex];
+  p.lapTimes = laps;
+  p.enter = marshalState.enter;
+  p.exit = marshalState.exit;
+  return true;
+}
+
+function marshalSwitchPilot(index, initial = false) {
+  const s = marshalState;
+  if (!s || !s.pilots[index]) return;
+  if (!initial && !marshalStorePilot()) return;
+  s.pilotIndex = index;
+  const p = s.pilots[index];
+  s.absPasses = segmentsToAbsPasses(p.lapTimes || []);
+  s.editLaps = (p.lapTimes || []).slice();
+  s.enter = p.enter ?? 120;
+  s.exit = p.exit ?? 100;
+  s.selected = [];
+  s.drag = null;
+  s.samples = s.channels ? (s.channels[p.slot] || []) : (p.isLocal ? s.legacySamples || [] : []);
+  s.hasHistory = s.samples.length > 0;
+  setMarshalGraphVisible(s.hasHistory);
+  for (const key of ["Enter", "Exit"]) {
+    document.getElementById("marshal" + key).value = s[key.toLowerCase()];
+    document.getElementById("marshal" + key + "Span").textContent = s[key.toLowerCase()];
+  }
+  renderMarshalLapsList();
+  if (!s.hasHistory) renderLapEditList();
+  else { s.viewSpanMs = marshalRaceDurationMs(); drawMarshalChart(); }
+}
+
+// The pilot rows above the graph. The selected pilot's laps come from the
+// live edit (absPasses), the others from what was stored when leaving them.
+function renderMarshalPilotList() {
+  const s = marshalState, host = document.getElementById("marshalPilotList");
+  if (!s || !host) return;
+  host.innerHTML = s.pilots.map((p, i) => {
+    const laps = i === s.pilotIndex && s.hasHistory ? absPassesToSegments(s.absPasses) : (p.lapTimes || []);
+    const valid = laps.slice(1).filter(t => t > 0);
+    const best = valid.length ? (Math.min(...valid) / 1000).toFixed(2) + "s" : "--";
+    const color = "#" + ((Number(p.color) || 0) >>> 0 & 0xffffff).toString(16).padStart(6, "0");
+    const channel = p.frequency && typeof C5UI !== "undefined" ? C5UI.channelName(p.frequency) : (p.slot >= 0 ? `S${p.slot + 1}` : "");
+    const hidden = s.hiddenSlots && s.hiddenSlots.has(p.slot);
+    return `<div class="marshal-pilot${i === s.pilotIndex ? " selected" : ""}${hidden ? " c5p-hidden" : ""}" style="--c:${color}"
+        onclick="marshalSwitchPilot(${i})" title="Edit ${escapeHtml(p.name || `Pilot ${i + 1}`)}'s laps">
+      <button type="button" class="c5p-eye" onclick="event.stopPropagation(); marshalToggleTrace(${p.slot})" title="Show or hide this trace"></button>
+      <b class="marshal-pilot-ch">${channel}</b>
+      <span class="marshal-pilot-name">${escapeHtml(p.name || `Pilot ${i + 1}`)}</span>
+      <span class="marshal-pilot-stats">${valid.length} lap${valid.length === 1 ? "" : "s"} \u00b7 ${best}</span>
+    </div>`;
+  }).join("");
+}
+
+function marshalToggleTrace(slot) {
+  const s = marshalState;
+  if (!s) return;
+  s.hiddenSlots = s.hiddenSlots || new Set();
+  if (s.hiddenSlots.has(slot)) s.hiddenSlots.delete(slot);
+  else s.hiddenSlots.add(slot);
+  renderMarshalPilotList();
+  drawMarshalChart();
+}
+
+function marshalTimeAt(index) {
+  return marshalState.times ? marshalState.times[index] : index * marshalState.intervalMs;
+}
 
 function segmentsToAbsPasses(lapTimes) {
   const abs = [];
@@ -6361,7 +7193,7 @@ function marshalPrimarySelected() {
 function marshalRaceDurationMs() {
   if (!marshalState) return 1;
   const n = marshalState.samples.length || 1;
-  return Math.max(1, (n - 1) * (marshalState.intervalMs || 20));
+  return Math.max(1, marshalTimeAt(n - 1) || 0, ...marshalState.absPasses);
 }
 
 function marshalClampView() {
@@ -6391,6 +7223,7 @@ function marshalXToMs(x, chart) {
 }
 
 function marshalSampleIndexAtMs(ms) {
+  if (marshalState.times) return nearestTraceSample(marshalState.times, ms);
   const n = marshalState.samples.length || 1;
   const idx = Math.round(ms / Math.max(1, marshalState.intervalMs || 20));
   return Math.max(0, Math.min(n - 1, idx));
@@ -6467,8 +7300,9 @@ function renderLapEditList() {
       return `
       <div class="marshal-lap-edit-row${i === 0 ? " is-gate" : ""}">
         <span class="marshal-lap-edit-label">${label}</span>
-        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} time in seconds" />
+        <input type="number" step="0.001" min="0" value="${(ms / 1000).toFixed(3)}" data-lap-index="${i}" aria-label="${label} ${i18n.t("history.marshal_time_aria")}" />
         <span>s</span>
+        ${marshalState.editLaps.length > 1 ? `<button type="button" class="marshal-btn" onclick="mergeLapInEditor(${i})" title="${i18n.t(i === marshalState.editLaps.length - 1 ? "history.edit_lap_merge_previous" : "history.edit_lap_merge_next")}">${i18n.t("history.edit_lap_merge")}</button>` : ""}
         <button type="button" class="marshal-btn marshal-btn-danger" onclick="deleteLapFromEditor(${i})" title="${i18n.t("history.delete")}">&times;</button>
       </div>`;
     })
@@ -6507,7 +7341,7 @@ function addLapToEditor() {
 
 function deleteLapFromEditor(index) {
   if (!marshalState) return;
-  if (marshalState.editLaps.length <= 1) {
+  if (marshalState.editLaps.length <= 1 && !marshalState.pilots.length) {
     alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
@@ -6515,6 +7349,30 @@ function deleteLapFromEditor(index) {
   syncLapEditState();
   marshalState.editLaps.splice(index, 1);
   renderLapEditList();
+}
+
+// A false or double pass splits one lap in two. Merging adds this lap's time
+// to its neighbour (the next lap, or the previous one for the last row), so
+// the race's total time is unchanged. Deleting drops the time instead.
+function mergeLapInEditor(index) {
+  if (!marshalState) return;
+  syncLapEditState();
+  const laps = marshalState.editLaps;
+  if (laps.length < 2 || index < 0 || index >= laps.length) return;
+  if (!confirm(i18n.t("history.edit_lap_merge_confirm"))) return;
+  const into = index < laps.length - 1 ? index + 1 : index - 1;
+  laps[into] += laps[index];
+  laps.splice(index, 1);
+  renderLapEditList();
+}
+
+// One line on the collapsed Race Details bar: name \u00b7 tag \u00b7 distance.
+function updateMarshalDetailsSummary() {
+  const name = document.getElementById("raceName").value.trim();
+  const tag = document.getElementById("raceTag").value.trim();
+  const distance = parseFloat(document.getElementById("raceDistance").value);
+  document.getElementById("marshalDetailsSummary").textContent =
+    [name, tag, distance > 0 ? `${distance} m` : ""].filter(Boolean).join(" \u00b7 ");
 }
 
 function openRaceEditor(index) {
@@ -6525,6 +7383,8 @@ function openRaceEditor(index) {
   marshalState = {
     index,
     race,
+    pilots: (race.pilots || []).map(p => ({ ...p, lapTimes: (p.lapTimes || []).slice() })),
+    pilotIndex: 0,
     hasHistory,
     // A copy, so closing without saving leaves raceHistoryData untouched.
     editLaps: (race.lapTimes || []).slice(),
@@ -6542,10 +7402,17 @@ function openRaceEditor(index) {
     suppressClick: false,
   };
 
+  const details = document.getElementById("marshalDetails");
+  details.open = false;
+  details.oninput = updateMarshalDetailsSummary;
   document.getElementById("raceName").value = race.name || "";
+  const pilotControls = document.getElementById("marshalPilotControls");
+  pilotControls.style.display = marshalState.pilots.length ? "flex" : "none";
+  marshalState.hiddenSlots = new Set();
   document.getElementById("raceTag").value = race.tag || "";
   document.getElementById("raceDistance").value = race.totalDistance || 0;
   document.getElementById("raceEditNotes").value = race.notes || "";
+  updateMarshalDetailsSummary();
 
   setMarshalGraphVisible(hasHistory);
   if (!hasHistory) renderLapEditList();
@@ -6561,28 +7428,41 @@ function openRaceEditor(index) {
   applyMarshalGuidePreference();
   renderMarshalLapsList();
   bindMarshalCanvasHandlers();
+  if (marshalState.pilots.length) marshalSwitchPilot(0, true);
 
   if (!hasHistory) {
     return;
   }
 
+  const loadingState = marshalState;
   fetch("/api/marshal/rssi?timestamp=" + race.timestamp)
     .then((r) => {
       if (!r.ok) throw new Error("no history HTTP " + r.status);
-      return r.json();
+      return (r.headers.get("Content-Type") || "").includes("application/octet-stream")
+        ? r.arrayBuffer().then(decodeRaceTrace) : r.json();
     })
     .then((data) => {
-      if (!data || !Array.isArray(data.samples)) {
+      if (marshalState !== loadingState) return;
+      if (!data || (!Array.isArray(data.samples) && !data.channels)) {
         console.error("[Marshal] Unexpected RSSI payload:", data);
         throw new Error("invalid rssi payload");
       }
-      marshalState.samples = data.samples;
+      marshalState.channels = data.channels;
+      marshalState.times = data.times;
+      marshalState.legacySamples = data.samples;
+      marshalState.samples = data.samples || data.channels[0];
+      if (marshalState.pilots.length) {
+        marshalStorePilot();
+        marshalSwitchPilot(marshalState.pilotIndex, true);
+      }
+      marshalState.hasHistory = marshalState.samples.length > 0;
+      setMarshalGraphVisible(marshalState.hasHistory);
       marshalState.intervalMs = data.intervalMs || 20;
       marshalState.truncated = !!data.truncated;
       marshalState.viewStartMs = 0;
       marshalState.viewSpanMs = marshalRaceDurationMs();
       marshalClampView();
-      const dur = ((marshalState.samples.length * marshalState.intervalMs) / 1000).toFixed(1);
+      const dur = (marshalRaceDurationMs() / 1000).toFixed(1);
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_meta", {
         count: marshalState.samples.length,
         interval: marshalState.intervalMs,
@@ -6592,6 +7472,10 @@ function openRaceEditor(index) {
       drawMarshalChart();
     })
     .catch((err) => {
+      if (marshalState !== loadingState) return;
+      marshalState.hasHistory = false;
+      setMarshalGraphVisible(false);
+      renderLapEditList();
       console.error("[Marshal] failed to load RSSI:", err);
       document.getElementById("marshalMeta").textContent = i18n.t("history.marshal_no_history");
       drawMarshalChart();
@@ -6612,7 +7496,7 @@ function updateMarshalThresholds() {
   marshalState.enter = parseInt(document.getElementById("marshalEnter").value, 10);
   marshalState.exit = parseInt(document.getElementById("marshalExit").value, 10);
   if (marshalState.exit >= marshalState.enter) {
-    marshalState.exit = Math.max(50, marshalState.enter - 1);
+    marshalState.exit = Math.max(0, marshalState.enter - 1);
     document.getElementById("marshalExit").value = marshalState.exit;
   }
   document.getElementById("marshalEnterSpan").textContent = marshalState.enter;
@@ -6679,6 +7563,7 @@ function updateMarshalSelectionUI() {
 
 function renderMarshalLapsList() {
   if (!marshalState) return;
+  renderMarshalPilotList();   // its lap count and best follow every edit
   marshalNormalizeSelection();
   const segs = absPassesToSegments(marshalState.absPasses);
   const box = document.getElementById("marshalLapsList");
@@ -6726,7 +7611,7 @@ function marshalDeleteSelected() {
   if (!marshalState) return;
   marshalNormalizeSelection();
   if (!marshalState.selected.length) return;
-  if (marshalState.absPasses.length - marshalState.selected.length < 1) {
+  if (marshalState.absPasses.length - marshalState.selected.length < 1 && !marshalState.pilots.length) {
     alert(i18n.t("history.edit_lap_last_error"));
     return;
   }
@@ -6850,7 +7735,7 @@ function onMarshalPointerMove(ev) {
         peakIdx = i;
       }
     }
-    marshalState.absPasses[marshalState.drag.markerIndex] = peakIdx * marshalState.intervalMs;
+    marshalState.absPasses[marshalState.drag.markerIndex] = Math.max(1, marshalTimeAt(peakIdx));
     // Keep order stable while dragging one marker: resort and remap selection/drag index
     const oldSelectedTimes = marshalState.selected.map((i) => marshalState.absPasses[i]);
     const dragTime = marshalState.absPasses[marshalState.drag.markerIndex];
@@ -6932,7 +7817,7 @@ function handleMarshalClickAtX(x, multi) {
         peakIdx = i;
       }
     }
-    const newMs = peakIdx * marshalState.intervalMs;
+    const newMs = Math.max(1, marshalTimeAt(peakIdx));
     marshalState.absPasses.push(newMs);
     marshalState.absPasses.sort((a, b) => a - b);
     marshalState.selected = [marshalState.absPasses.indexOf(newMs)];
@@ -6960,6 +7845,7 @@ function drawMarshalChart() {
   const samples = marshalState.samples;
   const n = samples.length;
   if (!n) {
+    marshalState._chart = null;
     ctx.fillStyle = "#ffffff";
     ctx.font = "bold 16px sans-serif";
     ctx.fillText(i18n.t("history.marshal_no_samples"), padL, h / 2);
@@ -6970,8 +7856,8 @@ function drawMarshalChart() {
   const viewStart = marshalState.viewStartMs || 0;
   const viewSpan = marshalState.viewSpanMs || marshalRaceDurationMs();
   const viewEnd = viewStart + viewSpan;
-  const i0 = Math.max(0, Math.floor(viewStart / marshalState.intervalMs) - 1);
-  const i1 = Math.min(n - 1, Math.ceil(viewEnd / marshalState.intervalMs) + 1);
+  const i0 = Math.max(0, marshalSampleIndexAtMs(viewStart) - 1);
+  const i1 = Math.min(n - 1, marshalSampleIndexAtMs(viewEnd) + 1);
 
   let minV = 255, maxV = 0;
   for (let i = i0; i <= i1; i++) {
@@ -6981,6 +7867,7 @@ function drawMarshalChart() {
   minV = Math.max(0, Math.min(minV, marshalState.exit - 10));
   maxV = Math.min(255, Math.max(maxV, marshalState.enter + 10));
   if (maxV <= minV) maxV = minV + 1;
+  if (marshalState.channels) { minV = 0; maxV = 255; }
 
   const chart = { padL, padR, padT, padB, plotW, plotH, n, minV, maxV };
   const xAtMs = (ms) => marshalMsToX(ms, chart);
@@ -7016,17 +7903,37 @@ function drawMarshalChart() {
 
   ctx.font = "bold 12px sans-serif";
   ctx.fillStyle = "#ff8a80";
-  ctx.fillText("ENTER " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
+  ctx.fillText(i18n.t("calib.enter_short") + " " + marshalState.enter, padL + 6, Math.max(padT + 12, enterY - 6));
   ctx.fillStyle = "#ffd54f";
-  ctx.fillText("EXIT " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
+  ctx.fillText(i18n.t("calib.exit_short") + " " + marshalState.exit, padL + 6, Math.min(padT + plotH - 4, exitY + 14));
 
+  // Context traces are read-only; edits always belong to the selected pilot.
+  // Other pilots' traces show faintly unless their dot hides them.
+  if (marshalState.channels) {
+    marshalState.channels.forEach((values, slot) => {
+      const pilot = marshalState.pilots.find(p => p.slot === slot);
+      if (values === samples || !pilot || marshalState.hiddenSlots?.has(slot)) return;
+      const color = '#' + (Number(pilot.color) & 0xffffff).toString(16).padStart(6, '0');
+      ctx.beginPath();
+      for (let i = i0; i <= i1; i++) {
+        const x = xAtMs(marshalTimeAt(i)), y = yAt(values[i]);
+        if (i === i0 || marshalTimeAt(i) - marshalTimeAt(i - 1) > marshalState.intervalMs * 3) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+  }
   // RSSI line in view
   ctx.beginPath();
   let started = false;
   for (let i = i0; i <= i1; i++) {
-    const x = xAtMs(i * marshalState.intervalMs);
+    const x = xAtMs(marshalTimeAt(i));
     const y = yAt(samples[i]);
-    if (!started) {
+    if (!started || (marshalState.times && i > 0 && marshalTimeAt(i) - marshalTimeAt(i-1) > marshalState.intervalMs * 3)) {
       ctx.moveTo(x, y);
       started = true;
     } else {
@@ -7095,7 +8002,7 @@ function marshalRecalculate() {
   const enter = marshalState.enter;
   const exit = marshalState.exit;
   const interval = marshalState.intervalMs;
-  const minLapMs = 2000;
+  const minLapMs = Number(marshalState.race.minLapMs) || 2000;
   const abs = [];
   let crossing = false;
   let peak = 0;
@@ -7113,7 +8020,7 @@ function marshalRecalculate() {
         peakIdx = i;
       }
       if (v < exit) {
-        const t = peakIdx * interval;
+        const t = Math.max(1, marshalTimeAt(peakIdx));
         if (t - lastPass >= minLapMs) {
           abs.push(t);
           lastPass = t;
@@ -7154,6 +8061,8 @@ function assertSaved(data, what) {
 
 function saveRaceChanges() {
   if (!marshalState) return;
+  if (!marshalStorePilot()) return;
+  const pilotEdits = marshalState.pilots.map(p => ({ lapTimes: p.lapTimes.slice() }));
   const ts = marshalState.raceTimestamp || marshalState.race.timestamp;
 
   const details = new URLSearchParams();
@@ -7177,12 +8086,12 @@ function saveRaceChanges() {
     }
     segs = rows.map((row) => row.ms);
   }
-  if (!segs.length) {
+  if (!segs.length && !pilotEdits.length) {
     alert(i18n.t("messages.race_edit_no_laps"));
     return;
   }
 
-  fetch("/races/update", {
+  return fetch("/races/update", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: details,
@@ -7193,7 +8102,7 @@ function saveRaceChanges() {
       return fetch("/races/updateLaps", {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ timestamp: ts, lapTimes: segs }),
+        body: JSON.stringify(pilotEdits.length ? { timestamp: ts, pilots: pilotEdits } : { timestamp: ts, lapTimes: segs }),
       })
         .then((r) => r.json())
         .then((data) => assertSaved(data, "Lap times"));
@@ -7374,7 +8283,7 @@ function onOtaVersionChange() {
 function otaFetchPart(url, name, label, expectedSize) {
   otaProgress(0, `${i18n.t("settings.firmware.label_downloading")} ${label}`);
   return fetch(url, { cache: "no-store" }).then((r) => {
-    if (!r.ok) throw new Error(`${label}: HTTP ${r.status}`);
+    if (!r.ok) throw new Error(i18n.t("settings.firmware.err_http", { label: label, status: r.status }));
     return r.blob().then((blob) => {
       // Content-Length is deliberately NOT used here. The host serves these
       // gzipped, so the header carries the compressed length while blob.size is
@@ -7394,7 +8303,7 @@ function otaFetchPart(url, name, label, expectedSize) {
         );
       }
       if (blob.size < 65536) {
-        throw new Error(`${label}: ${formatBytes(blob.size)} is too small to be a valid image`);
+        throw new Error(i18n.t("settings.firmware.err_too_small", { label: label, size: formatBytes(blob.size) }));
       }
       return new File([blob], name);
     });
@@ -7432,6 +8341,191 @@ function formatBytes(n) {
   if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
   if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
   return n + " B";
+}
+
+// ---- C5 receiver firmware -------------------------------------------------
+// The C5 has its own firmware and releases (FPVGateC5MK). Each release commits
+// release/<board>/firmware.bin, which raw.githubusercontent.com serves with
+// Access-Control-Allow-Origin, as the releases API does. So, as for the gate's
+// own firmware, the browser downloads it, passes it to the gate, and the gate
+// sends it to the C5 over their link (C5 firmware 3 and up).
+const C5FW_RELEASES_API = "https://api.github.com/repos/LouisHitchcock/FPVGateC5MK/releases";
+const C5FW_RAW = "https://raw.githubusercontent.com/LouisHitchcock/FPVGateC5MK";
+let c5FwSource = "online";
+let c5FwReleases = [];
+let c5FwStatus = null;
+let c5FwTimer = null;
+
+function c5FwShowWarning(text) {
+  const el = document.getElementById("c5FwWarning");
+  if (!el) return;
+  el.textContent = text || "";
+  el.style.display = text ? "block" : "none";
+}
+
+function c5FwProgress(percent, text) {
+  const wrap = document.getElementById("c5FwRunning");
+  if (!wrap) return;
+  wrap.style.display = "block";
+  document.getElementById("c5FwProgressBar").style.width = Math.max(0, Math.min(100, percent)) + "%";
+  document.getElementById("c5FwProgressText").textContent = text;
+}
+
+function c5FwBusy(state) {
+  return ["starting", "sending", "finishing", "restarting"].includes(state);
+}
+
+function loadC5Firmware() {
+  const section = document.getElementById("c5FwSection");
+  if (!section) return;
+  fetch("/api/c5/update")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      if (!s) return;
+      c5FwStatus = s;
+      const c5 = s.c5 || {};
+      section.style.display = c5.online || c5FwBusy(s.state) ? "block" : "none";
+      renderC5FwInfo();
+      if (!c5FwReleases.length) loadC5FwVersions();
+      if (c5FwBusy(s.state)) watchC5Update();
+    })
+    .catch(() => {});
+}
+
+function renderC5FwInfo() {
+  const box = document.getElementById("c5FwInfo");
+  const button = document.getElementById("c5FwStartBtn");
+  const c5 = (c5FwStatus && c5FwStatus.c5) || {};
+  const updatable = c5.online && c5.firmware >= 3;
+  if (box) {
+    box.innerHTML = updatable
+      ? `<span class="ota-device-name">${c5.board}</span><span class="ota-device-sizes">${c5.version}</span>`
+      : "";
+  }
+  if (!c5.online) c5FwShowWarning(i18n.t("settings.c5fw.offline"));
+  else if (c5.firmware < 3) c5FwShowWarning(i18n.t("settings.c5fw.too_old"));
+  else c5FwShowWarning("");
+  if (button) button.disabled = !updatable || c5FwBusy(c5FwStatus && c5FwStatus.state);
+}
+
+function loadC5FwVersions() {
+  const select = document.getElementById("c5FwVersionSelect");
+  if (!select) return;
+  fetch(C5FW_RELEASES_API)
+    .then((r) => (r.ok ? r.json() : []))
+    .then((list) => {
+      c5FwReleases = (list || [])
+        .filter((r) => !r.draft)
+        .map((r) => ({
+          tag: r.tag_name,
+          name: (r.name || r.tag_name) + (r.prerelease ? " (pre-release)" : ""),
+          notes: r.body || "",
+        }));
+      select.innerHTML = "";
+      if (!c5FwReleases.length) {
+        select.innerHTML = `<option value="">${i18n.t("settings.c5fw.no_versions")}</option>`;
+        return;
+      }
+      const installed = ((c5FwStatus && c5FwStatus.c5) || {}).version;
+      c5FwReleases.forEach((r, i) => {
+        const opt = document.createElement("option");
+        opt.value = r.tag;
+        opt.textContent =
+          r.name +
+          (i === 0 ? ` ${i18n.t("settings.firmware.newest")}` : "") +
+          (installed && r.tag.replace(/^v/, "") === installed ? ` ${i18n.t("settings.c5fw.installed")}` : "");
+        select.appendChild(opt);
+      });
+      onC5FwVersionChange();
+    })
+    .catch(() => {
+      select.innerHTML = `<option value="">${i18n.t("settings.c5fw.no_versions")}</option>`;
+    });
+}
+
+function onC5FwVersionChange() {
+  const select = document.getElementById("c5FwVersionSelect");
+  const wrap = document.getElementById("c5FwNotesWrap");
+  const release = c5FwReleases.find((r) => r.tag === (select && select.value));
+  if (!wrap) return;
+  wrap.style.display = release && release.notes ? "block" : "none";
+  document.getElementById("c5FwNotes").textContent = release ? release.notes.trim() : "";
+}
+
+function toggleC5FwSource() {
+  c5FwSource = c5FwSource === "online" ? "file" : "online";
+  document.getElementById("c5FwOnline").style.display = c5FwSource === "online" ? "block" : "none";
+  document.getElementById("c5FwFile").style.display = c5FwSource === "file" ? "block" : "none";
+  document.getElementById("c5FwSourceToggle").textContent = i18n.t(
+    c5FwSource === "online" ? "settings.c5fw.source_file" : "settings.c5fw.source_online"
+  );
+}
+
+// The image for the C5's own board: the boards' link pins differ, so the
+// gate also refuses an image built for the other one.
+async function c5FwImage() {
+  if (c5FwSource === "file") {
+    const file = document.getElementById("c5FwFileInput").files[0];
+    if (!file) throw new Error(i18n.t("settings.c5fw.no_file"));
+    return file;
+  }
+  const tag = document.getElementById("c5FwVersionSelect").value;
+  const board = c5FwStatus.c5.board;
+  if (!tag) throw new Error(i18n.t("settings.c5fw.no_versions"));
+  c5FwProgress(0, i18n.t("settings.c5fw.downloading", { version: tag }));
+  const r = await fetch(`${C5FW_RAW}/${tag}/release/${board}/firmware.bin`, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${tag} (${board}): HTTP ${r.status}`);
+  return r.blob();
+}
+
+async function startC5Update() {
+  const button = document.getElementById("c5FwStartBtn");
+  c5FwShowWarning("");
+  if (button) button.disabled = true;
+  try {
+    const image = await c5FwImage();
+    c5FwProgress(0, i18n.t("settings.c5fw.uploading"));
+    const up = await fetch("/api/c5/firmware", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: image,
+    });
+    const info = await up.json().catch(() => ({}));
+    if (!up.ok) throw new Error(info.error || "HTTP " + up.status);
+    const start = await fetch("/api/c5/update", { method: "POST" });
+    const started = await start.json().catch(() => ({}));
+    if (!start.ok) throw new Error(started.error || "HTTP " + start.status);
+    watchC5Update();
+  } catch (err) {
+    document.getElementById("c5FwRunning").style.display = "none";
+    c5FwShowWarning(err.message);
+    if (button) button.disabled = false;
+  }
+}
+
+// Progress comes from the gate, which does the sending.
+function watchC5Update() {
+  if (c5FwTimer) return;
+  c5FwTimer = setInterval(() => {
+    fetch("/api/c5/update")
+      .then((r) => r.json())
+      .then((s) => {
+        c5FwStatus = s;
+        const pct = s.size ? Math.floor((100 * s.sent) / s.size) : 0;
+        if (s.state === "starting") c5FwProgress(0, i18n.t("settings.c5fw.starting"));
+        else if (s.state === "sending") c5FwProgress(pct, i18n.t("settings.c5fw.sending", { percent: pct }));
+        else if (s.state === "finishing") c5FwProgress(100, i18n.t("settings.c5fw.finishing"));
+        else if (s.state === "restarting") c5FwProgress(100, i18n.t("settings.c5fw.restarting"));
+        if (c5FwBusy(s.state)) return;
+        clearInterval(c5FwTimer);
+        c5FwTimer = null;
+        if (s.state === "done") c5FwProgress(100, i18n.t("settings.c5fw.done", { version: s.c5.version }));
+        else if (s.state === "failed") c5FwProgress(0, i18n.t("settings.c5fw.failed", { error: s.error }));
+        renderC5FwInfo();
+        loadC5FwVersions();
+      })
+      .catch(() => {});   // the gate is busy; try again next tick
+  }, 500);
 }
 
 // Reads what the device is and how much room it has. Everything the update
@@ -7518,7 +8612,7 @@ function checkOtaSizes(firmwareFile, filesystemFile) {
 function otaUpload(file, mode, label) {
   return fetch(`/ota/start?mode=${mode}`)
     .then((r) => {
-      if (!r.ok) return r.text().then((t) => { throw new Error(`start failed: ${t || r.status}`); });
+      if (!r.ok) return r.text().then((t) => { throw new Error(i18n.t("settings.firmware.err_start_failed", { msg: t || r.status })); });
       return new Promise((resolve, reject) => {
         const form = new FormData();
         form.append("file", file, file.name);
@@ -7527,14 +8621,19 @@ function otaUpload(file, mode, label) {
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
           const pct = (e.loaded / e.total) * 100;
-          otaProgress(pct, `${label} ${Math.round(pct)}% (${formatBytes(e.loaded)} of ${formatBytes(e.total)})`);
+          otaProgress(pct, i18n.t("settings.firmware.progress", {
+            label: label,
+            pct: Math.round(pct),
+            loaded: formatBytes(e.loaded),
+            total: formatBytes(e.total),
+          }));
         };
         xhr.onload = () => {
           if (xhr.status === 200) resolve();
           else reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
         };
-        xhr.onerror = () => reject(new Error("connection lost during upload"));
-        xhr.ontimeout = () => reject(new Error("upload timed out"));
+        xhr.onerror = () => reject(new Error(i18n.t("settings.firmware.err_connection_lost")));
+        xhr.ontimeout = () => reject(new Error(i18n.t("settings.firmware.err_upload_timeout")));
         xhr.timeout = 180000;
         xhr.send(form);
       });
@@ -7547,9 +8646,9 @@ function waitForReboot(timeoutMs) {
   const deadline = Date.now() + (timeoutMs || 45000);
   const attempt = () =>
     fetch("/version", { cache: "no-store" })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("not ready"))))
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(i18n.t("settings.firmware.err_not_ready")))))
       .catch(() => {
-        if (Date.now() > deadline) throw new Error("gate did not come back in time");
+        if (Date.now() > deadline) throw new Error(i18n.t("settings.firmware.err_gate_not_back"));
         return new Promise((r) => setTimeout(r, 1500)).then(attempt);
       });
   return new Promise((r) => setTimeout(r, 4000)).then(attempt);
@@ -8450,7 +9549,7 @@ function drawResultsChart(previewStart, previewEnd) {
     ctx.beginPath(); ctx.moveTo(ax, pad); ctx.lineTo(ax, h - pad); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "11px Arial"; ctx.textAlign = "center";
-    ctx.fillText("Ambient", ax / 2 + pad / 2, pad - 6);
+    ctx.fillText(i18n.t("calib.ambient_short"), ax / 2 + pad / 2, pad - 6);
   }
 
   // Threshold lines (only if enough active peaks)
@@ -8464,8 +9563,8 @@ function drawResultsChart(previewStart, previewEnd) {
       ctx.fillStyle = color; ctx.font = "11px Arial"; ctx.textAlign = "right";
       ctx.fillText(label + " (" + val + ")", w - pad - 4, y - 4);
     }
-    drawHLine(wizardState.calculatedEnter, "#ff5555", "Enter");
-    drawHLine(wizardState.calculatedExit, "#ff9944", "Exit");
+    drawHLine(wizardState.calculatedEnter, "#ff5555", i18n.t("calib.enter_short"));
+    drawHLine(wizardState.calculatedExit, "#ff9944", i18n.t("calib.exit_short"));
   }
   // Always draw noise ceiling
   var noiseY = h - pad - ((wizardState.noiseCeiling - minR) / range) * ch;
@@ -8473,7 +9572,7 @@ function drawResultsChart(previewStart, previewEnd) {
   ctx.beginPath(); ctx.moveTo(pad, noiseY); ctx.lineTo(w - pad, noiseY); ctx.stroke();
   ctx.setLineDash([]);
   ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "11px Arial"; ctx.textAlign = "right";
-  ctx.fillText("Noise (" + wizardState.noiseCeiling + ")", w - pad - 4, noiseY - 4);
+  ctx.fillText(i18n.t("calib.noise_short", { v: wizardState.noiseCeiling }), w - pad - 4, noiseY - 4);
 
   // Peak markers - all peaks from allPeaks, greyed out if ignored
   var activeSet = new Set(activePeaks.map(function(p) { return p.index; }));
@@ -8547,7 +9646,7 @@ function drawWizardChart() {
     var y = h - pad - ((rssi - minR) / range) * ch;
     ctx.fillStyle = "#ff5555"; ctx.beginPath(); ctx.arc(x, y, 8, 0, 2 * Math.PI); ctx.fill();
     ctx.fillStyle = "#fff"; ctx.font = "14px Arial"; ctx.textAlign = "center";
-    ctx.fillText("Peak " + (idx + 1), x, y - 12);
+    ctx.fillText(i18n.t("calib.peak_n", { n: idx + 1 }), x, y - 12);
   });
 
   canvas.onclick = function (event) {
@@ -8657,94 +9756,6 @@ function closeCalibrationWizard() {
   });
 }
 
-// RotorHazard Integration Functions
-function toggleRHEnabled(enabled) {
-  const rhContentDiv = document.getElementById("rhContent");
-  if (rhContentDiv) rhContentDiv.style.display = enabled ? "block" : "none";
-
-  fetch("/config", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ rhEnabled: enabled ? 1 : 0 }),
-  })
-    .then((response) => response.json())
-    .then((data) => console.log("RH enabled:", enabled, data))
-    .catch((err) => console.error("Failed to toggle RH enabled:", err));
-}
-
-function refreshRHStatus() {
-  const badge = document.getElementById("rhStatusBadge");
-  const syncStatus = document.getElementById("rhSyncStatus");
-  if (!badge) return;
-  badge.textContent = "Checking...";
-  badge.style.backgroundColor = "var(--bg-secondary)";
-  badge.style.color = "var(--secondary-color)";
-
-  fetch("/api/rh/status")
-    .then((response) => response.json())
-    .then((data) => {
-      if (!data.enabled) {
-        badge.textContent = "Disabled";
-        badge.style.backgroundColor = "rgba(100,100,100,0.2)";
-        badge.style.color = "var(--secondary-color)";
-      } else if (data.connected) {
-        badge.textContent = "Connected";
-        badge.style.backgroundColor = "rgba(74, 222, 128, 0.2)";
-        badge.style.color = "#4ade80";
-      } else {
-        badge.textContent = "Disconnected";
-        badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
-        badge.style.color = "#ff5555";
-      }
-      // Update clock sync status
-      if (syncStatus) {
-        if (data.clockSynced) {
-          syncStatus.textContent = "Synced (RTT: " + data.rttMs + "ms)";
-          syncStatus.style.color = "#4ade80";
-        } else {
-          syncStatus.textContent = "Not synced";
-          syncStatus.style.color = "var(--secondary-color)";
-        }
-      }
-    })
-    .catch((err) => {
-      console.error("Failed to fetch RH status:", err);
-      badge.textContent = "Error";
-      badge.style.backgroundColor = "rgba(255, 85, 85, 0.2)";
-      badge.style.color = "#ff5555";
-    });
-}
-
-async function syncRHClock() {
-  const btn = document.getElementById("rhSyncBtn");
-  const status = document.getElementById("rhSyncStatus");
-  if (!btn || !status) return;
-
-  btn.disabled = true;
-  status.textContent = "Syncing...";
-  status.style.color = "var(--secondary-color)";
-
-  try {
-    await fetch("/api/rh/syncClock", { method: "POST" });
-    // Give the main loop ~2 s to perform the sync
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const resp = await fetch("/api/rh/status");
-    const data = await resp.json();
-    if (data.clockSynced) {
-      status.textContent = "Synced (RTT: " + data.rttMs + "ms)";
-      status.style.color = "#4ade80";
-    } else {
-      status.textContent = "Sync failed - check RH Host IP";
-      status.style.color = "#ff5555";
-    }
-  } catch (e) {
-    status.textContent = "Error: " + e.message;
-    status.style.color = "#ff5555";
-  } finally {
-    btn.disabled = false;
-  }
-}
-
 // WiFi Settings Functions
 function applyWiFiSettings() {
   const ssid = document.getElementById("ssid")?.value;
@@ -8825,6 +9836,7 @@ document.addEventListener("click", function (event) {
 });
 
 function switchSettingsSection(ev, sectionName) {
+  if (sectionName === "diagnostics") loadLogStatus();
   // Hide all sections
   const sections = document.querySelectorAll(".settings-section");
   sections.forEach((section) => section.classList.remove("active"));
@@ -8851,6 +9863,83 @@ function switchSettingsSection(ev, sectionName) {
       }
     });
   }
+  if (sectionName === "elrs") loadElrsSettings();
+}
+
+// ---- ELRS backpack: race start and stop from a radio switch ----
+// The binding phrase is write-only; the gate keeps only the UID derived from it.
+
+// Outcomes are keys from the gate, or an Event Director error shown as-is.
+function elrsOutcome(result) {
+  const key = `settings.elrs.outcome.${result}`;
+  const text = i18n.t(key);
+  return text === key ? result : text;
+}
+
+async function elrsRequest(method, body) {
+  const response = await fetch("/api/elrs", { method, body, cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function elrsStatusText(data) {
+  const lines = [];
+  if (!data.enabled) lines.push(i18n.t("settings.elrs.status_off"));
+  else if (!data.configured) lines.push(i18n.t("settings.elrs.status_unpaired"));
+  else if (!data.apMode) lines.push(i18n.t("settings.elrs.status_needs_ap"));
+  else lines.push(i18n.t(data.active ? "settings.elrs.status_active" : "settings.elrs.status_inactive"));
+  if (data.active) {
+    const position = i18n.t(data.switchState === 1 ? "settings.elrs.switch_on" : data.switchState === 0 ? "settings.elrs.switch_off" : "settings.elrs.switch_unheard");
+    lines.push(`${i18n.t("settings.elrs.status_switch")}: ${position} (${data.switchMessages})`);
+    if (data.lastCommand) {
+      const command = i18n.t(`settings.elrs.command_${data.lastCommand}`);
+      const ago = i18n.t("settings.elrs.ago", { s: Math.round(data.lastCommandAgoMs / 1000) });
+      lines.push(`${i18n.t("settings.elrs.status_last")}: ${command}, ${elrsOutcome(data.lastResult)} (${ago})`);
+    }
+    if (data.foreign) lines.push(`${i18n.t("settings.elrs.status_foreign")}: ${data.foreign}`);
+  }
+  if (data.restartPending) lines.push(i18n.t("settings.elrs.restarting"));
+  return lines.join("\n");
+}
+
+async function loadElrsSettings(fill = true) {
+  const status = document.getElementById("elrsStatus");
+  try {
+    const data = await elrsRequest("GET");
+    if (fill) {
+      document.getElementById("elrsEnabled").checked = data.enabled;
+      document.getElementById("elrsRaceControl").checked = data.raceControl;
+      document.getElementById("elrsInvert").checked = data.invert;
+      document.getElementById("elrsPhrase").value = "";
+      document.getElementById("elrsForget").checked = false;
+    }
+    document.getElementById("elrsSave").disabled = !!data.restartPending;
+    status.textContent = elrsStatusText(data);
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function saveElrsSettings(event) {
+  event.preventDefault();
+  const button = document.getElementById("elrsSave");
+  const status = document.getElementById("elrsStatus");
+  button.disabled = true;
+  try {
+    const body = new URLSearchParams();
+    for (const [key, id] of [["enabled", "elrsEnabled"], ["raceControl", "elrsRaceControl"], ["invert", "elrsInvert"], ["forget", "elrsForget"]]) {
+      body.set(key, document.getElementById(id).checked ? "1" : "0");
+    }
+    const phrase = document.getElementById("elrsPhrase").value;
+    if (phrase) body.set("phrase", phrase);
+    await elrsRequest("POST", body);
+    document.getElementById("elrsPhrase").value = "";
+    status.textContent = i18n.t("settings.elrs.restarting");
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
+  }
 }
 
 // Keyboard shortcut for closing modal (ESC key)
@@ -8869,6 +9958,27 @@ document.addEventListener("keydown", function (event) {
 });
 
 // Self-Test Functions
+async function testBuzzer() {
+  const button = document.getElementById("testBuzzerButton");
+  const status = document.getElementById("testBuzzerStatus");
+  button.disabled = true;
+  status.textContent = "";
+  try {
+    const response = await fetch("/api/buzzer/test", { method: "POST" });
+    if (!response.ok) {
+      status.textContent = i18n.t(response.status === 409
+        ? "settings.diagnostics.buzzer_busy"
+        : "settings.diagnostics.buzzer_error");
+      return;
+    }
+    status.textContent = i18n.t("settings.diagnostics.buzzer_sent");
+  } catch (error) {
+    status.textContent = i18n.t("settings.diagnostics.buzzer_error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function runSelfTest() {
   const button = document.getElementById("runTestsButton");
   const loadingDiv = document.getElementById("testLoading");
@@ -8884,6 +9994,7 @@ function runSelfTest() {
   fetch("/api/selftest")
     .then((response) => response.json())
     .then((data) => {
+      lastSelfTestResults = data.tests || null;
       // Hide loading
       loadingDiv.style.display = "none";
       // Newer firmware reports an explicit status: "pass" | "fail" | "skip".
@@ -8900,19 +10011,19 @@ function runSelfTest() {
         const status = statusOf(test);
         const durationMs = test.duration != null ? test.duration : (test.duration_ms || 0);
 
-        let statusIcon = "✓";
+        let statusIcon = "\u2713";
         let statusColor = "#4ade80";
         let bgColor = "rgba(74, 222, 128, 0.1)";
 
         if (status === "skip") {
           skippedCount++;
-          statusIcon = "–";
+          statusIcon = "\u2013";
           statusColor = "#9ca3af";
           bgColor = "rgba(156, 163, 175, 0.1)";
         } else if (status === "fail") {
           failedCount++;
           anyFailed = true;
-          statusIcon = "✗";
+          statusIcon = "\u2717";
           statusColor = "#ff5555";
           bgColor = "rgba(255, 85, 85, 0.1)";
         } else {
@@ -8925,7 +10036,7 @@ function runSelfTest() {
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 20px; color: ${statusColor};">${statusIcon}</span>
                 <span style="font-weight: bold; font-size: 16px;">${test.name}</span>
-                ${status === "skip" ? '<span style="font-size: 11px; color: var(--secondary-color); border: 1px solid var(--secondary-color); border-radius: 3px; padding: 1px 6px; margin-left: 4px;">SKIPPED</span>' : ""}
+                ${status === "skip" ? `<span style="font-size: 11px; color: var(--secondary-color); border: 1px solid var(--secondary-color); border-radius: 3px; padding: 1px 6px; margin-left: 4px;">${i18n.t("settings.diagnostics.skipped")}</span>` : ""}
               </div>
               <span style="font-size: 12px; color: var(--secondary-color);">${durationMs}ms</span>
             </div>
@@ -8943,10 +10054,12 @@ function runSelfTest() {
         ? i18n.t("settings.diagnostics.some_failed")
         : i18n.t("settings.diagnostics.all_passed");
 
-      let summaryLine = `${passedCount} passed`;
-      if (skippedCount > 0) summaryLine += `, ${skippedCount} skipped`;
-      if (failedCount > 0) summaryLine += `, ${failedCount} failed`;
-      summaryLine += ` (of ${totalCount})`;
+      const summaryLine = i18n.t("settings.diagnostics.summary", {
+        passed: passedCount,
+        skipped: skippedCount,
+        failed: failedCount,
+        total: totalCount,
+      });
 
       html =
         `
@@ -9015,7 +10128,7 @@ function runSPITest() {
             <span style="font-weight: bold; font-size: 16px;">${verdictText}</span>
           </div>
           <div style="font-size: 14px; color: var(--secondary-color);">
-            Spread: ${data.spread} | Min: ${data.min} | Max: ${data.max}
+            ${i18n.t("settings.diagnostics.spread", { spread: data.spread, min: data.min, max: data.max })}
           </div>
         </div>
       `;
@@ -9106,9 +10219,10 @@ function pollDebugLogs() {
       if (data.logs && data.logs.length > 0) {
         // Add new logs that we haven't seen yet
         data.logs.forEach((log) => {
-          if (log.timestamp > lastSeenTimestamp) {
+          const order = log.seq !== undefined ? log.seq : log.timestamp;
+          if (order > lastSeenTimestamp) {
             appendSerialLine(log.message, "#00ff00", log.timestamp);
-            lastSeenTimestamp = log.timestamp;
+            lastSeenTimestamp = order;
           }
         });
       }
@@ -9351,7 +10465,7 @@ function displayTracks() {
           <div style="flex: 1;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 4px;">${track.name}</div>
             <div style="font-size: 14px; color: var(--secondary-color);">
-              ${i18n.t("modals.track.unit_meters", { n: track.distance })}${track.tags ? " • " + track.tags : ""}
+              ${i18n.t("modals.track.unit_meters", { n: track.distance })}${track.tags ? " â€¢ " + track.tags : ""}
             </div>
           </div>
           <div style="display: flex; gap: 8px;">
@@ -9428,12 +10542,12 @@ function saveTrack() {
   const notes = document.getElementById("trackNotes").value.trim();
 
   if (!name) {
-    alert("Please enter a track name");
+    alert(i18n.t("messages.track_enter_name"));
     return;
   }
 
   if (!distance || distance <= 0) {
-    alert("Please enter a valid distance");
+    alert(i18n.t("messages.track_enter_distance"));
     return;
   }
 
@@ -9634,7 +10748,7 @@ function addWebhook() {
         loadWebhooks(); // Reload list
         console.log("Webhook added:", ip);
       } else {
-        alert(i18n.t("messages.webhook_add_error") + ": " + (data.message || "Unknown error"));
+        alert(i18n.t("messages.webhook_add_error") + ": " + (data.message || i18n.t("messages.unknown_error")));
       }
     })
     .catch((error) => {
@@ -9666,7 +10780,7 @@ function removeWebhook(ip) {
     })
     .catch((error) => {
       console.error("Error removing webhook:", error);
-      alert("Error removing webhook");
+      alert(i18n.t("messages.webhook_remove_error"));
     });
 }
 
@@ -9685,7 +10799,7 @@ function saveLeaderColorMode() {
 }
 
 // Restore dropdown on page load
-document.addEventListener("DOMContentLoaded", function () {
+onAppReady( function () {
   const sel = document.getElementById("leaderColorMode");
   if (sel) sel.value = localStorage.getItem("leaderColorMode") || "0";
 });
@@ -9805,7 +10919,7 @@ function renderGateDevices(webhooks) {
   if (!container) return;
 
   if (webhooks.length === 0) {
-    container.innerHTML = '<p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">No gate devices configured. Add webhook IPs in the Webhooks tab.</p>';
+    container.innerHTML = `<p style="color: var(--secondary-color); text-align: center; padding: 12px; font-size: 13px">${i18n.t("settings.led.no_gate_devices")}</p>`;
     return;
   }
 
@@ -9818,42 +10932,42 @@ function renderGateDevices(webhooks) {
       <div style="padding: 14px; background-color: var(--bg-secondary); border-radius: 8px; margin-bottom: 8px; border-left: 4px solid var(--accent-color)">
         <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer" onclick="toggleGateDetail('${eid}')">
           <div>
-            <span style="font-weight: bold; font-size: 14px">Gate ${idx + 1}</span>
+            <span style="font-weight: bold; font-size: 14px">${i18n.t("settings.led.gate_n", { n: idx + 1 })}</span>
             <span style="font-size: 12px; color: var(--secondary-color); margin-left: 8px">${ip}</span>
           </div>
           <span id="gateArrow_${eid}" style="font-size: 12px; color: var(--secondary-color); transition: transform 0.2s">&#9660;</span>
         </div>
         <div id="gateDetail_${eid}" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color)">
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Effect:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.effect")}</label>
             <select id="gateEffect_${eid}" style="flex: 1">
-              <option value="off">Off</option>
-              <option value="solid" selected>Solid</option>
-              <option value="rainbow">Rainbow</option>
-              <option value="fade">Color Fade</option>
-              <option value="pulse">Pulse</option>
-              <option value="sparkle">Sparkle</option>
+              <option value="off">${i18n.t("settings.led.effects.off")}</option>
+              <option value="solid" selected>${i18n.t("settings.led.effects.solid")}</option>
+              <option value="rainbow">${i18n.t("settings.led.effects.rainbow")}</option>
+              <option value="fade">${i18n.t("settings.led.effects.fade")}</option>
+              <option value="pulse">${i18n.t("settings.led.effects.pulse")}</option>
+              <option value="sparkle">${i18n.t("settings.led.effects.sparkle")}</option>
             </select>
           </div>
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Color:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.color")}</label>
             <input type="color" id="gateColor_${eid}" value="#FF0000" style="height: 36px; flex: 1; max-width: 80px; border: 2px solid var(--border-color); border-radius: 4px" />
           </div>
           <div class="config-item" style="margin-bottom: 8px">
-            <label style="min-width: 80px">Brightness:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.brightness_short")}</label>
             <div style="flex: 1; display: flex; align-items: center; gap: 8px">
               <input type="range" id="gateBri_${eid}" min="0" max="255" value="200" style="flex: 1" oninput="document.getElementById('gateBriV_${eid}').textContent=this.value" />
               <span id="gateBriV_${eid}" style="font-size: 13px; min-width: 28px">200</span>
             </div>
           </div>
           <div class="config-item" style="margin-bottom: 12px">
-            <label style="min-width: 80px">Speed:</label>
+            <label style="min-width: 80px">${i18n.t("settings.led.speed_short")}</label>
             <div style="flex: 1; display: flex; align-items: center; gap: 8px">
               <input type="range" id="gateSpd_${eid}" min="1" max="100" value="50" style="flex: 1" oninput="document.getElementById('gateSpdV_${eid}').textContent=this.value" />
               <span id="gateSpdV_${eid}" style="font-size: 13px; min-width: 28px">50</span>
             </div>
           </div>
-          <button onclick="sendToGate('${ip}')" style="width: 100%; background-color: var(--accent-color)">Apply to Gate ${idx + 1}</button>
+          <button onclick="sendToGate('${ip}')" style="width: 100%; background-color: var(--accent-color)">${i18n.t("settings.led.apply_gate_n", { n: idx + 1 })}</button>
         </div>
       </div>
     `;
@@ -9923,7 +11037,7 @@ function testWebhook() {
     .then((response) => {
       if (!response.ok) {
         return response.json().then((data) => {
-          throw new Error(data.message || "Unknown error");
+          throw new Error(data.message || i18n.t("messages.unknown_error"));
         });
       }
       return response.json();
@@ -9932,7 +11046,7 @@ function testWebhook() {
       if (data.status === "OK") {
         alert(i18n.t("messages.webhook_test_sent"));
       } else {
-        alert(i18n.t("messages.error_generic", { n: data.message || "Unknown error" }));
+        alert(i18n.t("messages.error_generic", { n: data.message || i18n.t("messages.unknown_error") }));
       }
     })
     .catch((error) => {
@@ -9948,10 +11062,13 @@ function openSettingsModal() {
   if (modal) {
   modal.classList.add("active");
     syncOpenRaceNotesOnRaceEndToggle();
+    applyRaceNotesButton();
+    applyHistoryAdvancedFilters();
 
     // Refresh each time the modal opens rather than once at page load, so the
     // panel reflects the device after an update without needing a reload.
     loadOtaDeviceInfo();
+    loadC5Firmware();
 
     // Load full config to populate all settings
     _refreshingFromDevice = true;
@@ -10138,17 +11255,6 @@ function openSettingsModal() {
           raceSyncMode = config.raceSyncMode;
           updateRaceSyncMode(config.raceSyncMode, true);  // skipSave=true when loading
         }
-        if (config.rhEnabled !== undefined) {
-          rhEnabled = config.rhEnabled;
-        }
-        if (config.rhHostIP !== undefined) {
-          const rhHostIPEl = document.getElementById('rhHostIP');
-          if (rhHostIPEl) rhHostIPEl.value = config.rhHostIP;
-        }
-        if (config.rhNodeIndex !== undefined) {
-          const rhNodeIndexEl = document.getElementById('rhNodeIndex');
-          if (rhNodeIndexEl) rhNodeIndexEl.value = config.rhNodeIndex;
-        }
         
         if (config.syncedTimers && Array.isArray(config.syncedTimers)) {
           syncedTimers = config.syncedTimers.slice(); // Copy array
@@ -10178,4 +11284,232 @@ function openSettingsModal() {
     // Switch to general section by default
     switchSettingsSection(null, "general");
   }
+}
+
+// ---------------------------------------------------------------------------
+// C5 receiver checks. Run in the browser from the c5Rssi telemetry the gate
+// already streams, so they need no firmware support and never touch storage.
+// ---------------------------------------------------------------------------
+
+// The receiver release this gate release is paired with.
+const C5_PAIRED_VERSION = "1.3.0";
+const C5_CHECK_MS = 6000;
+
+// frames: c5Rssi messages collected over `seconds`; update: /api/c5/update;
+// pilots: config c5Pilots. Returns [{ key, status: pass|warn|fail|skip, detail }].
+function evaluateC5Checks(frames, update, pilots, seconds) {
+  const results = [];
+  const add = (key, status, detail) => results.push({ key, status, detail });
+  const first = frames[0];
+  const last = frames[frames.length - 1];
+  if (!last) {
+    add("connected", "fail", "No receiver telemetry arrived from the gate");
+    return results;
+  }
+  if (last.race) {
+    add("race", "skip", "A race is running; stop it to run the checks");
+    return results;
+  }
+  add("connected", last.on && last.started ? "pass" : "fail",
+    last.on ? "The receiver is sending status" : "No status from the receiver: check its connection");
+  const c5 = (update && update.c5) || {};
+  const version = c5.version || "";
+  if (!version) add("version", "fail", "The receiver did not report a version");
+  else if (version === C5_PAIRED_VERSION) add("version", "pass", `${version}${c5.board ? ` (${c5.board})` : ""}`);
+  else add("version", "warn", `${version}${c5.board ? ` (${c5.board})` : ""}; this gate release is paired with ${C5_PAIRED_VERSION}`);
+  add("tuning", last.ready ? "pass" : "fail", last.ready ? "Tuning ready" : "The receiver has not finished tuning");
+  const racing = (pilots || []).filter((p) => p && p.race && p.frequency);
+  add("slots", racing.length ? "pass" : "warn",
+    racing.length ? `${racing.length} racing slot(s): ${racing.map((p) => p.frequency).join(", ")} MHz`
+      : "No racing slots have a frequency set");
+  const delta = (k) => (+last[k] || 0) - (+first[k] || 0);
+  const samples = delta("samples");
+  add("samples", frames.length > 1 && samples > 0 ? "pass" : "fail",
+    `${samples} RSSI samples in ${seconds.toFixed(1)} s`);
+  const gaps = delta("seqGaps"), drops = delta("queueDrops"), bad = delta("badRecords");
+  add("link", gaps || drops || bad ? "warn" : "pass",
+    `${gaps} sequence gaps, ${drops} dropped samples, ${bad} bad records during the check`);
+  return results;
+}
+
+function renderCheckResults(list, results, labelOf) {
+  const style = {
+    pass: ["\u2713", "#4ade80", "rgba(74, 222, 128, 0.1)"],
+    warn: ["!", "#fbbf24", "rgba(251, 191, 36, 0.1)"],
+    fail: ["\u2717", "#ff5555", "rgba(255, 85, 85, 0.1)"],
+    skip: ["\u2013", "#9ca3af", "rgba(156, 163, 175, 0.1)"],
+  };
+  list.innerHTML = results.map((r) => {
+    const [icon, color, bg] = style[r.status] || style.skip;
+    const div = document.createElement("div");
+    div.textContent = r.detail;
+    return `<div style="padding: 10px 12px; margin-bottom: 8px; border-radius: 6px; background-color: ${bg}; border-left: 3px solid ${color}">
+      <div style="font-weight: bold; color: ${color}">${icon} ${labelOf(r.key)}</div>
+      <div style="font-size: 13px; color: var(--secondary-color)">${div.innerHTML}</div></div>`;
+  }).join("");
+}
+
+function runC5Checks() {
+  const button = document.getElementById("runC5ChecksButton");
+  const box = document.getElementById("c5CheckResults");
+  const list = document.getElementById("c5CheckList");
+  if (!eventSource) {
+    box.style.display = "block";
+    renderCheckResults(list, [{ key: "connected", status: "fail", detail: "This page is not connected to the gate's live updates; reload the page" }],
+      (k) => i18n.t(`settings.diagnostics.c5_checks.${k}`));
+    return;
+  }
+  const frames = [];
+  const onFrame = (e) => {
+    try {
+      frames.push(JSON.parse(e.data));
+    } catch (err) {
+      // A malformed frame is skipped; the counters come from the others.
+    }
+  };
+  button.disabled = true;
+  button.textContent = i18n.t("settings.diagnostics.c5_running");
+  box.style.display = "none";
+  const started = Date.now();
+  eventSource.addEventListener("c5Rssi", onFrame);
+  const getJson = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  Promise.all([getJson("/api/c5/update"), getJson("/config"), new Promise((r) => setTimeout(r, C5_CHECK_MS))])
+    .then(([update, config]) => {
+      eventSource.removeEventListener("c5Rssi", onFrame);
+      const results = evaluateC5Checks(frames, update, config && config.c5Pilots, (Date.now() - started) / 1000);
+      lastC5CheckResults = results;
+      renderCheckResults(list, results, (k) => i18n.t(`settings.diagnostics.c5_checks.${k}`));
+      box.style.display = "block";
+    })
+    .finally(() => {
+      button.disabled = false;
+      button.textContent = i18n.t("settings.diagnostics.c5_run");
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Log download and the SD card log switch.
+// ---------------------------------------------------------------------------
+
+let lastSelfTestResults = null;
+let lastC5CheckResults = null;
+
+// One text file for a bug report: gate and receiver state, the last crash, the
+// latest checks, then the log (from the SD card when saving is on, otherwise
+// the recent lines kept in memory).
+function buildLogText(d) {
+  const out = [];
+  const section = (title) => out.push("", `== ${title} ==`);
+  const json = (value) => out.push(value ? JSON.stringify(value, null, 2) : "Not available");
+  out.push("FPVGate log", `Downloaded: ${d.now}`, `Page: ${d.page}`, `Browser: ${d.browser}`);
+  section("Gate");
+  json(d.info);
+  section("C5 receiver");
+  json(d.c5);
+  section("Last crash");
+  if (d.core && d.core.present) json(d.core);
+  else out.push(d.core ? `No crash dump stored (reset reason ${d.core.resetReason})` : "Not available");
+  section("System self-test");
+  if (d.selfTest && d.selfTest.length) {
+    d.selfTest.forEach((t) => out.push(`${(t.status || (t.passed ? "pass" : "fail")).toUpperCase()}  ${t.name}${t.details ? `: ${t.details}` : ""}`));
+  } else out.push("Not run on this page");
+  section("C5 receiver checks");
+  if (d.c5Checks && d.c5Checks.length) d.c5Checks.forEach((r) => out.push(`${r.status.toUpperCase()}  ${r.key}: ${r.detail}`));
+  else out.push("Not run on this page");
+  section("Log status");
+  json(d.status);
+  if (d.sdNow || d.sdOld) {
+    if (d.sdOld) {
+      section("SD card log, older file (log.1.txt)");
+      out.push(d.sdOld.replace(/\n$/, ""));
+    }
+    section("SD card log (log.txt)");
+    out.push((d.sdNow || "").replace(/\n$/, ""));
+  } else {
+    section("Recent log in memory (kept through a crash or restart, not a power loss)");
+    if (d.recent && d.recent.text) out.push(d.recent.text.replace(/\n$/, ""));
+    else {
+      const lines = (d.recent && d.recent.logs) || [];
+      if (lines.length) lines.forEach((l) => out.push(`[${l.timestamp}] ${l.message}`));
+      else out.push("No lines");
+    }
+  }
+  return out.join("\n") + "\n";
+}
+
+async function downloadGateLog() {
+  const button = document.getElementById("downloadLogButton");
+  if (button) button.disabled = true;
+  const getJson = (path) => fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const getText = (path) => fetch(path).then((r) => (r.ok ? r.text() : "")).catch(() => "");
+  try {
+    const [info, c5, core, status, recentText] = await Promise.all([
+      getJson("/api/system/info"), getJson("/api/c5/update"), getJson("/api/coredump/summary"),
+      getJson("/api/log/status"), getText("/api/log/recent"),
+    ]);
+    // Firmware before rc.5 has no /api/log/recent; its /api/debuglog lines will do.
+    const recent = recentText ? { text: recentText } : await getJson("/api/debuglog");
+    let sdOld = "", sdNow = "";
+    if (status && status.sdEnabled && status.fileBytes) {
+      if (status.oldFileBytes) sdOld = await getText("/api/log/file?part=1");
+      sdNow = await getText("/api/log/file?part=0");
+    }
+    const text = buildLogText({
+      info, c5, core, status, recent, sdOld, sdNow,
+      selfTest: lastSelfTestResults, c5Checks: lastC5CheckResults,
+      browser: navigator.userAgent, page: location.href, now: new Date().toISOString(),
+    });
+    const board = (info && info.board) || "gate";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    link.download = `fpvgate-log-${board}-${stamp}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function describeLogStatus(s) {
+  if (!s) return i18n.t("settings.diagnostics.log_status_unknown");
+  const kb = (b) => `${Math.round((b || 0) / 1024)} KB`;
+  let text;
+  if (!s.sdAvailable) text = i18n.t("settings.diagnostics.log_status_no_sd");
+  else if (!s.sdEnabled) text = i18n.t("settings.diagnostics.log_status_off");
+  else {
+    text = i18n.t("settings.diagnostics.log_status_on", { size: kb((s.fileBytes || 0) + (s.oldFileBytes || 0)) });
+    if (s.lost) text += ` ${s.lost} bytes were lost before they could be saved.`;
+    if (s.writeFailures) text += ` ${s.writeFailures} writes failed.`;
+  }
+  if (s.recoveredPrevious) text += ` ${i18n.t("settings.diagnostics.log_status_recovered")}`;
+  return text;
+}
+
+function loadLogStatus() {
+  const toggle = document.getElementById("sdLogToggle");
+  const label = document.getElementById("sdLogStatus");
+  if (!toggle || !label) return;
+  fetch("/api/log/status")
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((s) => {
+      toggle.checked = !!(s && s.sdEnabled);
+      toggle.disabled = !(s && s.sdAvailable);
+      label.textContent = describeLogStatus(s);
+    });
+}
+
+function setSdLog(on) {
+  const toggle = document.getElementById("sdLogToggle");
+  fetch(`/api/log/sd?enabled=${on ? 1 : 0}`, { method: "POST" })
+    .then((r) => r.json().catch(() => ({})).then((body) => {
+      if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    }))
+    .catch((e) => {
+      if (toggle) toggle.checked = !on;
+      alert(i18n.t("settings.diagnostics.log_switch_failed", { error: e.message }));
+    })
+    .finally(loadLogStatus);
 }

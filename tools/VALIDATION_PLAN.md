@@ -7,8 +7,8 @@ what it does not cover and still needs a person.
 
 Every release up to 1.7.3 was validated by hand: flash a board, click through the
 UI, run a few races, decide it looked right. That worked when the firmware was
-smaller. It does not scale to the current surface area — 18 self-test checks, two
-transports, nine board targets, SD-backed race history, RSSI capture, a marshal
+smaller. It does not scale to the current surface area — 18 self-test checks, Wi-Fi/USB/Ethernet,
+six shipping board targets plus retained custom targets, SD-backed race history, RSSI capture, a marshal
 editor and OTA — and it does not catch intermittent faults at all, because nobody
 hand-tests the same thing four hundred times.
 
@@ -22,22 +22,26 @@ to the things only a person can assess.
 |---|---|---|---|---|
 | **1. Unit** | every change | no | seconds | `cd tests && npx jest` |
 | **2. Build** | every change | no | ~2 min | `pio run -e <target>` |
-| **3. Component** | before release | yes | ~2 min | `race_day_sim.py --components-only` |
-| **4. Page load** | before release, **every board** | yes | ~1 min | `concurrent_load.py` |
-| **5. Race day** | before release | yes | 1–4 h | `race_day_sim.py --heats 20` |
-| **6. Reliability** | before release | yes | 4 h+ | `reliability_check.py` |
+| **3. Component** | before release | yes | ~2 min | `python tools/race_day_sim.py --i-know-this-writes --components-only --wifi <gate>` |
+| **4. Page load** | before release, **every board** | yes | ~1 min | `python tools/concurrent_load.py --host <gate>` |
+| **5. Race day** | before release | yes | 1–4 h | `python tools/race_day_sim.py --i-know-this-writes --heats 20 --wifi <gate>` |
+| **6. Reliability** | before release | yes | 4 h+ | `python tools/reliability_check.py --wifi <gate> --duration 14400` |
 
 ### 1. Unit — `tests/`
 
-Jest, browser-side logic only. Currently 44 tests across four suites covering
-band/channel selection, i18n fallback, the pre-paint theme restore, and lap-time
-round-tripping.
+Jest covers extracted production page functions for bands, i18n, theme restore,
+lap announcements, multi-pilot marshalling, OTA size guards and gate completion.
+It also compiles production configuration for the six shipping boards and the
+native race-controller harness. Use the runner's actual suite/test counts;
+there is no fixed four-suite/44-test scope. Install dependencies with
+`npm install --prefix tests`; C++ tests need `g++`.
 
 The valuable ones extract the real implementation out of `data/script.js` and
 `data/index.html` and execute it, rather than reimplementing the logic in the
 test. A test that copies the logic it is testing proves nothing.
 
-**Does not cover:** anything in firmware, anything needing a device.
+**Does not cover:** real RF, FreeRTOS scheduling, actual SD failures or board
+wiring. Compiled native tests exercise production firmware with host stand-ins.
 
 ### 2. Build — PlatformIO
 
@@ -45,8 +49,8 @@ Every target must compile, and the filesystem image must build. The filesystem
 build is not optional: it is what caught `data/` overflowing the old 1 MB spiffs
 partition, which no amount of firmware compiling would have found.
 
-Build at minimum `FPVGateAIO` and one non-AIO target, since board-specific
-`#ifdef` paths diverge.
+Build app and filesystem for all six shipping targets before release.
+Custom targets require their own qualification; the EMA probe is not shipping.
 
 ### 3. Component — `race_day_sim.py --components-only`
 
@@ -91,9 +95,11 @@ The same checks, repeated across many heats over hours, with periodic re-checks
 of the self test and history. Catches what one pass cannot: storage leaks,
 degradation across heats, history behaviour as races accumulate.
 
-### 5. Reliability — `reliability_check.py`
+### 6. Reliability — `reliability_check.py`
 
-Read-only sustained load with liveness probing, on both transports at once.
+Read load and liveness probing on configured transports, preceded by the device
+self-test. That self-test performs temporary storage/EEPROM writes and buzzer
+checks, so the complete run is not strictly read-only.
 Answers "does it stay up, and does it recover if it doesn't". See
 `RELIABILITY_RUNBOOK.md`.
 
@@ -150,9 +156,9 @@ Stated plainly so nobody assumes more coverage than exists.
 records whatever its RX5808 sees, which on a bench is idle noise. That fully
 exercises the capture pipeline — staging buffers, writer task, SD write, sidecar
 attach, header finalize, chunked serve — but it does **not** validate peak
-detection, because there are no peaks. Proper validation of lap detection would
-need a firmware hook to inject synthetic RSSI. That hook does not exist and is
-the single highest-value addition to this plan.
+detection, because there are no peaks. Native C5 simulators now feed controlled samples to the real detector, but
+that does not inject RF or exercise the complete device capture path. Real
+multi-transmitter and timing-reference qualification is still separate.
 
 **Only the primary transport drives writes.** Races are created over the first
 configured transport. The second is checked for read parity only.
@@ -161,12 +167,12 @@ configured transport. The second is checked for read parity only.
 race days have several people refreshing the UI while a race runs. `stress_test.py`
 covers concurrency separately; the two are not combined.
 
-**Nothing tests failure recovery deliberately.** Nothing pulls the SD card
-mid-race, drops WiFi mid-save, or power-cycles during a write. Those are real
-race-day events and are currently untested.
+**Native save-failure/retry tests exist; physical failure recovery is still unqualified.** Nothing pulls the SD card
+mid-race, drops WiFi mid-save, or power-cycles during a write. Those remain real-device checks, beyond a simulated history writer.
 
 **Board coverage is one board.** The harness runs against whatever is plugged in.
-Nine targets exist; eight go untested per release unless someone plugs them in.
+Six targets ship; one connected board does not qualify the other five or the
+retained custom builds.
 
 ## Adding a component check
 
@@ -183,3 +189,20 @@ check, because it reports confidence it has not earned. The delete check in this
 harness passed for the wrong reason on its first run — it treated a correct 404
 as a failure — and was only caught by reading the firmware to see what should
 have happened.
+
+## Alpha C5 and Events scope
+
+Run `tests/native/build_race_control.ps1` and the Jest gate-completion tests.
+Then follow the [physical C5 completion checklist](../docs/GATE_RACE_COMPLETION.md#verification):
+close every page, finish racers, reconnect, verify one record and its sidecar,
+then test save failure/retry, DNS/heat limits and reconnect during Stop.
+Run `tests/native/build_event_director.ps1` and the Event frontend/storage tests.
+Unreleased source handles Event result association and next-heat loading without
+a page; follow the [Event qualification checklist](../docs/GATE_EVENT_PROGRESSION.md#verification-and-remaining-qualification)
+on real hardware before release. Browser speech still needs a page.
+An RX5808 synthetic-lap workflow does not establish those C5 properties.
+
+Do not flash hardware or transmit RF merely to review docs or run offline tests.
+Use a separately authorized bench session and record the actual board/version
+coverage. The [post-soak record](../docs/RH_POST_SOAK_INVESTIGATION.md) separates
+same-frequency seat tests from independent eight-transmitter qualification.

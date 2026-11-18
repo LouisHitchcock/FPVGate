@@ -1,12 +1,29 @@
 #include "racehistory.h"
+#include "history_snapshot.h"
 #include <algorithm>
 #include <time.h>
 #include "debug.h"
+#include "freertos/semphr.h"
+#include <esp_task_wdt.h>
+
+namespace {
+SemaphoreHandle_t historyMutex = nullptr;
+HistorySnapshotAllocator snapshotAllocator;
+// HTTP reads on core 0 while loop() saves on core 1. Never hold a spinlock
+// across filesystem operations or JSON allocation.
+struct HistoryLock {
+    bool acquired;
+    explicit HistoryLock(uint32_t wait = portMAX_DELAY)
+        : acquired(!historyMutex || xSemaphoreTakeRecursive(historyMutex, wait) == pdTRUE) {}
+    ~HistoryLock() { if (historyMutex && acquired) xSemaphoreGiveRecursive(historyMutex); }
+};
+}
 
 RaceHistory::RaceHistory() : storage(nullptr), rssiRecorder(nullptr) {
 }
 
 bool RaceHistory::init(Storage* storageBackend) {
+    if (!historyMutex) historyMutex = xSemaphoreCreateRecursiveMutex();
     storage = storageBackend;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null!\n");
@@ -32,6 +49,7 @@ static String raceFilePathForTimestamp(uint32_t timestamp) {
 
 void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) const {
     raceObj["timestamp"] = race.timestamp;
+    raceObj["importedAt"] = race.importedAt;
     raceObj["fastestLap"] = race.fastestLap;
     raceObj["medianLap"] = race.medianLap;
     raceObj["best3LapsTotal"] = race.best3LapsTotal;
@@ -47,6 +65,7 @@ void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) c
     raceObj["trackName"] = race.trackName;
     raceObj["totalDistance"] = race.totalDistance;
     raceObj["syncMode"] = race.syncMode;
+    raceObj["minLapMs"] = race.minLapMs;
 
     JsonArray lapsArray = raceObj["lapTimes"].to<JsonArray>();
     for (uint32_t lap : race.lapTimes) {
@@ -62,6 +81,10 @@ void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) c
             pilotObj["color"] = pilot.color;
             pilotObj["fastestLap"] = pilot.fastestLap;
             pilotObj["isLocal"] = pilot.isLocal;
+            pilotObj["slot"] = pilot.slot;
+            pilotObj["frequency"] = pilot.frequency;
+            pilotObj["enter"] = pilot.enter;
+            pilotObj["exit"] = pilot.exit;
             JsonArray pilotLaps = pilotObj["lapTimes"].to<JsonArray>();
             for (uint32_t lap : pilot.lapTimes) {
                 pilotLaps.add(lap);
@@ -72,6 +95,8 @@ void RaceHistory::writeRaceObject(JsonObject raceObj, const RaceSession& race) c
     if (race.rssiMeta.hasHistory && race.rssiMeta.file.length() > 0) {
         JsonObject rh = raceObj["rssiHistory"].to<JsonObject>();
         rh["intervalMs"] = race.rssiMeta.intervalMs;
+        rh["version"] = race.rssiMeta.version;
+        rh["channels"] = race.rssiMeta.channels;
         rh["sampleCount"] = race.rssiMeta.sampleCount;
         rh["truncated"] = race.rssiMeta.truncated;
         rh["file"] = race.rssiMeta.file;
@@ -90,6 +115,8 @@ void RaceHistory::readRssiMeta(JsonObject raceObj, RaceSession& race) const {
     if (!raceObj["rssiHistory"].isNull()) {
         JsonObject rh = raceObj["rssiHistory"].as<JsonObject>();
         race.rssiMeta.intervalMs = rh["intervalMs"] | RACE_RSSI_INTERVAL_MS;
+        race.rssiMeta.version = rh["version"] | 1;
+        race.rssiMeta.channels = rh["channels"] | 1;
         race.rssiMeta.sampleCount = rh["sampleCount"] | 0;
         race.rssiMeta.truncated = rh["truncated"] | false;
         race.rssiMeta.file = rh["file"] | "";
@@ -106,13 +133,18 @@ bool RaceHistory::writeRaceFile(const RaceSession& race) {
     if (!storage) {
         return false;
     }
-    JsonDocument doc;
+    JsonDocument doc(&snapshotAllocator);
     JsonObject raceObj = doc.to<JsonObject>();
     writeRaceObject(raceObj, race);
     String json;
     serializeJson(doc, json);
     String filepath = raceFilePathForTimestamp(race.timestamp);
-    return storage->writeFile(filepath, json);
+    const bool success = storage->writeFile(filepath, json);
+    // A backup import writes many records inside one watched HTTP request.
+    // Report each completed operation, just as clearAll does for deletion.
+    vTaskDelay(pdMS_TO_TICKS(1));
+    if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
+    return success;
 }
 
 void RaceHistory::deleteSidecar(const RaceSession& race) {
@@ -128,6 +160,7 @@ void RaceHistory::deleteSidecar(const RaceSession& race) {
 }
 
 bool RaceHistory::saveRace(const RaceSession& raceIn) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in saveRace!\n");
         return false;
@@ -143,6 +176,12 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
             race.rssiMeta = meta;
         }
     }
+    // A previous JSON write may have failed after the sidecar was renamed.
+    // Preserve it when the controller retries that same race.
+    if (!race.rssiMeta.hasHistory) {
+        RaceRssiRecorder::readMetaFromFile(storage,
+            RaceRssiRecorder::sidecarPathForTimestamp(race.timestamp), race.rssiMeta);
+    }
 
     bool success = writeRaceFile(race);
     if (success) {
@@ -152,10 +191,9 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
                       (unsigned)race.lapTimes.size(),
                       (unsigned)race.rssiMeta.sampleCount);
         races.insert(races.begin(), race);
-        if (races.size() > MAX_RACES) {
-            // Delete sidecar for dropped race if we ever prune files later; for now only memory list
-            races.resize(MAX_RACES);
-        }
+        // Match loadRaces(): retain the full in-memory index, and cap only the
+        // list emitted by tryToJsonString(). Deleting a newer race must expose
+        // older records again without a reboot or a metadata reimport.
     } else {
         DEBUG("Failed to save race\n");
         Serial.printf("[Race] Failed to save race %u\n", race.timestamp);
@@ -165,6 +203,7 @@ bool RaceHistory::saveRace(const RaceSession& raceIn) {
 }
 
 bool RaceHistory::loadRaces() {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null!\n");
         return false;
@@ -192,7 +231,7 @@ bool RaceHistory::loadRaces() {
             continue;
         }
 
-        JsonDocument doc;
+        JsonDocument doc(&snapshotAllocator);
         DeserializationError error = deserializeJson(doc, json);
         if (error) {
             DEBUG("Failed to parse %s: %s\n", filepath.c_str(), error.c_str());
@@ -201,6 +240,7 @@ bool RaceHistory::loadRaces() {
 
         RaceSession race;
         race.timestamp = doc["timestamp"];
+        race.importedAt = doc["importedAt"] | 0u;
         race.fastestLap = doc["fastestLap"];
         race.medianLap = doc["medianLap"];
         race.best3LapsTotal = doc["best3LapsTotal"];
@@ -216,6 +256,7 @@ bool RaceHistory::loadRaces() {
         race.trackName = doc["trackName"] | "";
         race.totalDistance = doc["totalDistance"] | 0.0f;
         race.syncMode = doc["syncMode"] | 0;
+        race.minLapMs = doc["minLapMs"] | 2000;
 
         JsonArray lapsArray = doc["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -231,6 +272,10 @@ bool RaceHistory::loadRaces() {
                 pilot.color = pilotObj["color"] | 0x0080FF;
                 pilot.fastestLap = pilotObj["fastestLap"] | 0;
                 pilot.isLocal = pilotObj["isLocal"] | false;
+                pilot.slot = pilotObj["slot"] | -1;
+                pilot.frequency = pilotObj["frequency"] | 0;
+                pilot.enter = pilotObj["enter"] | 120;
+                pilot.exit = pilotObj["exit"] | 100;
                 JsonArray pilotLaps = pilotObj["lapTimes"];
                 for (uint32_t lap : pilotLaps) {
                     pilot.lapTimes.push_back(lap);
@@ -283,6 +328,7 @@ bool RaceHistory::loadRaces() {
 }
 
 bool RaceHistory::deleteRace(uint32_t timestamp) {
+    HistoryLock lock;
     String filepath = raceFilePathForTimestamp(timestamp);
     bool fileDeleted = storage->deleteFile(filepath);
 
@@ -313,6 +359,7 @@ bool RaceHistory::deleteRace(uint32_t timestamp) {
 }
 
 bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const String& tag, float totalDistance, const String& notes) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in updateRace!\n");
         return false;
@@ -338,7 +385,43 @@ bool RaceHistory::updateRace(uint32_t timestamp, const String& name, const Strin
     return writeRaceFile(*targetRace);
 }
 
+bool RaceHistory::updatePilotLaps(uint32_t timestamp, const std::vector<std::vector<uint32_t>>& laps) {
+    HistoryLock lock;
+    for (auto& race : races) {
+        if (race.timestamp != timestamp) continue;
+        if (laps.size() != race.pilots.size() || laps.empty() || laps.size() > MAX_PILOTS) return false;
+        RaceSession updated = race;
+        size_t leader = 0;
+        uint64_t leaderTime = UINT64_MAX;
+        for (size_t i = 0; i < laps.size(); ++i) {
+            if (laps[i].size() > 255) return false;
+            uint64_t total = 0;
+            for (auto ms : laps[i]) { if (!ms) return false; total += ms; }
+            updated.pilots[i].lapTimes = laps[i];
+            updated.pilots[i].fastestLap = laps[i].size() > 1 ? *std::min_element(laps[i].begin() + 1, laps[i].end()) : 0;
+            if (laps[i].size() > laps[leader].size() || (laps[i].size() == laps[leader].size() && total < leaderTime)) {
+                leader = i; leaderTime = total;
+            }
+        }
+        updated.lapTimes = laps[leader];
+        updated.pilotName = updated.pilots[leader].name;
+        updated.pilotCallsign = updated.pilots[leader].callsign;
+        updated.frequency = updated.pilots[leader].frequency;
+        std::vector<uint32_t> valid;
+        if (updated.lapTimes.size() > 1) valid.assign(updated.lapTimes.begin() + 1, updated.lapTimes.end());
+        std::sort(valid.begin(), valid.end());
+        updated.fastestLap = valid.empty() ? 0 : valid.front();
+        updated.medianLap = valid.empty() ? 0 : (valid[(valid.size()-1)/2] + valid[valid.size()/2]) / 2;
+        updated.best3LapsTotal = valid.size() < 3 ? 0 : valid[0] + valid[1] + valid[2];
+        if (!writeRaceFile(updated)) return false;
+        race = updated;
+        return true;
+    }
+    return false;
+}
+
 bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& newLapTimes) {
+    HistoryLock lock;
     if (!storage) {
         DEBUG("RaceHistory: Storage backend is null in updateLaps!\n");
         return false;
@@ -361,6 +444,7 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
         return false;
     }
 
+    if (!targetRace->pilots.empty()) return false; // multi-pilot edits must name every pilot
     targetRace->lapTimes = newLapTimes;
     targetRace->fastestLap = *std::min_element(newLapTimes.begin(), newLapTimes.end());
 
@@ -390,12 +474,19 @@ bool RaceHistory::updateLaps(uint32_t timestamp, const std::vector<uint32_t>& ne
 }
 
 bool RaceHistory::clearAll() {
+    HistoryLock lock;
     std::vector<String> files;
     if (storage->listDir(RACES_DIR, files)) {
         for (const String& filename : files) {
             if (filename.endsWith(".json") || filename.endsWith(".rssi")) {
                 String filepath = String(RACES_DIR) + "/" + filename;
                 storage->deleteFile(filepath);
+                // Keep idle tasks running during a long SD batch. AsyncTCP
+                // also subscribes its own task to the watchdog, so a yield
+                // alone is not enough: report progress after each operation.
+                // A stuck delete still times out before this reset is reached.
+                vTaskDelay(pdMS_TO_TICKS(1));
+                if (esp_task_wdt_status(nullptr) == ESP_OK) esp_task_wdt_reset();
             }
         }
     }
@@ -408,7 +499,15 @@ const std::vector<RaceSession>& RaceHistory::getRaces() {
     return races;
 }
 
+uint32_t RaceHistory::latestTimestamp() const {
+    HistoryLock lock;
+    uint32_t latest = 0;
+    for (const auto& race : races) latest = std::max(latest, race.timestamp);
+    return latest;
+}
+
 bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const {
+    HistoryLock lock;
     for (const auto& race : races) {
         if (race.timestamp == timestamp) {
             out = race;
@@ -419,7 +518,26 @@ bool RaceHistory::getRaceByTimestamp(uint32_t timestamp, RaceSession& out) const
 }
 
 String RaceHistory::toJsonString() {
-    JsonDocument doc;
+    HistoryLock lock;
+    String output;
+    tryToJsonString(output);
+    return output;
+}
+
+bool RaceHistory::tryToJsonString(String& output) {
+    // AsyncTCP's task watchdog cannot tolerate waiting for a slow SD reload.
+    // A busy response lets the caller retry without exposing partial history.
+    HistoryLock lock(0);
+    if (!lock.acquired) return false;
+    JsonDocument doc(&snapshotAllocator);
+    writeHistoryDocument(doc);
+    if (doc.overflowed()) return false;
+    output = "";
+    serializeJson(doc, output);
+    return true;
+}
+
+void RaceHistory::writeHistoryDocument(JsonDocument& doc) const {
     JsonArray racesArray = doc["races"].to<JsonArray>();
 
     size_t racesToOutput = std::min(races.size(), (size_t)MAX_RACES);
@@ -428,13 +546,43 @@ String RaceHistory::toJsonString() {
         writeRaceObject(raceObj, races[i]);
     }
 
-    String output;
-    serializeJson(doc, output);
-    return output;
+}
+
+bool RaceHistory::tryToJsonSnapshot(std::shared_ptr<char>& output, size_t& length, uint32_t before, bool paged) {
+    output.reset();
+    length = 0;
+    HistoryLock lock(0);
+    if (!lock.acquired) return false;
+    JsonDocument doc(&snapshotAllocator);
+    if (!paged) {
+        writeHistoryDocument(doc); // Preserve the existing API/export contract.
+    } else {
+        JsonArray page = doc["races"].to<JsonArray>();
+        bool more = false;
+        uint32_t next = 0;
+        for (const auto& race : races) {
+            if (before && race.timestamp >= before) continue;
+            if (page.size() == MAX_RACES) { more = true; break; }
+            writeRaceObject(page.add<JsonObject>(), race);
+            next = race.timestamp;
+        }
+        doc["hasMore"] = more;
+        doc["nextBefore"] = more ? next : 0;
+        doc["total"] = races.size();
+    }
+    if (doc.overflowed()) return false;
+    const size_t bytes = measureJson(doc);
+    char* raw = static_cast<char*>(snapshotAllocator.allocate(bytes + 1));
+    if (!raw) return false;
+    std::shared_ptr<char> snapshot(raw, std::free);
+    if (serializeJson(doc, raw, bytes + 1) != bytes) return false;
+    length = bytes;
+    output = std::move(snapshot);
+    return true;
 }
 
 bool RaceHistory::fromJsonString(const String& json) {
-    JsonDocument doc;
+    JsonDocument doc(&snapshotAllocator);
     DeserializationError error = deserializeJson(doc, json);
 
     if (error) {
@@ -442,12 +590,36 @@ bool RaceHistory::fromJsonString(const String& json) {
         return false;
     }
 
-    JsonArray racesArray = doc["races"];
+    return fromJson(doc.as<JsonVariant>());
+}
+
+bool RaceHistory::fromJson(JsonVariant json) {
+    HistoryLock lock;
+    if (!json.is<JsonObject>() || !json["races"].is<JsonArray>()) return false;
+    JsonArray racesArray = json["races"];
+    // Validate the collection before writing anything. A malformed backup must
+    // not be reported as an empty successful import or create a timestamp-0 file.
+    for (JsonVariant item : racesArray) {
+        if (!item.is<JsonObject>() || !item["timestamp"].is<uint32_t>() || item["timestamp"].as<uint32_t>() == 0) return false;
+        if (!item["lapTimes"].isNull() && !item["lapTimes"].is<JsonArray>()) return false;
+        if (!item["pilots"].isNull()) {
+            if (!item["pilots"].is<JsonArray>()) return false;
+            for (JsonVariant pilot : item["pilots"].as<JsonArray>()) {
+                if (!pilot.is<JsonObject>() || (!pilot["lapTimes"].isNull() && !pilot["lapTimes"].is<JsonArray>())) return false;
+            }
+        }
+    }
     int importedCount = 0;
+    bool success = true;
+    const time_t clock = time(nullptr);
+    const uint32_t clientImportTime = json["importedAt"] | 0u;
+    const uint32_t importedAt = clientImportTime >= 1577836800 ? clientImportTime
+        : (clock >= 1577836800 && static_cast<uint64_t>(clock) <= UINT32_MAX ? static_cast<uint32_t>(clock) : 0u);
 
     for (JsonObject raceObj : racesArray) {
         RaceSession race;
         race.timestamp = raceObj["timestamp"];
+        race.importedAt = importedAt;
         race.fastestLap = raceObj["fastestLap"];
         race.medianLap = raceObj["medianLap"];
         race.best3LapsTotal = raceObj["best3LapsTotal"];
@@ -463,6 +635,7 @@ bool RaceHistory::fromJsonString(const String& json) {
         race.trackName = raceObj["trackName"] | "";
         race.totalDistance = raceObj["totalDistance"] | 0.0f;
         race.syncMode = raceObj["syncMode"] | 0;
+        race.minLapMs = raceObj["minLapMs"] | 2000;
 
         JsonArray lapsArray = raceObj["lapTimes"];
         for (uint32_t lap : lapsArray) {
@@ -478,6 +651,10 @@ bool RaceHistory::fromJsonString(const String& json) {
                 pilot.color = pilotObj["color"] | 0x0080FF;
                 pilot.fastestLap = pilotObj["fastestLap"] | 0;
                 pilot.isLocal = pilotObj["isLocal"] | false;
+                pilot.slot = pilotObj["slot"] | -1;
+                pilot.frequency = pilotObj["frequency"] | 0;
+                pilot.enter = pilotObj["enter"] | 120;
+                pilot.exit = pilotObj["exit"] | 100;
                 JsonArray pilotLaps = pilotObj["lapTimes"];
                 for (uint32_t lap : pilotLaps) {
                     pilot.lapTimes.push_back(lap);
@@ -489,24 +666,37 @@ bool RaceHistory::fromJsonString(const String& json) {
         readRssiMeta(raceObj, race);
 
         bool exists = false;
-        for (const auto& existingRace : races) {
+        for (auto& existingRace : races) {
             if (existingRace.timestamp == race.timestamp) {
                 exists = true;
+                // A repeat import updates only local import metadata, never
+                // the already saved pilot/lap data.
+                if (importedAt && existingRace.importedAt != importedAt) {
+                    RaceSession marked = existingRace;
+                    marked.importedAt = importedAt;
+                    if (!writeRaceFile(marked)) success = false;
+                    else existingRace.importedAt = importedAt;
+                }
                 break;
             }
         }
+        if (!success) break;
 
         // Import without re-attaching pending recorder capture
         if (!exists) {
             RaceRssiRecorder* saved = rssiRecorder;
             rssiRecorder = nullptr;
-            if (saveRace(race)) {
-                importedCount++;
-            }
+            bool written = saveRace(race);
             rssiRecorder = saved;
+            if (!written) { success = false; break; }
+            importedCount++;
         }
     }
 
     DEBUG("Imported %d races\n", importedCount);
-    return importedCount > 0 || racesArray.size() == 0;
+    // Upload order must not hide recent records behind the 50-race list cap.
+    std::sort(races.begin(), races.end(),
+              [](const RaceSession& a, const RaceSession& b) { return a.timestamp > b.timestamp; });
+    // Re-importing records already present is an idempotent success.
+    return success;
 }

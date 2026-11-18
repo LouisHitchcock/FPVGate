@@ -1,31 +1,45 @@
-# Seeed Studio XIAO ESP32S3 (8MB) - Wiring Diagram
+# Seeed Studio XIAO ESP32S3 wiring
 
-Compact XIAO form factor with FPVGate pin mappings and SD card support.
+Alpha branch mapping from `lib/CONFIG/config.h`. Environment: `SeeedXIAOESP32S3`.
+GPIO numbers are not physical header positions.
 
-## Pin Configuration
+## Pin configuration
+
+| Signal | Pin / GPIO |
+| --- | --- |
+| RX5808 RSSI | D2 / GPIO3 |
+| RX5808 DATA / CH1 | D4 / GPIO5 |
+| RX5808 SELECT / CH2 | D5 / GPIO6 |
+| RX5808 CLOCK / CH3 | D3 / GPIO4 |
+| SD CS | D1 / GPIO2 |
+| SD SCK | D8 / GPIO7 |
+| SD MOSI | D9 / GPIO8 |
+| SD MISO | D10 / GPIO9 |
+| Battery divider midpoint | D0 / GPIO1 |
+| Active buzzer | D6 / GPIO43 |
+| WS2812 data; count | D7 / GPIO44; 2 LEDs |
+| Onboard user LED | GPIO21 |
+| C5 host TX / RX | D3 / GPIO4; D4 / GPIO5 |
+
+## Board-specific notes
+
+Use the 8 MB XIAO S3 build; the Plus has its own `XIAOS3Plus` target and 16 MB layout. The bare XIAO has no battery divider on D0: fit an external divider before connecting a battery sense lead. C5 UART uses the RX5808 CLOCK/DATA pins, so disconnect those RX5808 control wires when fitting a C5. XIAO C5 D4/D5 refer to GPIO23/24, not the same numbers as the S3. USB networking is enabled on `SeeedXIAOESP32S3`. AIO and Solo have their own board identities and LED counts; use their matching firmware.
+
+## Power and setup
+
+Use a regulated board supply, common ground and 3.3 V signal levels.
+SD cards need 3.3 V at the card; check whether the breakout includes a regulator.
+Match an RX5808 carrier's VCC to its regulator/input specification.
+Optional buzzers must stay within the GPIO drive rating or use a transistor.
+There is no GPIO Wi-Fi/RotorHazard mode switch in this firmware.
+
+Build and upload both firmware and web assets from the repository root:
+
+```sh
+pio run -e SeeedXIAOESP32S3 -t upload
+pio run -e SeeedXIAOESP32S3 -t uploadfs
 ```
-XIAO ESP32S3    RX5808              SD Card (SPI)        Optional
-D2 (GPIO3)  ─── RSSI             D1 (GPIO2) ─── CS     
-D4 (GPIO5)  ─── CH1 (DATA)       D8 (GPIO7) ─── SCK    
-D5 (GPIO6)  ─── CH2 (SELECT)     D9 (GPIO8) ─── MOSI   
-D3 (GPIO4)  ─── CH3 (CLOCK)      D10 (GPIO9) ── MISO   
-D0 (GPIO1)  ───────────────── Battery sense (divider)   
-D6 (GPIO43) ───────────────── Buzzer (+)               
-D7 (GPIO44) ───────────────── NeoPixel DIN             
-GND         ─── GND              GND       ─── GND     
-5V (VUSB)   ─── +5V              3V3/5V    ─── VCC     
-```
 
-- SD mapping above matches the current firmware (SeeedXIAOESP32S3 env).
-- NeoPixel is on D7 (GPIO44); add a 330 Ω series resistor and a 470–1000 µF capacitor across VUSB–GND.
-- Battery sense is on D0 (GPIO1). The XIAO has no onboard divider, so wire a 100K/100K divider from battery + to D0 and GND (2:1, matching the firmware default).
-
-## Notes
-- Logic levels are 3.3V. Most WS2812B run fine at 5V VCC with 3.3V DIN; use a level shifter if you see flicker.
-- VUSB (VBUS) can power the LED(s); share GND with the XIAO.
-- RSSI on GPIO3 (D2) is commonly used; if you encounter boot issues, move to another ADC pin and update config.
-- SD modules: If yours is 5V-ready (with regulator/level shifting), power from 5V; otherwise power from 3V3.
-
-## References
-- XIAO ESP32S3 pinout (GPIO ↔ D0–D10 mapping)
-- FPVGate target: `SeeedXIAOESP32S3` (PlatformIO)
+Back up races before filesystem uploads. See the [hardware guide](../HARDWARE_GUIDE.md),
+[battery guide](../BATTERY_MONITORING.md) and
+[C5 receiver guide](../C5_MULTI_PILOT.md) for the rest of the procedure.
