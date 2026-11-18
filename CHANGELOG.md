@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.0
+
+- Race up to eight pilots with one ESP32-C5. Run and save C5 heats on the gate with Event Director.
+- Adds C5MK AIO, receiver updates, RotorHazard plugin 2 support, and Waveshare Ethernet.
+- Adds Visual Marshal improvements, redesigned race history, voice packs, and opt-in ELRS Backpack control.
+- Improves bulk SD operations, concurrent web loads, and diagnostics.
+
+See the [full release notes and downloads](https://github.com/LouisHitchcock/FPVGate/releases/tag/v1.9.0).
+
 ## 1.9.0-alpha-6
 
 Repackages the current RC firmware as a testing alpha with bounded, queued Wi-Fi file transfers, cancellation-safe admission and deferred-poll credit accounting. Includes the RC race-history/import, diagnostics, localization, ELRS race-control and C5MK shared-median fixes. See release/v1.9.0-alpha-6/RELEASE_NOTES.md for board scope and validation limits.
